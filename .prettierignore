@@ -1,0 +1,5 @@
+dist
+node_modules
+AGENT_WORKLOG.md
+package-lock.json
+browser-artifacts

@@ -26,6 +26,7 @@ import {
   parseMoshPresetJson,
   saveMoshUserPresets,
   MOSH_USER_PRESETS_STORAGE_KEY,
+  LEGACY_MOSH_USER_PRESETS_STORAGE_KEY,
 } from './mosh/presets';
 import { PatchHistory, createPatch } from './history/PatchHistory';
 import type { HistoryAction } from './types';
@@ -486,6 +487,26 @@ describe('MOSH presets and deterministic randomization', () => {
     expect(imported).toHaveLength(1);
     expect(imported[0]!.name).toBe('My Melt');
     expect(imported[0]!.effectId).toBe('edge-melt');
+  });
+
+  it('migrates legacy MOSH presets without deleting the old key', () => {
+    const legacy = {
+      id: 'legacy-one',
+      name: 'Old Melt',
+      effectId: 'edge-melt' as const,
+      settings: { meltLength: 96 },
+      custom: true as const,
+    };
+    const values = new Map<string, string>([
+      [LEGACY_MOSH_USER_PRESETS_STORAGE_KEY, JSON.stringify([legacy])],
+    ]);
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+    expect(loadMoshUserPresets(storage)).toEqual([legacy]);
+    expect(values.has(MOSH_USER_PRESETS_STORAGE_KEY)).toBe(true);
+    expect(values.has(LEGACY_MOSH_USER_PRESETS_STORAGE_KEY)).toBe(true);
   });
 });
 

@@ -1,4 +1,5 @@
 import { createSeededRandom } from '../utils/prng';
+import { LEGACY_STORAGE_KEYS, STORAGE_KEYS } from '../brand/brand';
 import { normalizeImageBrushSettings } from './performance';
 import {
   defaultImageBrushSettings,
@@ -314,12 +315,25 @@ export const builtInImageBrushPresets: ImageBrushPreset[] = [
   ),
 ];
 
-const STORAGE_KEY = 'hex-redactor:image-brush-presets:v1';
+export const IMAGE_BRUSH_PRESETS_STORAGE_KEY = STORAGE_KEYS.imageBrushPresets;
+export const LEGACY_IMAGE_BRUSH_PRESETS_STORAGE_KEY = LEGACY_STORAGE_KEYS.imageBrushPresets;
 
-export function loadImageBrushPresets(): ImageBrushPreset[] {
+interface StorageLike {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+export function loadImageBrushPresets(
+  storage: StorageLike | undefined = typeof localStorage === 'undefined' ? undefined : localStorage,
+): ImageBrushPreset[] {
+  if (!storage) return [];
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') as ImageBrushPreset[];
-    return Array.isArray(parsed)
+    const source =
+      storage.getItem(IMAGE_BRUSH_PRESETS_STORAGE_KEY) ??
+      storage.getItem(LEGACY_IMAGE_BRUSH_PRESETS_STORAGE_KEY) ??
+      '[]';
+    const parsed = JSON.parse(source) as ImageBrushPreset[];
+    const presets = Array.isArray(parsed)
       ? parsed
           .filter((item) => item?.custom && typeof item.name === 'string')
           .map((item) => ({
@@ -327,14 +341,23 @@ export function loadImageBrushPresets(): ImageBrushPreset[] {
             settings: normalizeImageBrushSettings(item.settings),
           }))
       : [];
+    storage.setItem(IMAGE_BRUSH_PRESETS_STORAGE_KEY, JSON.stringify(presets));
+    return presets;
   } catch {
     return [];
   }
 }
 
-export function saveImageBrushPresets(presets: ImageBrushPreset[]): void {
+export function saveImageBrushPresets(
+  presets: ImageBrushPreset[],
+  storage: StorageLike | undefined = typeof localStorage === 'undefined' ? undefined : localStorage,
+): void {
+  if (!storage) return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(presets.filter((item) => item.custom)));
+    storage.setItem(
+      IMAGE_BRUSH_PRESETS_STORAGE_KEY,
+      JSON.stringify(presets.filter((item) => item.custom)),
+    );
   } catch {
     // localStorage can be unavailable in privacy mode; the current session still works.
   }

@@ -262,30 +262,31 @@ function applyMoshFx(
   }).pixels;
 }
 
-function nearestVisibleColor(
-  pixels: Uint8ClampedArray,
-  alpha: Uint8ClampedArray,
-  width: number,
-  height: number,
-  x: number,
-  y: number,
-  radius: number,
-): readonly [number, number, number] {
-  for (let distance = 1; distance <= radius; distance += 1) {
-    for (let dy = -distance; dy <= distance; dy += 1) {
-      for (let dx = -distance; dx <= distance; dx += 1) {
-        if (Math.abs(dx) !== distance && Math.abs(dy) !== distance) continue;
-        const sx = x + dx;
-        const sy = y + dy;
-        if (sx < 0 || sy < 0 || sx >= width || sy >= height) continue;
-        const pixel = sy * width + sx;
-        if (alpha[pixel]! <= 0) continue;
-        const offset = pixel * 4;
-        return [pixels[offset]!, pixels[offset + 1]!, pixels[offset + 2]!];
-      }
+interface BleedOffset {
+  dx: number;
+  dy: number;
+  fade: number;
+}
+
+const bleedOffsetCache = new Map<number, BleedOffset[]>();
+
+function bleedOffsets(radius: number): BleedOffset[] {
+  const cached = bleedOffsetCache.get(radius);
+  if (cached) return cached;
+  const offsets: BleedOffset[] = [];
+  for (let dy = -radius; dy <= radius; dy += 1) {
+    for (let dx = -radius; dx <= radius; dx += 1) {
+      const squaredDistance = dx * dx + dy * dy;
+      if (squaredDistance > radius * radius) continue;
+      offsets.push({
+        dx,
+        dy,
+        fade: 1 - Math.sqrt(squaredDistance) / (radius + 1),
+      });
     }
   }
-  return [0, 0, 0];
+  bleedOffsetCache.set(radius, offsets);
+  return offsets;
 }
 
 function enforceAlpha(
@@ -312,28 +313,34 @@ function enforceAlpha(
     return output;
   }
   const radius = Math.max(1, Math.min(32, Math.round(bleedAmount)));
+  const offsets = bleedOffsets(radius);
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const pixel = y * width + x;
       let maximum = sourceAlpha[pixel]!;
-      for (let dy = -radius; dy <= radius; dy += 1) {
-        for (let dx = -radius; dx <= radius; dx += 1) {
-          if (dx * dx + dy * dy > radius * radius) continue;
-          const sx = x + dx;
-          const sy = y + dy;
+      let colorSourcePixel = maximum > 0 ? pixel : -1;
+      if (maximum < 255) {
+        for (const bleedOffset of offsets) {
+          const sx = x + bleedOffset.dx;
+          const sy = y + bleedOffset.dy;
           if (sx < 0 || sy < 0 || sx >= width || sy >= height) continue;
-          const distance = Math.hypot(dx, dy);
-          const faded = sourceAlpha[sy * width + sx]! * (1 - distance / (radius + 1));
-          maximum = Math.max(maximum, faded);
+          const sourcePixel = sy * width + sx;
+          const alpha = sourceAlpha[sourcePixel]!;
+          if (alpha <= 0) continue;
+          const faded = alpha * bleedOffset.fade;
+          if (faded > maximum) {
+            maximum = faded;
+            colorSourcePixel = sourcePixel;
+          }
         }
       }
       const offset = pixel * 4;
       output[offset + 3] = Math.round(maximum);
       if (maximum > 0 && output[offset] + output[offset + 1] + output[offset + 2] === 0) {
-        const color = nearestVisibleColor(sourcePixels, sourceAlpha, width, height, x, y, radius);
-        output[offset] = color[0];
-        output[offset + 1] = color[1];
-        output[offset + 2] = color[2];
+        const colorOffset = Math.max(0, colorSourcePixel) * 4;
+        output[offset] = sourcePixels[colorOffset]!;
+        output[offset + 1] = sourcePixels[colorOffset + 1]!;
+        output[offset + 2] = sourcePixels[colorOffset + 2]!;
       }
     }
   }

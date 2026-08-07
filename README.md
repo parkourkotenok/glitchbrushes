@@ -1,6 +1,6 @@
-# HEX REDACTOR
+# imgfuck
 
-HEX REDACTOR — полностью локальный React + TypeScript редактор для художественного глитчинга PNG, JPEG и WebP. Изображения не отправляются на сервер: декодирование, слои, кисти, MOSH LAB, IMAGE BRUSH, история, FILE CORRUPTION и экспорт выполняются в браузере.
+`imgfuck` — локальная игрушка для разрушения изображений и художественного глитчинга PNG, JPEG и WebP. Изображения не отправляются на сервер: декодирование, слои, кисти, MOSH LAB, IMAGE BRUSH, история, FILE CORRUPTION и экспорт выполняются в браузере.
 
 ## Рабочие пространства
 
@@ -62,25 +62,25 @@ HEX REDACTOR — полностью локальный React + TypeScript ред
 
 Клавиши определяются через `KeyboardEvent.code`, поэтому работают при русской раскладке.
 
-| Клавиша | Действие |
-| --- | --- |
-| `B` | Glitch Brush |
-| `H` | Hand / pan |
-| `S` | Smudge |
-| `U` | Blur |
-| `J` | Sharpen |
-| `E` | Restore |
-| `X` | Eraser |
-| `G` | Random seeded glitch |
-| `[` / `]` | Уменьшить / увеличить кисть |
-| `Space + drag` | Временный pan |
-| `Ctrl + Z` | Undo |
-| `Ctrl + Shift + Z` / `Ctrl + Y` | Redo |
-| `\\` | Удерживать для Original |
-| `F` | Fit image |
-| `1` | 100% zoom |
-| `Enter` / `Escape` | Apply / Cancel Preview |
-| `Shift + click` | Выбрать пиксель для selection-target эффектов |
+| Клавиша                         | Действие                                      |
+| ------------------------------- | --------------------------------------------- |
+| `B`                             | Glitch Brush                                  |
+| `H`                             | Hand / pan                                    |
+| `S`                             | Smudge                                        |
+| `U`                             | Blur                                          |
+| `J`                             | Sharpen                                       |
+| `E`                             | Restore                                       |
+| `X`                             | Eraser                                        |
+| `G`                             | Random seeded glitch                          |
+| `[` / `]`                       | Уменьшить / увеличить кисть                   |
+| `Space + drag`                  | Временный pan                                 |
+| `Ctrl + Z`                      | Undo                                          |
+| `Ctrl + Shift + Z` / `Ctrl + Y` | Redo                                          |
+| `\\`                            | Удерживать для Original                       |
+| `F`                             | Fit image                                     |
+| `1`                             | 100% zoom                                     |
+| `Enter` / `Escape`              | Apply / Cancel Preview                        |
+| `Shift + click`                 | Выбрать пиксель для selection-target эффектов |
 
 ## Запуск и проверка
 

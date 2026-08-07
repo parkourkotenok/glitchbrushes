@@ -30,6 +30,9 @@ import {
 import {
   applyImageBrushPreset,
   builtInImageBrushPresets,
+  IMAGE_BRUSH_PRESETS_STORAGE_KEY,
+  LEGACY_IMAGE_BRUSH_PRESETS_STORAGE_KEY,
+  loadImageBrushPresets,
   randomizeImageBrush,
 } from './imageBrush/presets';
 import { imageBrushFxCacheKey } from './imageBrush/performance';
@@ -162,6 +165,28 @@ describe('Image Brush assets and path placement', () => {
     expect(decoded.width).toBe(2);
     expect(decoded.height).toBe(1);
     expect(decoded.pixels).toEqual(pixels);
+  });
+
+  it('reads legacy embedded RGBA brushes and writes the imgfuck media type', () => {
+    const pixels = new Uint8ClampedArray([12, 34, 56, 255]);
+    const current = embeddedRgbaDataUrl(pixels, 1, 1);
+    expect(current).toContain('x-imgfuck-rgba');
+    const legacy = current.replace('x-imgfuck-rgba', 'x-hex-redactor-rgba');
+    expect(decodeEmbeddedRgbaDataUrl(legacy).pixels).toEqual(pixels);
+  });
+
+  it('migrates legacy Image Brush presets to the imgfuck storage key', () => {
+    const legacyPreset = { ...builtInImageBrushPresets[0]!, id: 'legacy-brush', custom: true };
+    const values = new Map<string, string>([
+      [LEGACY_IMAGE_BRUSH_PRESETS_STORAGE_KEY, JSON.stringify([legacyPreset])],
+    ]);
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+    expect(loadImageBrushPresets(storage)).toHaveLength(1);
+    expect(values.has(IMAGE_BRUSH_PRESETS_STORAGE_KEY)).toBe(true);
+    expect(values.has(LEGACY_IMAGE_BRUSH_PRESETS_STORAGE_KEY)).toBe(true);
   });
 
   it('places stamps by accumulated distance independent of pointer event rate', () => {

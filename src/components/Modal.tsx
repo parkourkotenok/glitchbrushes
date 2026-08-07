@@ -19,7 +19,7 @@ export function Modal({ title, children, onClose }: ModalProps) {
       >
         <header>
           <div>
-            <span className="eyebrow">SYSTEM PANEL</span>
+            <span className="eyebrow">IMGFUCK WINDOW</span>
             <h2>{title}</h2>
           </div>
           <button className="icon-button" onClick={onClose} aria-label="Close">

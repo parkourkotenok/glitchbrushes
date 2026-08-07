@@ -8,10 +8,11 @@ import {
   History,
   Image as ImageIcon,
   Redo2,
-  ScanLine,
   Undo2,
 } from 'lucide-react';
 import type { EditorDocument } from '../types';
+import { ImgFuckLogo } from '../brand/ImgFuckLogo';
+import { PRODUCT_SUBTITLE } from '../brand/brand';
 
 interface TopBarProps {
   doc: EditorDocument;
@@ -55,12 +56,9 @@ export function TopBar({
   return (
     <header className="topbar">
       <div className="brand">
-        <div className="brand-mark">
-          <ScanLine size={18} />
-        </div>
-        <div>
-          <strong>HEX REDACTOR</strong>
-          <span>LOCAL GLITCH INSTRUMENT / RGBA</span>
+        <div className="brand-copy">
+          <ImgFuckLogo className="brand-logo" compact />
+          <span>{PRODUCT_SUBTITLE}</span>
         </div>
       </div>
       <div className="topbar-file">
@@ -81,11 +79,11 @@ export function TopBar({
           accept="image/png,image/jpeg,image/webp"
           onChange={onFileChange}
         />
-        <button onClick={() => fileInputRef.current?.click()}>
-          <FileUp size={15} /> Open
+        <button onClick={() => fileInputRef.current?.click()} data-tone="open">
+          <FileUp size={15} /> <span className="action-label">Open</span>
         </button>
-        <button onClick={onLoadDemo}>
-          <ImageIcon size={15} /> Demo
+        <button onClick={onLoadDemo} data-tone="demo">
+          <ImageIcon size={15} /> <span className="action-label">Demo</span>
         </button>
         <span className="toolbar-separator" />
         <button disabled={!canUndo && !hasPendingPreview} onClick={onUndo} title="Undo — Ctrl+Z">
@@ -99,10 +97,10 @@ export function TopBar({
         </button>
         <span className="toolbar-separator" />
         <button className={compareMode !== 'off' ? 'active' : ''} onClick={onCycleCompare}>
-          <Eye size={15} /> Compare
+          <Eye size={15} /> <span className="action-label">Compare</span>
         </button>
         <button className="primary" onClick={onOpenExport}>
-          <Download size={15} /> Export
+          <Download size={15} /> <span className="action-label">Export</span>
         </button>
         <button
           className={`icon-button ${helpMode || helpPanelOpen ? 'active' : ''}`}

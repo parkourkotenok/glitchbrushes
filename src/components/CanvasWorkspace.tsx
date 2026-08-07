@@ -13,6 +13,8 @@ import type {
 } from '../types';
 import type { BrushProgress } from '../brush/engine';
 import { isRetouchTool } from '../retouch/tools';
+import { ImgFuckMark } from '../brand/ImgFuckMark';
+import { PRODUCT_SUBTITLE } from '../brand/brand';
 
 interface CanvasWorkspaceProps {
   doc: EditorDocument;
@@ -188,6 +190,18 @@ export function CanvasWorkspace({
         onWheel={onCanvasWheel}
       >
         <div className="viewport-grid" />
+        {doc.fileName === 'signal-study-demo.png' && !doc.dirty && (
+          <aside className="demo-welcome" aria-label="imgfuck demo workspace">
+            <ImgFuckMark size={34} />
+            <div>
+              <strong>ready to ruin something?</strong>
+              <span>{PRODUCT_SUBTITLE}</span>
+            </div>
+            <p>
+              Paint the demo, drop an image here, or use Open above. Nothing leaves this machine.
+            </p>
+          </aside>
+        )}
         <div
           ref={stageRef}
           className="canvas-stage"

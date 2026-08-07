@@ -1,5 +1,6 @@
 import type { Preset } from '../types';
 import { migratePreset } from '../glitchAlgorithms/migration';
+import { LEGACY_STORAGE_KEYS, STORAGE_KEYS } from '../brand/brand';
 
 export const builtInPresets: Preset[] = [
   {
@@ -418,17 +419,41 @@ export const builtInPresets: Preset[] = [
   },
 ];
 
-const storageKey = 'hex-redactor.custom-presets.v1';
+export const CUSTOM_PRESETS_STORAGE_KEY = STORAGE_KEYS.presets;
+export const LEGACY_CUSTOM_PRESETS_STORAGE_KEY = LEGACY_STORAGE_KEYS.presets;
 
-export function loadCustomPresets(): Preset[] {
+interface StorageLike {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+export function loadCustomPresets(
+  storage: StorageLike | undefined = typeof localStorage === 'undefined' ? undefined : localStorage,
+): Preset[] {
+  if (!storage) return [];
   try {
-    const parsed = JSON.parse(localStorage.getItem(storageKey) ?? '[]') as Preset[];
-    return parsed.filter((preset) => preset.custom && preset.id && preset.name).map(migratePreset);
+    const source =
+      storage.getItem(CUSTOM_PRESETS_STORAGE_KEY) ??
+      storage.getItem(LEGACY_CUSTOM_PRESETS_STORAGE_KEY) ??
+      '[]';
+    const parsed = JSON.parse(source) as Preset[];
+    const presets = parsed
+      .filter((preset) => preset.custom && preset.id && preset.name)
+      .map(migratePreset);
+    storage.setItem(CUSTOM_PRESETS_STORAGE_KEY, JSON.stringify(presets));
+    return presets;
   } catch {
     return [];
   }
 }
 
-export function saveCustomPresets(presets: Preset[]): void {
-  localStorage.setItem(storageKey, JSON.stringify(presets.filter((preset) => preset.custom)));
+export function saveCustomPresets(
+  presets: Preset[],
+  storage: StorageLike | undefined = typeof localStorage === 'undefined' ? undefined : localStorage,
+): void {
+  if (!storage) return;
+  storage.setItem(
+    CUSTOM_PRESETS_STORAGE_KEY,
+    JSON.stringify(presets.filter((preset) => preset.custom)),
+  );
 }

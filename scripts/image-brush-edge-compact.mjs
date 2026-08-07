@@ -6,7 +6,9 @@ const edgePath = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.
 const port = 9334;
 const appUrl = 'http://127.0.0.1:5174/';
 const artifactDir = resolve('browser-artifacts', 'image-brush-edge');
-const visualTestPath = process.env.EDITOR_TEST_IMAGE ?? 'M:\\MYPICTUReseagle\\Mytv.library\\images\\MELACZBFZW3CE.info\\астронавт2.png';
+const visualTestPath =
+  process.env.EDITOR_TEST_IMAGE ??
+  'M:\\MYPICTUReseagle\\Mytv.library\\images\\MELACZBFZW3CE.info\\астронавт2.png';
 const imageBase64 = readFileSync(visualTestPath).toString('base64');
 mkdirSync(artifactDir, { recursive: true });
 const profile = mkdtempSync(resolve(artifactDir, 'visible-profile-'));
@@ -108,29 +110,36 @@ async function clickPoint(cdp, x, y, button = 'left') {
 }
 
 async function rect(cdp, expression) {
-  const result = await evaluate(cdp, `(() => {
+  const result = await evaluate(
+    cdp,
+    `(() => {
     const element = ${expression};
     if (!element) return null;
     element.scrollIntoView({ block: 'center', inline: 'center' });
     const bounds = element.getBoundingClientRect();
     return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
-  })()`);
+  })()`,
+  );
   if (!result) throw new Error(`Element not found: ${expression}`);
   return result;
 }
 
-const edge = spawn(edgePath, [
-  `--remote-debugging-port=${port}`,
-  `--user-data-dir=${profile}`,
-  '--no-first-run',
-  '--no-default-browser-check',
-  '--disable-features=msEdgeFirstRunExperience',
-  '--window-size=1500,980',
-  appUrl,
-], {
-  stdio: 'ignore',
-  windowsHide: false,
-});
+const edge = spawn(
+  edgePath,
+  [
+    `--remote-debugging-port=${port}`,
+    `--user-data-dir=${profile}`,
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-features=msEdgeFirstRunExperience',
+    '--window-size=1500,980',
+    appUrl,
+  ],
+  {
+    stdio: 'ignore',
+    windowsHide: false,
+  },
+);
 
 let cdp;
 try {
@@ -147,8 +156,12 @@ try {
   cdp = new Cdp(target.webSocketDebuggerUrl);
   await cdp.open();
   await cdp.send('Runtime.enable');
-  await waitFor(() => evaluate(cdp, `document.querySelector('.brand strong')?.textContent === 'HEX REDACTOR'`));
-  await evaluate(cdp, `(async () => {
+  await waitFor(() =>
+    evaluate(cdp, `Boolean(document.querySelector('.brand svg[aria-label="imgfuck"]'))`),
+  );
+  await evaluate(
+    cdp,
+    `(async () => {
     const response = await fetch('data:image/png;base64,${imageBase64}');
     const file = new File([await response.blob()], 'астронавт2.png', { type: 'image/png' });
     const transfer = new DataTransfer();
@@ -157,19 +170,30 @@ try {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'files').set.call(input, transfer.files);
     input.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
-  })()`);
-  await waitFor(() => evaluate(cdp, `document.querySelector('.topbar-file strong')?.textContent.includes('астронавт2.png')`));
-  await evaluate(cdp, `(() => {
+  })()`,
+  );
+  await waitFor(() =>
+    evaluate(
+      cdp,
+      `document.querySelector('.topbar-file strong')?.textContent.includes('астронавт2.png')`,
+    ),
+  );
+  await evaluate(
+    cdp,
+    `(() => {
     [...document.querySelectorAll('.inspector-tabs button')]
       .find((button) => button.textContent.toUpperCase().includes('IMAGE BRUSH'))?.click();
     return true;
-  })()`);
+  })()`,
+  );
   await waitFor(() => evaluate(cdp, `Boolean(document.querySelector('.image-brush-compact'))`));
 
   const layout = [];
   for (const zoom of [1, 1.25, 1.5]) {
     for (const width of [320, 450, 600]) {
-      const measurement = await evaluate(cdp, `new Promise((resolve) => {
+      const measurement = await evaluate(
+        cdp,
+        `new Promise((resolve) => {
         document.documentElement.style.zoom = ${JSON.stringify(String(zoom))};
         document.querySelector('.workspace').style.gridTemplateColumns = '55px minmax(0, 1fr) ${width}px';
         requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -193,16 +217,22 @@ try {
             presetPreviewCanvases: document.querySelectorAll('.image-brush-style-cards canvas').length
           });
         }));
-      })`);
+      })`,
+      );
       layout.push(measurement);
     }
   }
-  await evaluate(cdp, `(() => {
+  await evaluate(
+    cdp,
+    `(() => {
     document.documentElement.style.zoom = '1';
     document.querySelector('.workspace').style.gridTemplateColumns = '55px minmax(0, 1fr) 410px';
     return true;
-  })()`);
-  await evaluate(cdp, `(async () => {
+  })()`,
+  );
+  await evaluate(
+    cdp,
+    `(async () => {
     const response = await fetch('data:image/png;base64,${imageBase64}');
     const file = new File([await response.blob()], 'astronaut-edge-stamp.png', { type: 'image/png' });
     const transfer = new DataTransfer();
@@ -213,32 +243,58 @@ try {
       dataTransfer: transfer,
     }));
     return true;
-  })()`);
-  await waitFor(() => evaluate(cdp, `document.querySelector('.image-brush-active-image strong')?.textContent.includes('astronaut-edge-stamp')`));
-  await evaluate(cdp, `(() => {
+  })()`,
+  );
+  await waitFor(() =>
+    evaluate(
+      cdp,
+      `document.querySelector('.image-brush-active-image strong')?.textContent.includes('astronaut-edge-stamp')`,
+    ),
+  );
+  await evaluate(
+    cdp,
+    `(() => {
     const select = document.querySelector('.image-brush-optimization select');
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, '128');
     select.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
-  })()`);
+  })()`,
+  );
   await delay(180);
-  await evaluate(cdp, `(() => {
+  await evaluate(
+    cdp,
+    `(() => {
     [...document.querySelectorAll('.image-brush-optimization button')]
       .find((button) => button.textContent.includes('Optimize Stamp Image'))?.click();
     return true;
-  })()`);
-  await waitFor(() => evaluate(cdp, `document.querySelector('.image-brush-active-image')?.textContent.includes('128')`));
-  await evaluate(cdp, `(() => {
+  })()`,
+  );
+  await waitFor(() =>
+    evaluate(
+      cdp,
+      `document.querySelector('.image-brush-active-image')?.textContent.includes('128')`,
+    ),
+  );
+  await evaluate(
+    cdp,
+    `(() => {
     const select = document.querySelector('select[data-help-id="image-brush.preset"]');
     const option = [...select.options].find((entry) => entry.textContent.trim() === 'Glitched Repeat');
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, option.value);
     select.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
-  })()`);
+  })()`,
+  );
   await delay(250);
 
-  const sizeInput = await rect(cdp, `document.querySelector('.image-brush-essential input[aria-label="Size"]')`);
-  const sizeBefore = await evaluate(cdp, `document.querySelector('.image-brush-essential input[aria-label="Size"]').value`);
+  const sizeInput = await rect(
+    cdp,
+    `document.querySelector('.image-brush-essential input[aria-label="Size"]')`,
+  );
+  const sizeBefore = await evaluate(
+    cdp,
+    `document.querySelector('.image-brush-essential input[aria-label="Size"]').value`,
+  );
   await cdp.send('Input.dispatchMouseEvent', {
     type: 'mouseMoved',
     x: sizeInput.x + sizeInput.width * 0.25,
@@ -268,26 +324,46 @@ try {
     clickCount: 1,
   });
   await delay(160);
-  const sizeAfter = await evaluate(cdp, `document.querySelector('.image-brush-essential input[aria-label="Size"]').value`);
+  const sizeAfter = await evaluate(
+    cdp,
+    `document.querySelector('.image-brush-essential input[aria-label="Size"]').value`,
+  );
 
   const firstThumbnail = await rect(cdp, `document.querySelector('.image-brush-library-select')`);
-  await clickPoint(cdp, firstThumbnail.x + firstThumbnail.width / 2, firstThumbnail.y + firstThumbnail.height / 2, 'right');
+  await clickPoint(
+    cdp,
+    firstThumbnail.x + firstThumbnail.width / 2,
+    firstThumbnail.y + firstThumbnail.height / 2,
+    'right',
+  );
   await delay(120);
-  const contextMenuVisible = await evaluate(cdp, `Boolean(document.querySelector('.image-brush-library-context [role=menuitem]'))`);
+  const contextMenuVisible = await evaluate(
+    cdp,
+    `Boolean(document.querySelector('.image-brush-library-context [role=menuitem]'))`,
+  );
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' });
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape' });
-  await evaluate(cdp, `(() => {
+  await evaluate(
+    cdp,
+    `(() => {
     const input = document.querySelector('.image-brush-essential input[aria-label="Size"]');
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, '96');
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
-  })()`);
+  })()`,
+  );
   await delay(180);
 
   const canvas = await rect(cdp, `document.querySelector('.work-canvas')`);
-  const historyBefore = await evaluate(cdp, `document.querySelector('.status-data')?.textContent ?? ''`);
-  const undoDisabledBefore = await evaluate(cdp, `document.querySelector('.topbar-actions button[title^="Undo"]')?.disabled ?? true`);
+  const historyBefore = await evaluate(
+    cdp,
+    `document.querySelector('.status-data')?.textContent ?? ''`,
+  );
+  const undoDisabledBefore = await evaluate(
+    cdp,
+    `document.querySelector('.topbar-actions button[title^="Undo"]')?.disabled ?? true`,
+  );
   const start = { x: canvas.x + canvas.width * 0.3, y: canvas.y + canvas.height * 0.48 };
   const end = { x: canvas.x + canvas.width * 0.7, y: canvas.y + canvas.height * 0.55 };
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...start });
@@ -315,22 +391,36 @@ try {
     buttons: 0,
     clickCount: 1,
   });
-  await waitFor(() => evaluate(cdp, `document.querySelector('.topbar-actions button[title^="Undo"]')?.disabled === false`), 120000);
+  await waitFor(
+    () =>
+      evaluate(
+        cdp,
+        `document.querySelector('.topbar-actions button[title^="Undo"]')?.disabled === false`,
+      ),
+    120000,
+  );
   await waitFor(() => evaluate(cdp, `!document.querySelector('.image-brush-progress')`), 120000);
-  const historyAfter = await evaluate(cdp, `document.querySelector('.status-data')?.textContent ?? ''`);
-  const undoDisabledAfter = await evaluate(cdp, `document.querySelector('.topbar-actions button[title^="Undo"]')?.disabled ?? true`);
+  const historyAfter = await evaluate(
+    cdp,
+    `document.querySelector('.status-data')?.textContent ?? ''`,
+  );
+  const undoDisabledAfter = await evaluate(
+    cdp,
+    `document.querySelector('.topbar-actions button[title^="Undo"]')?.disabled ?? true`,
+  );
 
   const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true });
   const report = {
     browser: await evaluate(cdp, `navigator.userAgent`),
     visible: true,
     layout,
-    allLayoutsFit: layout.every((entry) =>
-      entry.lab[0] === entry.lab[1] &&
-      entry.essential[0] === entry.essential[1] &&
-      entry.rangeCount === 5 &&
-      entry.rangesInsideInspector &&
-      entry.presetPreviewCanvases === 0
+    allLayoutsFit: layout.every(
+      (entry) =>
+        entry.lab[0] === entry.lab[1] &&
+        entry.essential[0] === entry.essential[1] &&
+        entry.rangeCount === 5 &&
+        entry.rangesInsideInspector &&
+        entry.presetPreviewCanvases === 0,
     ),
     slider: { before: sizeBefore, after: sizeAfter, changed: sizeBefore !== sizeAfter },
     contextMenuVisible,
@@ -338,14 +428,30 @@ try {
     historyBefore,
     historyAfter,
     visualTestPath,
-    activeStamp: await evaluate(cdp, `document.querySelector('.image-brush-active-image strong')?.textContent.trim()`),
-    visibleTabs: await evaluate(cdp, `[...document.querySelectorAll('.inspector-tabs button')].map((button) => button.textContent.trim())`),
-    hexRemoved: await evaluate(cdp, `![...document.querySelectorAll('.inspector-tabs button')].some((button) => /(^|\\s)HEX($|\\s)/i.test(button.textContent))`),
+    activeStamp: await evaluate(
+      cdp,
+      `document.querySelector('.image-brush-active-image strong')?.textContent.trim()`,
+    ),
+    visibleTabs: await evaluate(
+      cdp,
+      `[...document.querySelectorAll('.inspector-tabs button')].map((button) => button.textContent.trim())`,
+    ),
+    hexRemoved: await evaluate(
+      cdp,
+      `![...document.querySelectorAll('.inspector-tabs button')].some((button) => /(^|\\s)HEX($|\\s)/i.test(button.textContent))`,
+    ),
     testedPreset: 'Glitched Repeat',
-    codecWholeTrailEdgeWatchdog: 'Exceeded 120 seconds in separate 427 px and 96 px Edge attempts; final Edge smoke uses Glitched Repeat while Firefox retains the accepted Codec whole-trail evidence.',
+    codecWholeTrailEdgeWatchdog:
+      'Exceeded 120 seconds in separate 427 px and 96 px Edge attempts; final Edge smoke uses Glitched Repeat while Firefox retains the accepted Codec whole-trail evidence.',
   };
-  writeFileSync(resolve(artifactDir, 'major-editor-stage8-visible-edge-astronaut.png'), Buffer.from(screenshot.data, 'base64'));
-  writeFileSync(resolve(artifactDir, 'major-editor-stage8-visible-edge-astronaut.json'), JSON.stringify(report, null, 2));
+  writeFileSync(
+    resolve(artifactDir, 'major-editor-stage8-visible-edge-astronaut.png'),
+    Buffer.from(screenshot.data, 'base64'),
+  );
+  writeFileSync(
+    resolve(artifactDir, 'major-editor-stage8-visible-edge-astronaut.json'),
+    JSON.stringify(report, null, 2),
+  );
   console.log(JSON.stringify(report, null, 2));
   await cdp.send('Browser.close');
 } finally {

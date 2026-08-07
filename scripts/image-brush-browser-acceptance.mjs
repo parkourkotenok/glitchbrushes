@@ -15,7 +15,7 @@ const mark = (message) => console.error(`[acceptance] ${message}`);
 
 const crcTable = Array.from({ length: 256 }, (_, value) => {
   let crc = value;
-  for (let bit = 0; bit < 8; bit += 1) crc = (crc & 1) ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+  for (let bit = 0; bit < 8; bit += 1) crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
   return crc >>> 0;
 });
 
@@ -24,7 +24,8 @@ function pngChunk(type, data) {
   const length = Buffer.alloc(4);
   length.writeUInt32BE(data.length);
   let crc = 0xffffffff;
-  for (const byte of Buffer.concat([typeBytes, data])) crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  for (const byte of Buffer.concat([typeBytes, data]))
+    crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
   const checksum = Buffer.alloc(4);
   checksum.writeUInt32BE((crc ^ 0xffffffff) >>> 0);
   return Buffer.concat([length, typeBytes, data, checksum]);
@@ -40,7 +41,8 @@ function generatedPngBase64(size, opaque) {
     raw[row] = 0;
     for (let x = 0; x < size; x += 1) {
       const offset = row + 1 + x * 4;
-      const inside = x >= rectangleStart && x < rectangleEnd && y >= rectangleStart && y < rectangleEnd;
+      const inside =
+        x >= rectangleStart && x < rectangleEnd && y >= rectangleStart && y < rectangleEnd;
       raw[offset] = inside ? 30 : opaque ? 38 : 0;
       raw[offset + 1] = inside ? 150 : opaque ? 54 : 0;
       raw[offset + 2] = inside ? 210 : opaque ? 75 : 0;
@@ -199,17 +201,22 @@ async function drawStroke(cdp, start, end, steps = 14) {
 }
 
 async function stagePoints(cdp, row = 0.5) {
-  return evaluate(cdp, `(() => {
+  return evaluate(
+    cdp,
+    `(() => {
     const rect = document.querySelector('.canvas-stage').getBoundingClientRect();
     return {
       start: { x: rect.left + rect.width * .18, y: rect.top + rect.height * ${row} },
       end: { x: rect.left + rect.width * .76, y: rect.top + rect.height * ${row} }
     };
-  })()`);
+  })()`,
+  );
 }
 
 async function setSelectByLabel(cdp, label, text) {
-  return evaluate(cdp, `(() => {
+  return evaluate(
+    cdp,
+    `(() => {
     const field = [...document.querySelectorAll('.image-brush-select')]
       .find((item) => item.querySelector(':scope > span')?.textContent.trim() === ${JSON.stringify(label)});
     if (!field) return false;
@@ -219,11 +226,14 @@ async function setSelectByLabel(cdp, label, text) {
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, option.value);
     select.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
-  })()`);
+  })()`,
+  );
 }
 
 async function setPreset(cdp, text) {
-  return evaluate(cdp, `(() => {
+  return evaluate(
+    cdp,
+    `(() => {
     const select = [...document.querySelectorAll('.image-brush-select select')]
       .find((item) => [...item.options].some((option) => option.textContent.trim() === ${JSON.stringify(text)}));
     if (!select) return false;
@@ -231,11 +241,14 @@ async function setPreset(cdp, text) {
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, option.value);
     select.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
-  })()`);
+  })()`,
+  );
 }
 
 async function setRangeByLabel(cdp, label, value) {
-  return evaluate(cdp, `(() => {
+  return evaluate(
+    cdp,
+    `(() => {
     const field = [...document.querySelectorAll('.image-brush-lab .slider-field')]
       .find((item) => item.textContent.includes(${JSON.stringify(label)}));
     const input = field?.querySelector('input[type=range]');
@@ -244,7 +257,8 @@ async function setRangeByLabel(cdp, label, value) {
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
-  })()`);
+  })()`,
+  );
 }
 
 async function waitImageBrushIdle(cdp, timeout = 30000) {
@@ -256,7 +270,9 @@ async function waitImageBrushIdle(cdp, timeout = 30000) {
 }
 
 async function canvasHash(cdp) {
-  return evaluate(cdp, `(() => {
+  return evaluate(
+    cdp,
+    `(() => {
     const canvas = document.querySelector('.work-canvas');
     const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
     let hash = 2166136261 >>> 0;
@@ -267,11 +283,14 @@ async function canvasHash(cdp) {
       hash = Math.imul(hash ^ data[index + 3], 16777619) >>> 0;
     }
     return hash;
-  })()`);
+  })()`,
+  );
 }
 
 async function installDownloadCapture(cdp) {
-  await evaluate(cdp, `(() => {
+  await evaluate(
+    cdp,
+    `(() => {
     window.__capturedDownloads = [];
     const original = HTMLAnchorElement.prototype.click;
     HTMLAnchorElement.prototype.click = function () {
@@ -288,43 +307,58 @@ async function installDownloadCapture(cdp) {
       if (!href.startsWith('blob:')) original.call(this);
     };
     return true;
-  })()`);
+  })()`,
+  );
 }
 
 async function openExport(cdp) {
-  await evaluate(cdp, `(() => {
+  await evaluate(
+    cdp,
+    `(() => {
     [...document.querySelectorAll('.topbar-actions button')].find((button) => button.textContent.includes('Export')).click();
     return true;
-  })()`);
+  })()`,
+  );
   await waitExpression(cdp, `Boolean(document.querySelector('.export-form'))`);
 }
 
 async function exportFormat(cdp, format, background = '#ffffff') {
   await openExport(cdp);
-  await evaluate(cdp, `(() => {
+  await evaluate(
+    cdp,
+    `(() => {
     const form = document.querySelector('.export-form');
     const format = form.querySelector('select');
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(format, ${JSON.stringify(format)});
     format.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
-  })()`);
+  })()`,
+  );
   await delay(80);
   if (format === 'jpeg') {
-    await evaluate(cdp, `(() => {
+    await evaluate(
+      cdp,
+      `(() => {
       const color = document.querySelector('.export-form input[type=color]');
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(color, ${JSON.stringify(background)});
       color.dispatchEvent(new Event('input', { bubbles: true }));
       color.dispatchEvent(new Event('change', { bubbles: true }));
       return true;
-    })()`);
+    })()`,
+    );
   }
   const previousCount = await evaluate(cdp, `window.__capturedDownloads.length`);
-  await evaluate(cdp, `(() => {
+  await evaluate(
+    cdp,
+    `(() => {
     [...document.querySelectorAll('.export-form .modal-actions button')].find((button) => button.textContent.includes('Download')).click();
     return true;
-  })()`);
+  })()`,
+  );
   await waitExpression(cdp, `window.__capturedDownloads.length > ${previousCount}`);
-  return evaluate(cdp, `(async () => {
+  return evaluate(
+    cdp,
+    `(async () => {
     const item = window.__capturedDownloads.at(-1);
     const bitmap = await createImageBitmap(new Blob([item.bytes], { type: item.type }));
     const canvas = document.createElement('canvas');
@@ -334,11 +368,14 @@ async function exportFormat(cdp, format, background = '#ffffff') {
     bitmap.close();
     const corner = [...canvas.getContext('2d').getImageData(0, 0, 1, 1).data];
     return { name: item.name, type: item.type, width: canvas.width, height: canvas.height, corner };
-  })()`);
+  })()`,
+  );
 }
 
 async function loadGeneratedDocument(cdp, size, encodedPng) {
-  await evaluate(cdp, `(async () => {
+  await evaluate(
+    cdp,
+    `(async () => {
     const encoded = ${JSON.stringify(encodedPng)};
     const binary = atob(encoded);
     const bytes = new Uint8Array(binary.length);
@@ -350,25 +387,38 @@ async function loadGeneratedDocument(cdp, size, encodedPng) {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'files').set.call(input, transfer.files);
     input.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
-  })()`);
-  await waitExpression(cdp, `document.querySelector('.topbar-file strong')?.textContent.includes('transparent-${size}.png')`, 30000);
+  })()`,
+  );
+  await waitExpression(
+    cdp,
+    `document.querySelector('.topbar-file strong')?.textContent.includes('transparent-${size}.png')`,
+    30000,
+  );
   await waitImageBrushIdle(cdp, 30000);
 }
 
 async function projectRoundTrip(cdp) {
   await openExport(cdp);
-  await evaluate(cdp, `(() => {
+  await evaluate(
+    cdp,
+    `(() => {
     [...document.querySelectorAll('.export-form button')].find((button) => button.textContent.includes('Project import')).click();
     return true;
-  })()`);
+  })()`,
+  );
   await waitExpression(cdp, `Boolean(document.querySelector('.project-panel'))`);
   const previousCount = await evaluate(cdp, `window.__capturedDownloads.length`);
-  await evaluate(cdp, `(() => {
+  await evaluate(
+    cdp,
+    `(() => {
     [...document.querySelectorAll('.project-panel button')].find((button) => button.textContent.includes('Export project')).click();
     return true;
-  })()`);
+  })()`,
+  );
   await waitExpression(cdp, `window.__capturedDownloads.length > ${previousCount}`);
-  const projectSummary = await evaluate(cdp, `(() => {
+  const projectSummary = await evaluate(
+    cdp,
+    `(() => {
     const item = window.__capturedDownloads.at(-1);
     const project = JSON.parse(item.text);
     return {
@@ -376,8 +426,11 @@ async function projectRoundTrip(cdp) {
       active: project.imageBrush?.activeAssetId,
       rack: project.imageBrush?.rack?.length ?? 0
     };
-  })()`);
-  await evaluate(cdp, `(async () => {
+  })()`,
+  );
+  await evaluate(
+    cdp,
+    `(async () => {
     const item = window.__capturedDownloads.at(-1);
     const file = new File([item.text], 'roundtrip.hexproject.json', { type: 'application/json' });
     const transfer = new DataTransfer();
@@ -386,11 +439,15 @@ async function projectRoundTrip(cdp) {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'files').set.call(input, transfer.files);
     input.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
-  })()`);
+  })()`,
+  );
   await delay(600);
   return {
     ...projectSummary,
-    restored: await evaluate(cdp, `document.querySelectorAll('.image-brush-library article').length`),
+    restored: await evaluate(
+      cdp,
+      `document.querySelectorAll('.image-brush-library article').length`,
+    ),
   };
 }
 
@@ -398,24 +455,30 @@ async function runEdge() {
   mark('launching Edge');
   const transparent512Png = generatedPngBase64(512, false);
   const opaque4000Png = generatedPngBase64(4000, true);
-  const profile = mkdtempSync(join(tmpdir(), 'hex-redactor-edge-'));
-  const edge = spawn(edgePath, [
-    '--headless=new',
-    '--disable-gpu',
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--remote-debugging-port=9333',
-    `--user-data-dir=${profile}`,
-    '--window-size=1600,1000',
-    'about:blank',
-  ], { stdio: 'ignore', windowsHide: true });
+  const profile = mkdtempSync(join(tmpdir(), 'imgfuck-edge-'));
+  const edge = spawn(
+    edgePath,
+    [
+      '--headless=new',
+      '--disable-gpu',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--remote-debugging-port=9333',
+      `--user-data-dir=${profile}`,
+      '--window-size=1600,1000',
+      'about:blank',
+    ],
+    { stdio: 'ignore', windowsHide: true },
+  );
   const exceptions = [];
   const consoleErrors = [];
   try {
     const page = await waitForEndpoint(9333);
     const cdp = new Cdp(page.webSocketDebuggerUrl);
     await cdp.open();
-    cdp.on('Runtime.exceptionThrown', (event) => exceptions.push(event.exceptionDetails?.text ?? 'exception'));
+    cdp.on('Runtime.exceptionThrown', (event) =>
+      exceptions.push(event.exceptionDetails?.text ?? 'exception'),
+    );
     cdp.on('Page.javascriptDialogOpening', () => {
       mark('accepting replace-image confirmation');
       void cdp.send('Page.handleJavaScriptDialog', { accept: true });
@@ -429,23 +492,32 @@ async function runEdge() {
       cdp.send('Log.enable'),
     ]);
     await cdp.send('Page.navigate', { url: appUrl });
-    await waitExpression(cdp, `document.querySelector('.brand')?.textContent.includes('HEX REDACTOR')`);
+    await waitExpression(
+      cdp,
+      `Boolean(document.querySelector('.brand svg[aria-label="imgfuck"]'))`,
+    );
     mark('app loaded');
     await installDownloadCapture(cdp);
-    await evaluate(cdp, `(() => {
+    await evaluate(
+      cdp,
+      `(() => {
       [...document.querySelectorAll('.inspector-tabs button')].find((button) => button.textContent.includes('Image Brush')).click();
       return true;
-    })()`);
+    })()`,
+    );
     await waitExpression(cdp, `Boolean(document.querySelector('.image-brush-lab'))`);
     mark('IMAGE BRUSH tab opened');
 
-    const initial = await evaluate(cdp, `(() => ({
+    const initial = await evaluate(
+      cdp,
+      `(() => ({
       tabs: [...document.querySelectorAll('.inspector-tabs button')].map((button) => button.textContent.trim()),
       assets: document.querySelectorAll('.image-brush-library article').length,
       originalPreview: document.querySelector('.image-brush-previews canvas')?.width,
       processedPreview: document.querySelectorAll('.image-brush-previews canvas')[1]?.width,
       active: document.querySelector('.image-brush-library article.active strong')?.textContent
-    }))()`);
+    }))()`,
+    );
 
     const firstPoints = await stagePoints(cdp, 0.36);
     const before = await canvasHash(cdp);
@@ -453,16 +525,28 @@ async function runEdge() {
     await waitImageBrushIdle(cdp);
     mark('clean stroke completed');
     const cleanHash = await canvasHash(cdp);
-    const cleanHistory = await evaluate(cdp, `document.querySelector('.history-popover') ? '' : (
+    const cleanHistory = await evaluate(
+      cdp,
+      `document.querySelector('.history-popover') ? '' : (
       [...document.querySelectorAll('.topbar-actions button')].find((button) => button.title === 'History').click(), ''
-    )`);
+    )`,
+    );
     await waitExpression(cdp, `Boolean(document.querySelector('.history-list button'))`);
-    const cleanLabel = await evaluate(cdp, `document.querySelector('.history-list button strong')?.textContent`);
+    const cleanLabel = await evaluate(
+      cdp,
+      `document.querySelector('.history-list button strong')?.textContent`,
+    );
     await evaluate(cdp, `document.querySelector('.history-popover .icon-button').click()`);
 
-    await evaluate(cdp, `[...document.querySelectorAll('.topbar-actions button')].find((button) => button.title.startsWith('Undo')).click()`);
+    await evaluate(
+      cdp,
+      `[...document.querySelectorAll('.topbar-actions button')].find((button) => button.title.startsWith('Undo')).click()`,
+    );
     const undoHash = await canvasHash(cdp);
-    await evaluate(cdp, `[...document.querySelectorAll('.topbar-actions button')].find((button) => button.title.startsWith('Redo')).click()`);
+    await evaluate(
+      cdp,
+      `[...document.querySelectorAll('.topbar-actions button')].find((button) => button.title.startsWith('Redo')).click()`,
+    );
     const redoHash = await canvasHash(cdp);
 
     const modeResults = [];
@@ -501,15 +585,25 @@ async function runEdge() {
     mark('spacing and follow-stroke completed');
 
     const blendModes = [
-      'Normal', 'Multiply', 'Screen', 'Overlay', 'Difference',
-      'Lighten', 'Darken', 'Hard Light', 'Color Dodge', 'Exclusion',
+      'Normal',
+      'Multiply',
+      'Screen',
+      'Overlay',
+      'Difference',
+      'Lighten',
+      'Darken',
+      'Hard Light',
+      'Color Dodge',
+      'Exclusion',
     ];
     for (const blend of blendModes) {
-      if (!(await setSelectByLabel(cdp, 'Blend mode', blend))) throw new Error(`Blend mode missing: ${blend}`);
+      if (!(await setSelectByLabel(cdp, 'Blend mode', blend)))
+        throw new Error(`Blend mode missing: ${blend}`);
     }
     const alphaModes = ['Preserve Alpha', 'Glitch Inside Alpha', 'Alpha Bleed', 'Corrupt Alpha'];
     for (const alpha of alphaModes) {
-      if (!(await setSelectByLabel(cdp, 'Alpha mode', alpha))) throw new Error(`Alpha mode missing: ${alpha}`);
+      if (!(await setSelectByLabel(cdp, 'Alpha mode', alpha)))
+        throw new Error(`Alpha mode missing: ${alpha}`);
     }
     await setSelectByLabel(cdp, 'Alpha mode', 'Preserve Alpha');
     mark('blend and alpha controls enumerated');
@@ -519,7 +613,10 @@ async function runEdge() {
     const project = await projectRoundTrip(cdp);
     mark('project round-trip completed');
     mark('closing project modal');
-    await evaluate(cdp, `document.querySelector('.modal[aria-label="Project data"] button[aria-label="Close"]')?.click()`);
+    await evaluate(
+      cdp,
+      `document.querySelector('.modal[aria-label="Project data"] button[aria-label="Close"]')?.click()`,
+    );
     mark('project modal closed');
 
     mark('selecting clean preset after project import');
@@ -534,13 +631,22 @@ async function runEdge() {
     await waitImageBrushIdle(cdp);
     const png = await exportFormat(cdp, 'png');
     mark('PNG export decoded');
-    await evaluate(cdp, `document.querySelector('.modal[aria-label="Export image"] button[aria-label="Close"]')?.click()`);
+    await evaluate(
+      cdp,
+      `document.querySelector('.modal[aria-label="Export image"] button[aria-label="Close"]')?.click()`,
+    );
     const jpeg = await exportFormat(cdp, 'jpeg', '#ff00ff');
     mark('JPEG export decoded');
-    await evaluate(cdp, `document.querySelector('.modal[aria-label="Export image"] button[aria-label="Close"]')?.click()`);
+    await evaluate(
+      cdp,
+      `document.querySelector('.modal[aria-label="Export image"] button[aria-label="Close"]')?.click()`,
+    );
     const webp = await exportFormat(cdp, 'webp');
     mark('WebP export decoded');
-    await evaluate(cdp, `document.querySelector('.modal[aria-label="Export image"] button[aria-label="Close"]')?.click()`);
+    await evaluate(
+      cdp,
+      `document.querySelector('.modal[aria-label="Export image"] button[aria-label="Close"]')?.click()`,
+    );
 
     await setPreset(cdp, 'Clean Sticker Trail');
     await setRangeByLabel(cdp, 'Spacing', 200);
@@ -549,11 +655,14 @@ async function runEdge() {
     const largePoints = await stagePoints(cdp, 0.5);
     const largeStarted = Date.now();
     await drawStroke(cdp, largePoints.start, largePoints.end, 4);
-    const historyToggleMs = await evaluate(cdp, `(() => {
+    const historyToggleMs = await evaluate(
+      cdp,
+      `(() => {
       const started = performance.now();
       [...document.querySelectorAll('.topbar-actions button')].find((button) => button.title === 'History').click();
       return performance.now() - started;
-    })()`);
+    })()`,
+    );
     await waitImageBrushIdle(cdp, 60000);
     const largeElapsedMs = Date.now() - largeStarted;
     mark('4000x4000 stroke completed');
@@ -563,7 +672,10 @@ async function runEdge() {
       format: 'png',
       captureBeyondViewport: false,
     });
-    writeFileSync(join(artifactDir, 'image-brush-edge.png'), Buffer.from(screenshot.data, 'base64'));
+    writeFileSync(
+      join(artifactDir, 'image-brush-edge.png'),
+      Buffer.from(screenshot.data, 'base64'),
+    );
 
     const report = {
       browser: 'Edge Chromium',
@@ -584,7 +696,10 @@ async function runEdge() {
       exceptions,
       consoleErrors,
     };
-    writeFileSync(join(artifactDir, 'image-brush-edge-report.json'), JSON.stringify(report, null, 2));
+    writeFileSync(
+      join(artifactDir, 'image-brush-edge-report.json'),
+      JSON.stringify(report, null, 2),
+    );
     cdp.close();
     return report;
   } finally {
@@ -597,19 +712,29 @@ async function runEdge() {
 async function runFirefox() {
   mark('launching Firefox screenshot');
   const screenshot = join(repairArtifactDir, 'after-firefox.png');
-  const profile = mkdtempSync(join(tmpdir(), 'hex-redactor-firefox-'));
-  const firefox = spawn(firefoxPath, [
-    '--headless',
-    '--no-remote',
-    '--profile', profile,
-    '--window-size=1600,1000',
-    '--screenshot', screenshot,
-    appUrl,
-  ], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  const profile = mkdtempSync(join(tmpdir(), 'imgfuck-firefox-'));
+  const firefox = spawn(
+    firefoxPath,
+    [
+      '--headless',
+      '--no-remote',
+      '--profile',
+      profile,
+      '--window-size=1600,1000',
+      '--screenshot',
+      screenshot,
+      appUrl,
+    ],
+    { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true },
+  );
   let stdout = '';
   let stderr = '';
-  firefox.stdout.on('data', (chunk) => { stdout += chunk; });
-  firefox.stderr.on('data', (chunk) => { stderr += chunk; });
+  firefox.stdout.on('data', (chunk) => {
+    stdout += chunk;
+  });
+  firefox.stderr.on('data', (chunk) => {
+    stderr += chunk;
+  });
   try {
     const rendered = await waitFor(() => existsSync(screenshot), 45000, 250);
     if (firefox.exitCode === null) {
@@ -626,7 +751,10 @@ async function runFirefox() {
       screenshot,
       rendered: Boolean(rendered),
     };
-    writeFileSync(join(repairArtifactDir, 'after-firefox-report.json'), JSON.stringify(report, null, 2));
+    writeFileSync(
+      join(repairArtifactDir, 'after-firefox-report.json'),
+      JSON.stringify(report, null, 2),
+    );
     return report;
   } finally {
     if (firefox.exitCode === null) firefox.kill();

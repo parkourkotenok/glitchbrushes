@@ -5,8 +5,10 @@ import {
   type MoshEffectSettings,
   type MoshPreset,
 } from './types';
+import { LEGACY_STORAGE_KEYS, STORAGE_KEYS } from '../brand/brand';
 
-export const MOSH_USER_PRESETS_STORAGE_KEY = 'hex-redactor-mosh-presets-v1';
+export const MOSH_USER_PRESETS_STORAGE_KEY = STORAGE_KEYS.moshPresets;
+export const LEGACY_MOSH_USER_PRESETS_STORAGE_KEY = LEGACY_STORAGE_KEYS.moshPresets;
 
 export interface MoshUserPreset extends MoshPreset {
   id: string;
@@ -68,13 +70,17 @@ export function loadMoshUserPresets(
 ): MoshUserPreset[] {
   if (!storage) return [];
   try {
-    const value = storage.getItem(MOSH_USER_PRESETS_STORAGE_KEY);
+    const value =
+      storage.getItem(MOSH_USER_PRESETS_STORAGE_KEY) ??
+      storage.getItem(LEGACY_MOSH_USER_PRESETS_STORAGE_KEY);
     if (!value) return [];
     const parsed = JSON.parse(value) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed
+    const presets = parsed
       .map((preset, index) => normalizeMoshUserPreset(preset, `mosh-user-${index}`))
       .filter((preset): preset is MoshUserPreset => preset !== null);
+    storage.setItem(MOSH_USER_PRESETS_STORAGE_KEY, JSON.stringify(presets));
+    return presets;
   } catch {
     return [];
   }

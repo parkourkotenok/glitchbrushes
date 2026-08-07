@@ -1,16 +1,6 @@
-import {
-  Brush,
-  Droplets,
-  Eraser,
-  Focus,
-  Hand,
-  Maximize2,
-  MousePointer2,
-  RefreshCcw,
-  Trash2,
-  WandSparkles,
-} from 'lucide-react';
+import { Hand, Maximize2, MousePointer2, Trash2 } from 'lucide-react';
 import type { Tool } from '../types';
+import { ToolGlyph } from '../brand/ToolGlyph';
 
 type ActivePanel = 'effect' | 'retouch' | 'mosh' | 'image-brush' | 'raw';
 
@@ -43,7 +33,7 @@ export function ToolRail({
         }}
         title="Glitch Brush (B)"
       >
-        <Brush size={20} />
+        <ToolGlyph id="brush" size={22} />
         <span>B</span>
       </button>
       <button
@@ -64,7 +54,7 @@ export function ToolRail({
         }}
         title="Smudge · physical S key (works on Cyrillic layout)"
       >
-        <Droplets size={19} />
+        <ToolGlyph id="smudge" size={21} />
         <span>S</span>
       </button>
       <button
@@ -75,7 +65,7 @@ export function ToolRail({
         }}
         title="Blur · physical U key (works on Cyrillic layout)"
       >
-        <Focus size={19} />
+        <ToolGlyph id="blur" size={21} />
         <span>U</span>
       </button>
       <button
@@ -86,7 +76,7 @@ export function ToolRail({
         }}
         title="Sharpen · physical J key (works on Cyrillic layout)"
       >
-        <WandSparkles size={19} />
+        <ToolGlyph id="sharpen" size={21} />
         <span>J</span>
       </button>
       <button
@@ -97,7 +87,7 @@ export function ToolRail({
         }}
         title="Restore · physical E key (works on Cyrillic layout)"
       >
-        <RefreshCcw size={19} />
+        <ToolGlyph id="restore" size={21} />
         <span>E</span>
       </button>
       <button
@@ -108,12 +98,12 @@ export function ToolRail({
         }}
         title="Eraser · physical X key (works on Cyrillic layout)"
       >
-        <Eraser size={19} />
+        <ToolGlyph id="eraser" size={21} />
         <span>X</span>
       </button>
       <div className="rail-rule" />
       <button onClick={onRandomGlitch} title="Random glitch (G)">
-        <WandSparkles size={20} />
+        <ToolGlyph id="random" size={21} />
         <span>G</span>
       </button>
       <button onClick={onFitToScreen} title="Fit to screen (F)">

@@ -12,6 +12,8 @@ import {
 import { HelpCircle, Search, X } from 'lucide-react';
 import { helpRegistry, helpSlug, resolveControlHelp } from './registry';
 import type { ControlHelp } from './types';
+import { ImgFuckLogo } from '../brand/ImgFuckLogo';
+import { PRODUCT_ABOUT, PRODUCT_SUBTITLE, PRODUCT_VERSION } from '../brand/brand';
 
 interface HelpContextValue {
   helpMode: boolean;
@@ -269,6 +271,14 @@ export function HelpProvider({ children }: { children: ReactNode }) {
               <X size={14} />
             </button>
           </header>
+          <section className="help-about" aria-label="About imgfuck">
+            <ImgFuckLogo className="help-about-logo" />
+            <div>
+              <strong>{PRODUCT_SUBTITLE}</strong>
+              <span>v{PRODUCT_VERSION}</span>
+            </div>
+            <p>{PRODUCT_ABOUT}</p>
+          </section>
           <label className="help-search">
             <Search size={14} />
             <input

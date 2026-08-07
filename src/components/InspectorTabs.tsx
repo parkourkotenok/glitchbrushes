@@ -1,5 +1,4 @@
-import { Droplets, SlidersHorizontal, Zap } from 'lucide-react';
-import { EffectIcon } from '../icons/effects';
+import { ToolGlyph } from '../brand/ToolGlyph';
 
 export type InspectorPanelId = 'effect' | 'retouch' | 'mosh' | 'image-brush' | 'raw';
 
@@ -14,26 +13,37 @@ export function InspectorTabs({ activePanel, onSelect }: InspectorTabsProps) {
       <button
         className={activePanel === 'effect' ? 'active' : ''}
         onClick={() => onSelect('effect')}
+        data-panel="effect"
       >
-        <SlidersHorizontal size={15} /> Effect
+        <ToolGlyph id="effect" size={17} /> <span>Effect</span>
       </button>
       <button
         className={activePanel === 'retouch' ? 'active' : ''}
         onClick={() => onSelect('retouch')}
+        data-panel="retouch"
       >
-        <Droplets size={15} /> Retouch
+        <ToolGlyph id="retouch" size={17} /> <span>Retouch</span>
       </button>
-      <button className={activePanel === 'mosh' ? 'active' : ''} onClick={() => onSelect('mosh')}>
-        <EffectIcon id="motion-field" size={15} /> Mosh Lab
+      <button
+        className={activePanel === 'mosh' ? 'active' : ''}
+        onClick={() => onSelect('mosh')}
+        data-panel="mosh"
+      >
+        <ToolGlyph id="mosh" size={17} /> <span>Mosh Lab</span>
       </button>
       <button
         className={activePanel === 'image-brush' ? 'active' : ''}
         onClick={() => onSelect('image-brush')}
+        data-panel="image-brush"
       >
-        <EffectIcon id="image-brush" size={15} /> Image Brush
+        <ToolGlyph id="image-brush" size={17} /> <span>Image Brush</span>
       </button>
-      <button className={activePanel === 'raw' ? 'active' : ''} onClick={() => onSelect('raw')}>
-        <Zap size={15} /> File Corruption
+      <button
+        className={activePanel === 'raw' ? 'active' : ''}
+        onClick={() => onSelect('raw')}
+        data-panel="raw"
+      >
+        <ToolGlyph id="raw" size={17} /> <span>File Corruption</span>
       </button>
     </nav>
   );

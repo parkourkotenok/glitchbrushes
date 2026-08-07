@@ -30,8 +30,11 @@
 - Все 19 Stamp FX имеют визуально отличимый результат и сохранённый browser contact sheet; добавлены Original/Processed/Difference, Test Stamp/Trail, понятные processing stages и уровни силы.
 - Добавлена центральная contextual-help registry, HelpButton/Popover, полные Motion Field пояснения, глобальный Help Mode и поиск; общие sliders и IMAGE BRUSH/MOSH controls имеют явные help IDs, остальные editor actions получают глобальное help-покрытие.
 - Финальная матрица repair: TypeScript success, 6 test files / 108 tests, production build success, visible Edge pointer acceptance на 1000²/2000²/4000², Cancel 16.8 ms без изменения документа и успешный Firefox headless render.
+- `imgfuck` visual identity/UI redesign завершён: централизованный бренд, оригинальный SVG wordmark/mark/favicon и пиктограммы, molded-plastic shell, пять семантических workspace-акцентов, welcome/About, совместимые миграции legacy presets/projects и полный final screenshot set. Финальная проверка: 13 файлов / 166 тестов, TypeScript и production build успешны; headed Edge/Firefox Codec Damage Trail acceptance проходит.
 
 ## Current Priority
+
+2026-08-07 completed: the product is now `imgfuck — local image destruction toy` while the GitHub repository remains `glitchbrushes`. The complete 1999-inspired tactile UI system, original vector identity, legacy-data migrations, final 12-state visual acceptance and real headed Edge/Firefox performance matrix are implemented and verified. No product-code work remains in the current redesign scope.
 
 2026-08-01 P0 completed: major editor cleanup and rebuild using the user-supplied `астронавт2.png` as the mandatory visual source. All eight stages are implemented and accepted in headed Firefox; visible Edge passed the final layout and real Glitched Repeat commit smoke test. The measured slow Edge whole-trail case is recorded below instead of being hidden.
 
@@ -46,6 +49,17 @@ Remaining measured limit: final 4000² Evolving processing is asynchronous and c
 Обязательные хвосты MOSH/Worker-этапа завершены. Следующие возможные этапы — независимые raster-слои и optional temporal/video pipeline; они не блокируют текущий static-image glitch workflow.
 
 ## Task Queue
+
+### 2026-08-07 imgfuck visual identity and UI redesign
+
+- [x] Stage 1 baseline: read the complete worklog, inspect repository state, run typecheck/161 tests/build, and capture 11 required UI states at 1440x900.
+- [x] Stage 2 branding: centralize the `imgfuck` identity, rename package/title/README/user-facing labels, add original vector logo/mark/favicon, and preserve old project/preset storage compatibility.
+- [x] Stage 3 design system: centralized molded-plastic palette, surfaces, buttons, inputs, sliders, selects, toggles, typography and motion tokens.
+- [x] Stage 4 shell: top bar, tool rail, inspector tabs, canvas frame, status display, dialogs and history window.
+- [x] Stage 5 workspace identities: EFFECT, RETOUCH, MOSH LAB, IMAGE BRUSH, Layers and FILE CORRUPTION.
+- [x] Stage 6 identity details: custom critical icons, demo/welcome treatment, About content and restrained decorative marks.
+- [x] Stage 7 regression/performance: Firefox and Edge interaction, Codec Damage Trail profiling, editor workflow smoke tests and responsive checks.
+- [x] Stage 8 acceptance: clean live worklog summaries, full verification commands, baseline/final comparison and inspected final contact sheet.
 
 ### 2026-08-01 Major editor cleanup and rebuild
 
@@ -170,6 +184,8 @@ Remaining measured limit: final 4000² Evolving processing is asynchronous and c
 - [x] Отполировать desktop-компоновку, состояния управления и доступные подписи элементов.
 
 ## In Progress
+
+- 2026-08-07 — `imgfuck` identity redesign is complete. Eleven baseline states and twelve final states are saved under `browser-artifacts/imgfuck-redesign/`; the final 1440×900 report has 39 centralized CSS tokens and no app/inspector horizontal overflow. Identity, shell, all five workspace accents, custom tool/tab glyphs, dialogs, History, welcome and About were visually inspected. Legacy storage/MIME strings remain only as tested read compatibility paths.
 
 - 2026-08-01 — Major editor cleanup Stage 3 completed and accepted in headed Firefox.
   - The primary picker now exposes one `Block Corruption` with seven modes and one `Codec Block Damage` with six modes. Macroblock Shift, Packet Loss, Compression Block Damage and Tile Scramble remain internal only for deterministic old-project migration.
@@ -409,7 +425,7 @@ Remaining measured limit: final 4000² Evolving processing is asynchronous and c
 - [resolved 2026-08-01, Stage 7] HEX is absent from the production App, Help and current docs. RAW FILE is now the fully explained FILE CORRUPTION workflow with exact mutation controls, retry/revert and decode status.
 - [resolved 2026-08-01, Stage 1] IMAGE BRUSH now preserves original uploads while creating selectable real working buffers, reports dimensions/memory reduction and invalidates only stamp-related caches/jobs.
 - [resolved 2026-08-01, Stage 6] Smudge, Blur, Sharpen, layered Restore and sparse active-layer Eraser exist with local Worker processing, preview, History and physical-key shortcuts.
-- [open, measured 2026-08-01, Stage 8] Visible Edge `Codec Damage Trail` exceeded 120 seconds in both a 427 px and a 96 px acceptance attempt. Firefox completes the same preset and owns the accepted whole-trail evidence; Edge final smoke uses optimized Glitched Repeat until the pre-optimization preview/whole-trail scheduling path is further reduced.
+- [resolved, verified 2026-08-07 in headed Edge and Firefox] `Codec Damage Trail` no longer exceeds the old 120-second watchdog after alpha-bleed offset caching and opaque-pixel/source reuse. Visible Edge committed 121 stamps in 434.90 ms at 1000² and 193 stamps in 1310.13 ms at 2000²; the heavier case had one 586 ms result-arrival long task. Headed Firefox committed 108 stamps in 299 ms and 242 stamps in 511 ms; the heavier case had no sampled rAF gap above 50 ms. The first Firefox case recorded one 2014 ms setup/whole-wall sampling gap, retained as an honest harness caveat rather than attributed to stroke work.
 
 - [fixed, verified 2026-07-27 in headed Firefox 153.0] The rejected SIMPLE card/workflow split is removed. The compact inspector has no horizontal overflow at 320/450/600 px, mounts no preset-card canvases and keeps all five essential sliders visible.
 - [fixed, verified 2026-07-27 in headed Firefox 153.0] Real pointer drags changed all five essential sliders after adding two transparent PNGs; switching assets preserved the values, and the overlay neither intersected nor intercepted the inspector.
@@ -955,3 +971,14 @@ Output: dist/index.html, 21.39 KB CSS, 297.34 KB JS, 0.90 KB Raw Worker
 * Sharpen использует тот же separable-проход.
 * Замеры 512x512 полный кадр, 5 runs avg: blur 6153 -> 3806 (предвычисление ядра/luma) -> 340 ms (separable), sharpen 426 -> 78 ms. Итого blur ~-94%.
 * Валидация: typecheck ✓, 161/161 ✓, build ✓, prettier ✓.
+
+### 2026-08-07 imgfuck visual identity and UI redesign (complete)
+
+* Rebranded the product to `imgfuck` with the exact subtitle `local image destruction toy`; the GitHub repository name remains `glitchbrushes`. Central brand constants now own product copy, version, filenames, new storage keys and the legacy read-only migration keys.
+* Added an original code-native SVG wordmark, mark, favicon, critical tool glyphs and five inspector-tab pictograms. Browser title is `imgfuck — local image destruction toy`; package name is `imgfuck`; README and About use the new identity.
+* Rebuilt the presentation as a compact late-1990s tactile image-destruction toy: molded navy shell, violet-gray inspector plastic, warm wells, rim/highlight/shadow controls, technical display typography and separate blue/green/purple/orange/red Effect/Retouch/Mosh/Image Brush/File Corruption accents.
+* Added the nonblocking demo welcome plaque and the final About copy: “A local image corruption and glitch playground. PNG / JPEG / WebP. Everything runs on your machine.” Project/preset exports use `imgfuck`; legacy `hex-redactor` preset keys and embedded RGBA MIME remain accepted and are covered by migration tests.
+* Optimized Image Brush alpha bleed by caching circular offsets, skipping already opaque pixels and reusing the selected source. Visible Edge `Codec Damage Trail`: 121 stamps / 434.90 ms at 1000² and 193 / 1310.13 ms at 2000², with one 586 ms result-arrival long task in the heavier case. Headed Firefox 153.0.3: 108 / 299 ms and 242 / 511 ms; the heavier case had zero sampled rAF gaps above 50 ms. The first Firefox case retained one 2014 ms setup/whole-wall sampling gap as an explicit harness caveat.
+* Final validation after source changes: `npm run typecheck` passed; Vitest 13 files / 166 tests passed through both `npm test` and local `npx vitest run`; production Vite build passed at 1660 modules. The two raw suites (4 tests) pass inside Vitest. Bun/Bunx is not installed on this host, so the literal `bunx vitest run` and `npm run test:raw` commands could not execute. The requested global Prettier check reports pre-existing formatting debt in 87 source files; all newly added identity/style files and touched redesign modules pass a targeted Prettier check, and `src/main.tsx` was formatted.
+* Visual acceptance saved eleven baseline and twelve final 1440×900 states under `browser-artifacts/imgfuck-redesign/`; final title, brand, 39 CSS tokens and zero app/inspector horizontal overflow were machine-checked, then Effect, Retouch, Mosh, Image Brush, File Corruption, Layers, picker, dialogs, History and Help/About were visually inspected.
+* Permanent browser performance evidence: `browser-artifacts/image-brush-repair/codec-visible-edge.json/.png` and `browser-artifacts/image-brush-firefox/imgfuck-codec-firefox.json/.png`. No Firefox process owned by the user was terminated; only the dedicated BiDi profile was closed, and the task-owned Vite server was stopped by exact PID.

@@ -5,12 +5,12 @@ import { join, resolve } from 'node:path';
 import { deflateSync } from 'node:zlib';
 
 const edgePath = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
-const appUrl = process.env.HEX_REDACTOR_URL ?? 'http://127.0.0.1:5174/';
+const appUrl = process.env.IMGFUCK_URL ?? process.env.HEX_REDACTOR_URL ?? 'http://127.0.0.1:5174/';
 const artifactDir = resolve('browser-artifacts', 'image-brush-repair');
 const skipEffectAudit =
-  process.env.SKIP_EFFECT_AUDIT === '1' ||
-  process.argv.includes('--skip-effects');
+  process.env.SKIP_EFFECT_AUDIT === '1' || process.argv.includes('--skip-effects');
 const cancelOnly = process.argv.includes('--cancel-only');
+const codecOnly = process.argv.includes('--codec-only');
 mkdirSync(artifactDir, { recursive: true });
 
 class Cdp {
@@ -108,7 +108,7 @@ async function waitExpression(cdp, expression, timeout = 30000) {
 
 const crcTable = Array.from({ length: 256 }, (_, value) => {
   let crc = value;
-  for (let bit = 0; bit < 8; bit += 1) crc = (crc & 1) ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+  for (let bit = 0; bit < 8; bit += 1) crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
   return crc >>> 0;
 });
 
@@ -117,7 +117,8 @@ function pngChunk(type, data) {
   const length = Buffer.alloc(4);
   length.writeUInt32BE(data.length);
   let crc = 0xffffffff;
-  for (const byte of Buffer.concat([typeBytes, data])) crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  for (const byte of Buffer.concat([typeBytes, data]))
+    crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
   const checksum = Buffer.alloc(4);
   checksum.writeUInt32BE((crc ^ 0xffffffff) >>> 0);
   return Buffer.concat([length, typeBytes, data, checksum]);
@@ -181,7 +182,9 @@ function testDocumentBase64(size) {
 }
 
 async function installMetrics(cdp) {
-  await evaluate(cdp, `(() => {
+  await evaluate(
+    cdp,
+    `(() => {
     const metrics = window.__imageBrushBaseline = {
       pointerEvents: 0,
       pointerStartedAt: 0,
@@ -251,27 +254,37 @@ async function installMetrics(cdp) {
       metrics.domMutations += records.length;
     }).observe(document.querySelector('#root'), { subtree: true, childList: true, attributes: true, characterData: true });
     return true;
-  })()`);
+  })()`,
+  );
 }
 
 async function addBrushAsset(cdp, base64) {
-  await evaluate(cdp, `(async () => {
+  await evaluate(
+    cdp,
+    `(async () => {
     const binary = atob(${JSON.stringify(base64)});
     const bytes = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
     const file = new File([bytes], 'repair-icon-96.png', { type: 'image/png' });
     const transfer = new DataTransfer();
     transfer.items.add(file);
-    const input = document.querySelector('.image-brush-drop input[type=file]');
+    const input = document.querySelector('.image-brush-compact input[type=file][accept*="image/png"]');
+    if (!input) throw new Error('Image Brush file input is unavailable.');
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'files').set.call(input, transfer.files);
     input.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
-  })()`);
-  await waitExpression(cdp, `[...document.querySelectorAll('.image-brush-library article strong')].some((node) => node.textContent.includes('repair-icon-96'))`);
+  })()`,
+  );
+  await waitExpression(
+    cdp,
+    `[...document.querySelectorAll('.image-brush-library-strip article')].some((node) => node.textContent.includes('repair-icon-96'))`,
+  );
 }
 
 async function setPreset(cdp, text) {
-  return evaluate(cdp, `(() => {
+  return evaluate(
+    cdp,
+    `(() => {
     const select = [...document.querySelectorAll('.image-brush-select select')]
       .find((item) => [...item.options].some((option) => option.textContent.trim() === ${JSON.stringify(text)}));
     if (!select) return false;
@@ -279,11 +292,14 @@ async function setPreset(cdp, text) {
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, option.value);
     select.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
-  })()`);
+  })()`,
+  );
 }
 
 async function setSelect(cdp, label, text) {
-  return evaluate(cdp, `(() => {
+  return evaluate(
+    cdp,
+    `(() => {
     const field = [...document.querySelectorAll('.image-brush-select')]
       .find((item) => item.querySelector(':scope > span')?.textContent.trim() === ${JSON.stringify(label)});
     const select = field?.querySelector('select');
@@ -292,11 +308,14 @@ async function setSelect(cdp, label, text) {
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, option.value);
     select.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
-  })()`);
+  })()`,
+  );
 }
 
 async function setRangeByLabel(cdp, label, value) {
-  return evaluate(cdp, `(() => {
+  return evaluate(
+    cdp,
+    `(() => {
     const field = [...document.querySelectorAll('.image-brush-lab .slider-field')]
       .find((item) => item.querySelector(':scope > span')?.textContent.trim() === ${JSON.stringify(label)});
     const input = field?.querySelector('input[type=range]');
@@ -305,12 +324,15 @@ async function setRangeByLabel(cdp, label, value) {
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
-  })()`);
+  })()`,
+  );
 }
 
 async function loadTestDocument(cdp, size) {
   const base64 = testDocumentBase64(size);
-  await evaluate(cdp, `(async () => {
+  await evaluate(
+    cdp,
+    `(async () => {
     const binary = atob(${JSON.stringify(base64)});
     const bytes = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
@@ -321,36 +343,48 @@ async function loadTestDocument(cdp, size) {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'files').set.call(input, transfer.files);
     input.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
-  })()`);
+  })()`,
+  );
   await waitExpression(
     cdp,
     `document.querySelector('.topbar-file strong')?.textContent.includes('performance-${size}.png')`,
     90000,
   );
-  await evaluate(cdp, `(() => {
+  await evaluate(
+    cdp,
+    `(() => {
     const canvas = document.querySelector('.work-canvas');
     window.__imageBrushBaseline.lastCommitted = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data.slice();
     return true;
-  })()`);
+  })()`,
+  );
 }
 
 async function setFirstFxAmount(cdp, value) {
-  return evaluate(cdp, `(() => {
+  return evaluate(
+    cdp,
+    `(() => {
     const input = document.querySelector('.image-brush-fx-rack article .slider-field input[type=range]');
     if (!input) return false;
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(String(value))});
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
-  })()`);
+  })()`,
+  );
 }
 
 async function auditStampEffects(cdp) {
-  const effects = await evaluate(cdp, `(() => {
+  const effects = await evaluate(
+    cdp,
+    `(() => {
     const select = document.querySelector('.image-brush-add-fx select');
     return [...select.options].map((option) => ({ id: option.value, name: option.textContent.trim() }));
-  })()`);
-  await evaluate(cdp, `(() => {
+  })()`,
+  );
+  await evaluate(
+    cdp,
+    `(() => {
     const canvas = document.createElement('canvas');
     canvas.width = 1000;
     canvas.height = 850;
@@ -362,11 +396,14 @@ async function auditStampEffects(cdp) {
     context.textBaseline = 'top';
     window.__imageBrushContactSheet = canvas;
     return true;
-  })()`);
+  })()`,
+  );
   const results = [];
   for (let index = 0; index < effects.length; index += 1) {
     const effect = effects[index];
-    await evaluate(cdp, `(() => {
+    await evaluate(
+      cdp,
+      `(() => {
       for (const button of [...document.querySelectorAll('.image-brush-fx-rack article > header button.icon-button')]) {
         button.click();
       }
@@ -374,25 +411,49 @@ async function auditStampEffects(cdp) {
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, ${JSON.stringify(effect.id)});
       select.dispatchEvent(new Event('change', { bubbles: true }));
       return true;
-    })()`);
+    })()`,
+    );
     await delay(25);
     await evaluate(cdp, `document.querySelector('.image-brush-add-fx button').click()`);
-    await waitFor(async () => {
-      const text = await evaluate(cdp, `document.querySelector('.image-brush-diagnostics')?.innerText ?? ''`);
-      return text.startsWith('FULL') ? text : null;
-    }, 30000, 25);
+    await waitFor(
+      async () => {
+        const text = await evaluate(
+          cdp,
+          `document.querySelector('.image-brush-diagnostics')?.innerText ?? ''`,
+        );
+        return text.startsWith('FULL') ? text : null;
+      },
+      30000,
+      25,
+    );
     const defaultHash = await canvasHash(cdp, '.image-brush-previews article:nth-child(2) canvas');
     await setFirstFxAmount(cdp, 0.86);
-    const changedHash = await waitFor(async () => {
-      const hash = await canvasHash(cdp, '.image-brush-previews article:nth-child(2) canvas');
-      return hash !== defaultHash ? hash : null;
-    }, 30000, 25).catch(() => defaultHash);
-    await waitFor(async () => {
-      const text = await evaluate(cdp, `document.querySelector('.image-brush-diagnostics')?.innerText ?? ''`);
-      return text.startsWith('FULL') ? text : null;
-    }, 30000, 25);
-    const diagnostic = await evaluate(cdp, `document.querySelector('.image-brush-diagnostics')?.innerText ?? ''`);
-    await evaluate(cdp, `(() => {
+    const changedHash = await waitFor(
+      async () => {
+        const hash = await canvasHash(cdp, '.image-brush-previews article:nth-child(2) canvas');
+        return hash !== defaultHash ? hash : null;
+      },
+      30000,
+      25,
+    ).catch(() => defaultHash);
+    await waitFor(
+      async () => {
+        const text = await evaluate(
+          cdp,
+          `document.querySelector('.image-brush-diagnostics')?.innerText ?? ''`,
+        );
+        return text.startsWith('FULL') ? text : null;
+      },
+      30000,
+      25,
+    );
+    const diagnostic = await evaluate(
+      cdp,
+      `document.querySelector('.image-brush-diagnostics')?.innerText ?? ''`,
+    );
+    await evaluate(
+      cdp,
+      `(() => {
       const sheet = window.__imageBrushContactSheet;
       const context = sheet.getContext('2d');
       const original = document.querySelector('.image-brush-previews article:nth-child(1) canvas');
@@ -416,7 +477,8 @@ async function auditStampEffects(cdp) {
       context.fillStyle = '#80aaa5';
       context.fillText(${JSON.stringify(diagnostic.split('\\n').slice(1, 3).join(' · '))}, x + 12, y + 137);
       return true;
-    })()`);
+    })()`,
+    );
     results.push({
       ...effect,
       parameterChangedOutput: changedHash !== defaultHash,
@@ -428,7 +490,9 @@ async function auditStampEffects(cdp) {
 }
 
 async function canvasHash(cdp, selector) {
-  return evaluate(cdp, `(() => {
+  return evaluate(
+    cdp,
+    `(() => {
     const canvas = document.querySelector(${JSON.stringify(selector)});
     const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
     let hash = 2166136261 >>> 0;
@@ -439,11 +503,14 @@ async function canvasHash(cdp, selector) {
       hash = Math.imul(hash ^ data[index + 3], 16777619) >>> 0;
     }
     return hash;
-  })()`);
+  })()`,
+  );
 }
 
 async function previewDifference(cdp) {
-  return evaluate(cdp, `(() => {
+  return evaluate(
+    cdp,
+    `(() => {
     const canvases = [...document.querySelectorAll('.image-brush-previews canvas')];
     const original = canvases[0].getContext('2d').getImageData(0, 0, canvases[0].width, canvases[0].height).data;
     const processed = canvases[1].getContext('2d').getImageData(0, 0, canvases[1].width, canvases[1].height).data;
@@ -458,17 +525,21 @@ async function previewDifference(cdp) {
       total += delta;
     }
     return { changed, total, percent: changed / (original.length / 4) * 100 };
-  })()`);
+  })()`,
+  );
 }
 
 async function stagePoints(cdp, row = 0.5) {
-  return evaluate(cdp, `(() => {
+  return evaluate(
+    cdp,
+    `(() => {
     const rect = document.querySelector('.canvas-stage').getBoundingClientRect();
     return {
       start: { x: rect.left + rect.width * .16, y: rect.top + rect.height * ${row} },
       end: { x: rect.left + rect.width * .82, y: rect.top + rect.height * ${row} }
     };
-  })()`);
+  })()`,
+  );
 }
 
 async function drawMeasuredStroke(cdp, events, intervalMs, row) {
@@ -476,7 +547,9 @@ async function drawMeasuredStroke(cdp, events, intervalMs, row) {
   const points = await stagePoints(cdp, row);
   const beforeHash = await canvasHash(cdp, '.work-canvas');
   const overlayBeforeHash = await canvasHash(cdp, '.image-brush-overlay-canvas');
-  await evaluate(cdp, `(() => {
+  await evaluate(
+    cdp,
+    `(() => {
     const metrics = window.__imageBrushBaseline;
     metrics.strokeStart = performance.now();
     metrics.domBefore = metrics.domMutations;
@@ -486,13 +559,22 @@ async function drawMeasuredStroke(cdp, events, intervalMs, row) {
     metrics.rafGaps = [];
     metrics.longTasks = [];
     return true;
-  })()`);
+  })()`,
+  );
   const inputStarted = performance.now();
   await cdp.send('Input.dispatchMouseEvent', {
-    type: 'mouseMoved', x: points.start.x, y: points.start.y, button: 'none',
+    type: 'mouseMoved',
+    x: points.start.x,
+    y: points.start.y,
+    button: 'none',
   });
   await cdp.send('Input.dispatchMouseEvent', {
-    type: 'mousePressed', x: points.start.x, y: points.start.y, button: 'left', buttons: 1, clickCount: 1,
+    type: 'mousePressed',
+    x: points.start.x,
+    y: points.start.y,
+    button: 'left',
+    buttons: 1,
+    clickCount: 1,
   });
   let overlayMidHash = 0;
   let workMidHash = 0;
@@ -515,16 +597,30 @@ async function drawMeasuredStroke(cdp, events, intervalMs, row) {
   const downHash = await canvasHash(cdp, '.work-canvas');
   const releasedAt = performance.now();
   await cdp.send('Input.dispatchMouseEvent', {
-    type: 'mouseReleased', x: points.end.x, y: points.end.y, button: 'left', buttons: 0, clickCount: 1,
+    type: 'mouseReleased',
+    x: points.end.x,
+    y: points.end.y,
+    button: 'left',
+    buttons: 0,
+    clickCount: 1,
   });
   try {
-    await waitFor(async () => {
-      const hash = await canvasHash(cdp, '.work-canvas');
-      const busy = await evaluate(cdp, `Boolean(document.querySelector('.image-brush-progress'))`);
-      return hash !== beforeHash && !busy ? hash : null;
-    }, 15000, 25);
+    await waitFor(
+      async () => {
+        const hash = await canvasHash(cdp, '.work-canvas');
+        const busy = await evaluate(
+          cdp,
+          `Boolean(document.querySelector('.image-brush-progress'))`,
+        );
+        return hash !== beforeHash && !busy ? hash : null;
+      },
+      15000,
+      25,
+    );
   } catch (error) {
-    const state = await evaluate(cdp, `({
+    const state = await evaluate(
+      cdp,
+      `({
       notice: document.querySelector('.statusbar')?.innerText ?? '',
       progress: document.querySelector('.image-brush-progress')?.innerText ?? '',
       workerPost: window.__imageBrushBaseline.workerPosts.at(-1),
@@ -533,16 +629,22 @@ async function drawMeasuredStroke(cdp, events, intervalMs, row) {
       activeTab: document.querySelector('.inspector-tabs button.active')?.innerText,
       stagePointerEvents: getComputedStyle(document.querySelector('.canvas-stage')).pointerEvents,
       helpMode: document.body.classList.contains('help-mode-active')
-    })`);
+    })`,
+    );
     const failureScreenshot = await cdp.send('Page.captureScreenshot', {
       format: 'png',
       captureBeyondViewport: false,
     });
-    writeFileSync(join(artifactDir, 'acceptance-failure.png'), Buffer.from(failureScreenshot.data, 'base64'));
+    writeFileSync(
+      join(artifactDir, 'acceptance-failure.png'),
+      Buffer.from(failureScreenshot.data, 'base64'),
+    );
     throw new Error(`${error.message} State: ${JSON.stringify(state)}`);
   }
   const committedAt = performance.now();
-  const changedPixels = await evaluate(cdp, `(() => {
+  const changedPixels = await evaluate(
+    cdp,
+    `(() => {
     const canvas = document.querySelector('.work-canvas');
     const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
     if (!window.__imageBrushBaseline.lastCommitted) {
@@ -557,8 +659,11 @@ async function drawMeasuredStroke(cdp, events, intervalMs, row) {
     }
     window.__imageBrushBaseline.lastCommitted = data.slice();
     return changed;
-  })()`);
-  const metrics = await evaluate(cdp, `(() => ({
+  })()`,
+  );
+  const metrics = await evaluate(
+    cdp,
+    `(() => ({
     pointerEvents: window.__imageBrushBaseline.pointerEvents,
     pointerDuration: window.__imageBrushBaseline.pointerEndedAt - window.__imageBrushBaseline.pointerStartedAt,
     domMutations: window.__imageBrushBaseline.domMutations - window.__imageBrushBaseline.domBefore,
@@ -566,7 +671,8 @@ async function drawMeasuredStroke(cdp, events, intervalMs, row) {
     longTasks: window.__imageBrushBaseline.longTasks.slice(-30),
     lastWorkerPost: window.__imageBrushBaseline.workerPosts.at(-1),
     lastWorkerResult: window.__imageBrushBaseline.workerResults.at(-1)
-  }))()`);
+  }))()`,
+  );
   return {
     inputDispatchMs: inputEnded - inputStarted,
     pointerUpCommitMs: committedAt - releasedAt,
@@ -580,16 +686,40 @@ async function drawMeasuredStroke(cdp, events, intervalMs, row) {
 }
 
 async function runPerformanceMatrix(cdp) {
-  await evaluate(cdp, `(() => {
+  await evaluate(
+    cdp,
+    `(() => {
     if (!document.querySelector('.image-brush-performance > div')) {
       document.querySelector('.image-brush-performance > button')?.click();
     }
     return true;
-  })()`);
+  })()`,
+  );
   const cases = [
-    { size: 1000, tip: 96, spacing: 8, mode: 'Fixed Glitch', stage: 'Process Each Stamp', events: 90 },
-    { size: 2000, tip: 128, spacing: 9, mode: 'Per Stamp', stage: 'Process Each Stamp', events: 140 },
-    { size: 4000, tip: 128, spacing: 15, mode: 'Evolving', stage: 'Process Each Stamp', events: 180 },
+    {
+      size: 1000,
+      tip: 96,
+      spacing: 8,
+      mode: 'Fixed Glitch',
+      stage: 'Process Each Stamp',
+      events: 90,
+    },
+    {
+      size: 2000,
+      tip: 128,
+      spacing: 9,
+      mode: 'Per Stamp',
+      stage: 'Process Each Stamp',
+      events: 140,
+    },
+    {
+      size: 4000,
+      tip: 128,
+      spacing: 15,
+      mode: 'Evolving',
+      stage: 'Process Each Stamp',
+      events: 180,
+    },
   ];
   const results = [];
   for (const test of cases) {
@@ -603,8 +733,35 @@ async function runPerformanceMatrix(cdp) {
     if (test.mode === 'Per Stamp') await setRangeByLabel(cdp, 'Variant pool', 8);
     await delay(250);
     const metrics = await drawMeasuredStroke(cdp, test.events, 1, 0.5);
-    const panel = await evaluate(cdp, `document.querySelector('.image-brush-performance > div')?.innerText ?? ''`);
+    const panel = await evaluate(
+      cdp,
+      `document.querySelector('.image-brush-performance > div')?.innerText ?? ''`,
+    );
     results.push({ ...test, ...metrics, panel });
+  }
+  return results;
+}
+
+async function runCodecPerformanceMatrix(cdp) {
+  const cases = [
+    { size: 1000, tip: 96, spacing: 8, events: 90, expectedStamps: 100 },
+    { size: 2000, tip: 128, spacing: 9, events: 140, expectedStamps: 200 },
+  ];
+  const results = [];
+  for (const test of cases) {
+    await loadTestDocument(cdp, test.size);
+    await setPreset(cdp, 'Codec Damage Trail');
+    await setSelect(cdp, 'Unit', 'Pixels');
+    await setRangeByLabel(cdp, 'Size', test.tip);
+    await setRangeByLabel(cdp, 'Spacing', test.spacing);
+    await delay(300);
+    const metrics = await drawMeasuredStroke(cdp, test.events, 1, 0.5);
+    results.push({
+      ...test,
+      ...metrics,
+      renderedStamps: metrics.lastWorkerResult?.stamps ?? null,
+      preset: 'Codec Damage Trail',
+    });
   }
   return results;
 }
@@ -612,7 +769,9 @@ async function runPerformanceMatrix(cdp) {
 async function runCancellationCheck(cdp) {
   const points = await stagePoints(cdp, 0.76);
   const before = await canvasHash(cdp, '.work-canvas');
-  await evaluate(cdp, `(() => {
+  await evaluate(
+    cdp,
+    `(() => {
     const stage = document.querySelector('.canvas-stage');
     stage.setPointerCapture = () => {};
     const send = (type, x, y, buttons) => stage.dispatchEvent(new PointerEvent(type, {
@@ -636,7 +795,8 @@ async function runCancellationCheck(cdp) {
     }
     send('pointerup', end.x, end.y, 0);
     return true;
-  })()`);
+  })()`,
+  );
   await waitExpression(cdp, `Boolean(document.querySelector('.image-brush-progress'))`, 5000);
   const started = performance.now();
   await evaluate(cdp, `document.querySelector('.image-brush-progress button')?.click()`);
@@ -646,22 +806,29 @@ async function runCancellationCheck(cdp) {
   return {
     cancelMs,
     documentUnchanged: after === before,
-    notice: await evaluate(cdp, `document.querySelector('.statusbar')?.innerText.split('\\n').at(0) ?? ''`),
+    notice: await evaluate(
+      cdp,
+      `document.querySelector('.statusbar')?.innerText.split('\\n').at(0) ?? ''`,
+    ),
   };
 }
 
 async function run() {
-  const profile = mkdtempSync(join(tmpdir(), 'hex-redactor-image-brush-acceptance-'));
+  const profile = mkdtempSync(join(tmpdir(), 'imgfuck-image-brush-acceptance-'));
   const port = 9444;
-  const edge = spawn(edgePath, [
-    '--no-first-run',
-    '--no-default-browser-check',
-    `--remote-debugging-port=${port}`,
-    `--user-data-dir=${profile}`,
-    '--window-size=1600,1000',
-    '--new-window',
-    'about:blank',
-  ], { stdio: 'ignore', windowsHide: false });
+  const edge = spawn(
+    edgePath,
+    [
+      '--no-first-run',
+      '--no-default-browser-check',
+      `--remote-debugging-port=${port}`,
+      `--user-data-dir=${profile}`,
+      '--window-size=1600,1000',
+      '--new-window',
+      'about:blank',
+    ],
+    { stdio: 'ignore', windowsHide: false },
+  );
   try {
     const page = await waitForEndpoint(port);
     const cdp = new Cdp(page.webSocketDebuggerUrl);
@@ -676,43 +843,90 @@ async function run() {
     ]);
     await cdp.send('Page.navigate', { url: appUrl });
     await cdp.send('Page.bringToFront');
-    await waitExpression(cdp, `document.querySelector('.brand')?.textContent.includes('HEX REDACTOR')`);
-    await evaluate(cdp, `(() => {
+    await waitExpression(
+      cdp,
+      `Boolean(document.querySelector('.brand svg[aria-label="imgfuck"]'))`,
+    );
+    await evaluate(
+      cdp,
+      `(() => {
       [...document.querySelectorAll('.inspector-tabs button')].find((button) => button.textContent.includes('Image Brush')).click();
       return true;
-    })()`);
+    })()`,
+    );
     await waitExpression(cdp, `Boolean(document.querySelector('.image-brush-lab'))`);
-    await evaluate(cdp, `(() => {
+    await evaluate(
+      cdp,
+      `(() => {
       [...document.querySelectorAll('.image-brush-interface-level button')]
         .find((button) => button.textContent.trim() === 'ADVANCED')?.click();
       return true;
-    })()`);
+    })()`,
+    );
     await installMetrics(cdp);
     await addBrushAsset(cdp, testIconBase64());
     await setPreset(cdp, 'Glitched Repeat');
     await delay(1200);
+    if (codecOnly) {
+      const codecMatrix = await runCodecPerformanceMatrix(cdp);
+      const screenshot = await cdp.send('Page.captureScreenshot', {
+        format: 'png',
+        captureBeyondViewport: false,
+      });
+      const report = {
+        browser: 'Visible Edge Chromium',
+        appUrl,
+        preset: 'Codec Damage Trail',
+        codecMatrix,
+        passed: codecMatrix.every(
+          (entry) =>
+            entry.overlayChangedAtMidStroke &&
+            entry.pointerUpCommitMs < 15_000 &&
+            entry.changedPixels > 0,
+        ),
+      };
+      writeFileSync(
+        join(artifactDir, 'codec-visible-edge.png'),
+        Buffer.from(screenshot.data, 'base64'),
+      );
+      writeFileSync(join(artifactDir, 'codec-visible-edge.json'), JSON.stringify(report, null, 2));
+      console.log(JSON.stringify(report, null, 2));
+      cdp.close();
+      await delay(500);
+      return;
+    }
     await setSelect(cdp, 'FX stage', 'Process Each Stamp');
     await delay(250);
     const previewBefore = await previewDifference(cdp);
     const sliderStarted = performance.now();
     await setFirstFxAmount(cdp, 0.92);
     const sliderDispatchMs = performance.now() - sliderStarted;
-    const previewHashBefore = await canvasHash(cdp, '.image-brush-previews article:nth-child(2) canvas');
+    const previewHashBefore = await canvasHash(
+      cdp,
+      '.image-brush-previews article:nth-child(2) canvas',
+    );
     const previewUpdateStarted = performance.now();
-    const previewHashAfter = await waitFor(async () => {
-      const hash = await canvasHash(cdp, '.image-brush-previews article:nth-child(2) canvas');
-      return hash !== previewHashBefore ? hash : null;
-    }, 30000, 20).catch(() => previewHashBefore);
+    const previewHashAfter = await waitFor(
+      async () => {
+        const hash = await canvasHash(cdp, '.image-brush-previews article:nth-child(2) canvas');
+        return hash !== previewHashBefore ? hash : null;
+      },
+      30000,
+      20,
+    ).catch(() => previewHashBefore);
     const previewUpdateMs = performance.now() - previewUpdateStarted;
     const previewAfter = await previewDifference(cdp);
-    const previewDiagnostics = await evaluate(cdp, `document.querySelector('.image-brush-diagnostics')?.innerText ?? ''`);
+    const previewDiagnostics = await evaluate(
+      cdp,
+      `document.querySelector('.image-brush-diagnostics')?.innerText ?? ''`,
+    );
     await setSelect(cdp, 'Mutation', 'Fixed Glitch');
     await setSelect(cdp, 'FX stage', 'Process Brush Before Stamp');
     const effectAudit = skipEffectAudit
       ? {
           results: JSON.parse(
             await import('node:fs').then(({ readFileSync }) =>
-              readFileSync(join(artifactDir, 'stamp-fx-report.json'), 'utf8')
+              readFileSync(join(artifactDir, 'stamp-fx-report.json'), 'utf8'),
             ),
           ),
           png: '',
@@ -751,11 +965,14 @@ async function run() {
       return;
     }
 
-    await evaluate(cdp, `(() => {
+    await evaluate(
+      cdp,
+      `(() => {
       const canvas = document.querySelector('.work-canvas');
       window.__imageBrushBaseline.lastCommitted = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data.slice();
       return true;
-    })()`);
+    })()`,
+    );
     const modes = [
       ['Fixed Glitch', 0.28],
       ['Per Stamp', 0.43],
@@ -772,30 +989,48 @@ async function run() {
     const performanceMatrix = await runPerformanceMatrix(cdp);
     const cancellation = await runCancellationCheck(cdp);
 
-    await evaluate(cdp, `(() => {
+    await evaluate(
+      cdp,
+      `(() => {
       if (!document.querySelector('.image-brush-performance > div')) {
         document.querySelector('.image-brush-performance > button')?.click();
       }
       return true;
-    })()`);
-    const performanceText = await evaluate(cdp, `document.querySelector('.image-brush-performance > div')?.innerText ?? ''`);
+    })()`,
+    );
+    const performanceText = await evaluate(
+      cdp,
+      `document.querySelector('.image-brush-performance > div')?.innerText ?? ''`,
+    );
     const screenshot = await cdp.send('Page.captureScreenshot', {
       format: 'png',
       captureBeyondViewport: false,
     });
-    writeFileSync(join(artifactDir, 'after-visible-edge.png'), Buffer.from(screenshot.data, 'base64'));
-    await evaluate(cdp, `document.querySelector('button[aria-label="Open contextual help"]')?.click()`);
+    writeFileSync(
+      join(artifactDir, 'after-visible-edge.png'),
+      Buffer.from(screenshot.data, 'base64'),
+    );
+    await evaluate(
+      cdp,
+      `document.querySelector('button[aria-label="Open contextual help"]')?.click()`,
+    );
     await delay(200);
     const helpScreenshot = await cdp.send('Page.captureScreenshot', {
       format: 'png',
       captureBeyondViewport: false,
     });
-    writeFileSync(join(artifactDir, 'help-visible-edge.png'), Buffer.from(helpScreenshot.data, 'base64'));
-    const helpState = await evaluate(cdp, `({
+    writeFileSync(
+      join(artifactDir, 'help-visible-edge.png'),
+      Buffer.from(helpScreenshot.data, 'base64'),
+    );
+    const helpState = await evaluate(
+      cdp,
+      `({
       panel: Boolean(document.querySelector('.help-panel')),
       search: Boolean(document.querySelector('.help-search input')),
       registeredButtons: document.querySelectorAll('.help-button[data-help-id]').length
-    })`);
+    })`,
+    );
     const report = {
       browser: 'Visible Edge Chromium',
       appUrl,
@@ -819,9 +1054,12 @@ async function run() {
         interactiveTrail: 'Cached variants are painted into one overlay during pointer movement.',
         fullDocumentCopiesPerStroke: 0,
         fullDocumentLayersPerStroke: 0,
-        workerLifecycle: 'One cancellable final Worker per stroke; only cropped document source and required brush assets are transferred.',
-        progressUpdates: 'Progress is percent/time throttled instead of one React update per stamp.',
-        perStampVariants: 'Bounded deterministic pool; Fixed prepares and processes one reusable tip.',
+        workerLifecycle:
+          'One cancellable final Worker per stroke; only cropped document source and required brush assets are transferred.',
+        progressUpdates:
+          'Progress is percent/time throttled instead of one React update per stamp.',
+        perStampVariants:
+          'Bounded deterministic pool; Fixed prepares and processes one reusable tip.',
       },
     };
     writeFileSync(join(artifactDir, 'after-report.json'), JSON.stringify(report, null, 2));

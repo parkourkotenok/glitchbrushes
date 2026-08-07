@@ -1,0 +1,56 @@
+:root {
+  color-scheme: dark;
+  font-family: 'Trebuchet MS', 'Arial Rounded MT Bold', Arial, sans-serif;
+  --bg: #101225;
+  --panel: #c9cad9;
+  --panel-raised: #dedee8;
+  --panel-soft: #b9bbcd;
+  --line: #8b8da5;
+  --line-strong: #62657e;
+  --text: #20223b;
+  --muted: #5d6078;
+  --dim: #77798d;
+  --accent: #596cff;
+  --accent-strong: #314ee5;
+  --accent-faint: rgba(89, 108, 255, 0.16);
+  --range-track: #a5a7b8;
+  --range-track-border: #73768e;
+  --danger: #e84959;
+  --success: #18a97c;
+
+  --shell: #171a31;
+  --shell-raised: #242843;
+  --shell-deep: #0d0f21;
+  --shell-line: #454b69;
+  --shell-text: #f1efe7;
+  --shell-muted: #aeb2c8;
+  --plastic: #d3d4e1;
+  --plastic-hi: #edecf2;
+  --plastic-low: #a7a9bd;
+  --well: #f1ede0;
+  --well-low: #d6d1c4;
+  --ink: #20223b;
+  --lcd: #b9efca;
+  --lcd-ink: #173d32;
+  --tool-accent: #596cff;
+  --tool-accent-rgb: 89, 108, 255;
+  --effect: #596cff;
+  --retouch: #17ae83;
+  --mosh: #8757ed;
+  --image-brush: #ec793d;
+  --raw: #df4457;
+  --yellow: #f1c94d;
+  --technical-font: 'Lucida Console', 'Courier New', monospace;
+
+  background: var(--shell-deep);
+  color: var(--text);
+}
+
+::selection {
+  background: rgba(var(--tool-accent-rgb), 0.28);
+  color: var(--ink);
+}
+
+* {
+  scrollbar-color: #777a92 #b7b9ca;
+}

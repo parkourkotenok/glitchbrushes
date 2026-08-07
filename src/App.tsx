@@ -11,6 +11,7 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from 'react';
 import { FileImage } from 'lucide-react';
+import { PRODUCT_NAME } from './brand/brand';
 import { stampSoftBrush } from './canvas/brushMask';
 // Heavy interactive tabs are loaded lazily so the initial bundle stays small
 // and the heavy worker-driven panels are code-split into their own chunks.
@@ -3196,7 +3197,7 @@ export function App() {
     const current = docRef.current;
     const project = {
       version: 2,
-      app: 'HEX REDACTOR',
+      app: PRODUCT_NAME,
       image: {
         fileName: current.fileName,
         width: current.width,
@@ -3222,7 +3223,7 @@ export function App() {
     };
     triggerDownload(
       new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' }),
-      `${exportName || 'hex-redactor'}.hexproject.json`,
+      `${exportName || PRODUCT_NAME}.imgfuck.json`,
     );
     const embeddedBytes = imageBrushLibrary.reduce(
       (total, asset) => total + asset.originalPixels.byteLength,
@@ -3348,7 +3349,7 @@ export function App() {
   const exportPresets = () => {
     triggerDownload(
       new Blob([JSON.stringify(customPresets, null, 2)], { type: 'application/json' }),
-      'hex-redactor-presets.json',
+      'imgfuck-presets.json',
     );
   };
 
@@ -3694,7 +3695,7 @@ export function App() {
           onCanvasWheel={wheelCanvas}
         />
 
-        <aside className="inspector">
+        <aside className="inspector" data-active-panel={activePanel}>
           <InspectorTabs
             activePanel={activePanel}
             onSelect={(panel) => {

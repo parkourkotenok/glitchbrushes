@@ -22,7 +22,8 @@ function migrateImageBrushRecipe(
   return recipe === 'clean' || recipe === 'mixed' ? recipe : migrateImageBrushFxId(recipe);
 }
 
-const EMBEDDED_RGBA_TYPE = 'data:application/x-hex-redactor-rgba';
+const EMBEDDED_RGBA_TYPE = 'data:application/x-imgfuck-rgba';
+const LEGACY_EMBEDDED_RGBA_TYPE = 'data:application/x-hex-redactor-rgba';
 export const IMAGE_BRUSH_FILE_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
 
 function bytesToBase64(bytes: Uint8ClampedArray): string {
@@ -58,7 +59,8 @@ export function decodeEmbeddedRgbaDataUrl(dataUrl: string): {
   width: number;
   height: number;
 } {
-  if (!dataUrl.startsWith(EMBEDDED_RGBA_TYPE)) throw new Error('Unsupported embedded brush data.');
+  if (!dataUrl.startsWith(EMBEDDED_RGBA_TYPE) && !dataUrl.startsWith(LEGACY_EMBEDDED_RGBA_TYPE))
+    throw new Error('Unsupported embedded brush data.');
   const match = dataUrl.match(/;w=(\d+);h=(\d+);base64,(.+)$/);
   if (!match) throw new Error('Malformed embedded brush data.');
   const width = Number(match[1]);

@@ -1,0 +1,92 @@
+.app {
+  grid-template-rows: 58px minmax(0, 1fr) 30px;
+}
+
+.topbar {
+  grid-template-columns: 250px minmax(170px, 1fr) auto;
+}
+
+.brand {
+  padding: 0 14px;
+}
+
+.workspace {
+  grid-template-columns: 64px minmax(0, 1fr) 420px;
+}
+
+.tool-rail {
+  gap: 6px;
+  padding: 10px 0;
+}
+
+.tool-rail button {
+  width: 44px;
+  height: 44px;
+}
+
+.canvas-column {
+  grid-template-rows: 44px minmax(0, 1fr);
+}
+
+.canvas-toolbar {
+  padding-inline: 10px;
+}
+
+.inspector {
+  grid-template-rows: 50px minmax(0, 1fr);
+}
+
+.inspector-tabs button {
+  flex-direction: column;
+  gap: 1px;
+  height: 48px;
+  padding-inline: 2px;
+  font-size: 7px;
+  line-height: 1;
+}
+
+.panel-section-content {
+  padding: 12px 13px 15px;
+}
+
+.help-panel {
+  top: 68px;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+}
+
+.help-search {
+  background: var(--well);
+  color: #64687d;
+}
+
+.help-results > button {
+  border-color: #898b9f;
+  background: linear-gradient(#f0eef2, #d6d6e0);
+  color: var(--ink);
+}
+
+.help-results strong {
+  color: #30334c;
+}
+
+.help-results small {
+  color: #676a7d;
+}
+
+@media (max-width: 1240px) {
+  .topbar {
+    grid-template-columns: 210px minmax(120px, 1fr) auto;
+  }
+
+  .brand-logo {
+    width: 118px;
+  }
+
+  .workspace {
+    grid-template-columns: 58px minmax(0, 1fr) 390px;
+  }
+
+  .action-label {
+    display: none;
+  }
+}

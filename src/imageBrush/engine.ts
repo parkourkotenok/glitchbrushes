@@ -56,6 +56,8 @@ interface StampVariant extends PreparedTip {
 interface RenderOptions {
   shouldCancel?: () => boolean;
   onProgress?: (progress: Omit<ImageBrushProgress, 'jobId'>) => void;
+  collectPreviewVariants?: boolean;
+  maxPreviewVariants?: number;
 }
 
 interface RenderTimings {
@@ -1111,6 +1113,8 @@ export function processImageBrushStroke(
   const cleanCache = new Map<string, PreparedTip>();
   const fixedCache = new Map<string, PreparedTip>();
   const perStampCache = new Map<string, PreparedTip[]>();
+  const previewVariants: PreparedTip[] = [];
+  const previewVariantBuffers = new Set<ArrayBuffer>();
   let previous: PreparedTip | null = null;
   const copies = Math.max(1, Math.round(request.settings.stampsPerStep));
   const totalPlacements = Math.min(
@@ -1303,6 +1307,14 @@ export function processImageBrushStroke(
       perStampCache,
       timings,
     );
+    if (
+      options.collectPreviewVariants &&
+      !previewVariantBuffers.has(variant.pixels.buffer) &&
+      previewVariants.length < Math.max(1, options.maxPreviewVariants ?? 8)
+    ) {
+      previewVariantBuffers.add(variant.pixels.buffer);
+      previewVariants.push(variant);
+    }
     if (request.settings.mutationMode === 'evolving') {
       previous = variant;
     }
@@ -1381,6 +1393,14 @@ export function processImageBrushStroke(
       `${request.seed}:${request.strokeId}:post`,
       { direction: request.stamps.at(-1)?.direction ?? { x: 1, y: 0 } },
     );
+    if (
+      options.collectPreviewVariants &&
+      !previewVariantBuffers.has(processed.pixels.buffer) &&
+      previewVariants.length < Math.max(1, options.maxPreviewVariants ?? 8)
+    ) {
+      previewVariantBuffers.add(processed.pixels.buffer);
+      previewVariants.push(processed);
+    }
     timings.fxProcessingMs += clockNow() - fxStarted;
     layer.set(processed.pixels.subarray(0, layer.length));
   }
@@ -1427,5 +1447,12 @@ export function processImageBrushStroke(
       ? request.evolutionOffset + renderedStamps
       : 0,
     metrics,
+    previewVariants: options.collectPreviewVariants
+      ? previewVariants.map((variant) => ({
+          pixels: variant.pixels.slice(),
+          width: variant.width,
+          height: variant.height,
+        }))
+      : undefined,
   };
 }

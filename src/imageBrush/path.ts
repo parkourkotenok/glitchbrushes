@@ -117,7 +117,9 @@ export function rotationForStamp(
   randomRotation: number,
   rotationJitter: number,
 ): number {
-  const tangent = (Math.atan2(direction.y, direction.x) * 180) / Math.PI;
+  const rawTangent = (Math.atan2(direction.y, direction.x) * 180) / Math.PI;
+  const tangent =
+    rawTangent >= 90 ? rawTangent - 180 : rawTangent < -90 ? rawTangent + 180 : rawTangent;
   let rotation = baseAngle;
   if (mode === 'follow') rotation += tangent;
   else if (mode === 'perpendicular') rotation += tangent + 90;

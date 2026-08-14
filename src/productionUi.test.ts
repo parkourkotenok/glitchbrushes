@@ -3,7 +3,12 @@ import { resolveControlHelp } from './help/registry';
 import { resolveEditorShortcut } from './utils/shortcuts';
 import appSource from './App.tsx?raw';
 import algorithmControlsSource from './components/AlgorithmControls.tsx?raw';
+import canvasWorkspaceSource from './components/CanvasWorkspace.tsx?raw';
+import effectPanelSource from './components/EffectPanel.tsx?raw';
 import fileCorruptionSource from './components/FileCorruptionPanel.tsx?raw';
+import retouchPanelSource from './components/RetouchPanel.tsx?raw';
+import statusBarSource from './components/StatusBar.tsx?raw';
+import topBarSource from './components/TopBar.tsx?raw';
 import rawMutationModuleSource from './raw/mutateBytes.ts?raw';
 import rawWorkerSource from './workers/rawMutation.worker.ts?raw';
 
@@ -68,6 +73,21 @@ describe('production editor cleanup', () => {
     expect(resolveEditorShortcut({ code: 'KeyJ' })).toBe('sharpen');
     expect(resolveEditorShortcut({ code: 'KeyE' })).toBe('restore');
     expect(resolveEditorShortcut({ code: 'KeyX' })).toBe('eraser');
+  });
+
+  it('does not mount the expensive Retouch tool preview', () => {
+    expect(retouchPanelSource).not.toContain('RetouchPreviewStage');
+    expect(retouchPanelSource).not.toContain('REAL TOOL PREVIEW');
+  });
+
+  it('keeps multi-megabyte document pixel buffers out of ordinary React UI props', () => {
+    expect(appSource).toContain('doc={documentMeta}');
+    expect(appSource).toContain('documentWidth={doc.width}');
+    expect(appSource).not.toContain('original={doc.original}');
+    expect(topBarSource).not.toContain('EditorDocument');
+    expect(canvasWorkspaceSource).not.toContain('EditorDocument');
+    expect(statusBarSource).not.toContain('EditorDocument');
+    expect(effectPanelSource).not.toContain('Uint8ClampedArray');
   });
 
   it('exposes six explicit Clone Corruption modes and factual source alignment', () => {

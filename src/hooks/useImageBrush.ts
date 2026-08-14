@@ -48,6 +48,7 @@ export function useImageBrush() {
   const [imageBrushVariationNonce, setImageBrushVariationNonce] = useState(0);
   const [imageBrushLockSeed, setImageBrushLockSeed] = useState(false);
   const [imageBrushPresetId, setImageBrushPresetId] = useState('clean-repeat');
+  const [imageBrushStrokeNonce, setImageBrushStrokeNonce] = useState(0);
   const [imageBrushLibrary, setImageBrushLibrary] = useState<ImageBrushAsset[]>([]);
   const [activeImageBrushId, setActiveImageBrushId] = useState<string | null>(null);
   const [processedBrushPreview, setProcessedBrushPreview] =
@@ -110,6 +111,8 @@ export function useImageBrush() {
     setImageBrushLockSeed,
     imageBrushPresetId,
     setImageBrushPresetId,
+    imageBrushStrokeNonce,
+    setImageBrushStrokeNonce,
     imageBrushLibrary,
     setImageBrushLibrary,
     activeImageBrushId,

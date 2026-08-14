@@ -36,7 +36,10 @@ export interface StrokeState {
   pressure: number;
   movement: Point;
   path: Array<Point & { pressure: number }>;
-  layerBefore: LayerStackSnapshot;
+  layerBefore: LayerStackSnapshot | null;
+  pendingRetouchSamples: Array<{ point: Point; pressure: number }>;
+  retouchRaf: number | null;
+  retouchEnded: boolean;
 }
 
 export interface PersistedBrushMask {

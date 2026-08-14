@@ -1,4 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import {
+  fitImportedDocument,
+  MAX_DOCUMENT_PIXELS,
+  readEncodedImageDimensions,
+} from './documentImport';
 import { stampSoftBrush } from './canvas/brushMask';
 import { algorithms, defaultAlgorithmSettings, flipBits, swapChannels } from './glitchAlgorithms';
 import { PatchHistory, restoreOriginalRange } from './history/PatchHistory';
@@ -112,6 +117,37 @@ describe('patch history', () => {
   });
 });
 
+describe('responsive document import sizing', () => {
+  it('keeps small images unchanged', () => {
+    expect(fitImportedDocument(1280, 720)).toMatchObject({
+      width: 1280,
+      height: 720,
+      resized: false,
+    });
+  });
+
+  it('bounds large photos by both dimension and pixel budget', () => {
+    const fitted = fitImportedDocument(8064, 6048);
+    expect(fitted.resized).toBe(true);
+    expect(Math.max(fitted.width, fitted.height)).toBeLessThanOrEqual(1920);
+    expect(fitted.width * fitted.height).toBeLessThanOrEqual(MAX_DOCUMENT_PIXELS);
+    expect(fitted.sourceWidth).toBe(8064);
+    expect(fitted.sourceHeight).toBe(6048);
+  });
+
+  it('reads PNG dimensions before decoding the full bitmap', () => {
+    const pngHeader = new Uint8Array(24);
+    pngHeader.set([0x89, 0x50, 0x4e, 0x47], 0);
+    const view = new DataView(pngHeader.buffer);
+    view.setUint32(16, 4032);
+    view.setUint32(20, 3024);
+    expect(readEncodedImageDimensions(pngHeader.buffer, 'image/png')).toEqual({
+      width: 4032,
+      height: 3024,
+    });
+  });
+});
+
 describe('soft brush mask', () => {
   it('has a stronger center and soft edge', () => {
     const mask = new Float32Array(11 * 11);
@@ -130,6 +166,25 @@ describe('soft brush mask', () => {
     expect(mask[5 * 11 + 5]).toBeGreaterThan(mask[5 * 11 + 1]!);
     expect(mask[5 * 11 + 1]).toBeGreaterThan(0);
     expect(mask[0]).toBe(0);
+  });
+
+  it('can skip per-pixel bookkeeping while preserving the mask', () => {
+    const mask = new Float32Array(21 * 21);
+    const result = stampSoftBrush(
+      mask,
+      21,
+      21,
+      { x: 10.5, y: 10.5 },
+      8,
+      0.5,
+      1,
+      1,
+      createSeededRandom('retouch-mask'),
+      true,
+      false,
+    );
+    expect(result.touched).toHaveLength(0);
+    expect(mask[10 * 21 + 10]).toBeGreaterThan(0);
   });
 });
 

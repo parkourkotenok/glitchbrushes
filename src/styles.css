@@ -538,7 +538,8 @@ select {
     inset 0 0 0 1px rgba(0, 0, 0, 0.75),
     0 0 0 1px rgba(0, 0, 0, 0.7);
   pointer-events: none;
-  will-change: transform, width, height;
+  contain: layout paint;
+  will-change: transform;
 }
 
 .pixel-highlight {
@@ -4409,6 +4410,62 @@ kbd {
   font-size: 8px;
 }
 
+.image-brush-live-preview-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 126px;
+  margin: 8px;
+  overflow: hidden;
+  border: 1px solid #3b3d38;
+  background-color: #20211f;
+  background-image:
+    linear-gradient(45deg, #2b2d2a 25%, transparent 25%),
+    linear-gradient(-45deg, #2b2d2a 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #2b2d2a 75%),
+    linear-gradient(-45deg, transparent 75%, #2b2d2a 75%);
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+  background-size: 16px 16px;
+}
+
+.image-brush-live-preview-stage canvas {
+  display: block;
+  width: 100%;
+  height: 126px;
+}
+
+.image-brush-live-preview-stage > span {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  color: #777b74;
+  font-size: 8px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.image-brush-live-preview > p {
+  margin: 0 8px 4px;
+  color: #9a9d96;
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.image-brush-live-preview > small {
+  display: block;
+  margin: 0 8px 8px;
+  color: #6f8f89;
+  font:
+    7px 'IBM Plex Mono',
+    monospace;
+}
+
 .retouch-panel,
 .retouch-panel * {
   box-sizing: border-box;
@@ -4456,73 +4513,6 @@ kbd {
   border-color: #5f8d88;
   background: rgba(74, 135, 130, 0.14);
   color: #a9d1ca;
-}
-
-.retouch-preview-stage {
-  margin: 8px;
-  padding: 8px;
-  border: 1px solid #343834;
-  background: #151715;
-}
-
-.retouch-preview-stage > header {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 7px;
-  color: #b0c5bf;
-  font:
-    7px 'IBM Plex Mono',
-    monospace;
-  letter-spacing: 0.06em;
-}
-
-.retouch-preview-stage > div {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 5px;
-}
-.retouch-preview-stage figure {
-  margin: 0;
-  border: 1px solid #30332f;
-  background-color: #222;
-  background-image:
-    linear-gradient(45deg, #30302e 25%, transparent 25%),
-    linear-gradient(-45deg, #30302e 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #30302e 75%),
-    linear-gradient(-45deg, transparent 75%, #30302e 75%);
-  background-size: 12px 12px;
-  background-position:
-    0 0,
-    0 6px,
-    6px -6px,
-    -6px 0;
-}
-.retouch-preview-stage canvas {
-  display: block;
-  width: 100%;
-  height: 95px;
-  object-fit: contain;
-}
-.retouch-preview-stage figcaption {
-  padding: 3px;
-  border-top: 1px solid #30332f;
-  color: #7e948e;
-  font:
-    7px 'IBM Plex Mono',
-    monospace;
-  text-align: center;
-}
-.retouch-preview-stage p {
-  margin: 7px 0 3px;
-  color: #999c95;
-  font-size: 9px;
-  line-height: 1.4;
-}
-.retouch-preview-stage small {
-  color: #656a65;
-  font:
-    7px 'IBM Plex Mono',
-    monospace;
 }
 
 .retouch-layer-note {

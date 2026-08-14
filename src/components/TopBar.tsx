@@ -11,10 +11,14 @@ import {
   ScanLine,
   Undo2,
 } from 'lucide-react';
-import type { EditorDocument } from '../types';
-
 interface TopBarProps {
-  doc: EditorDocument;
+  doc: {
+    fileName: string;
+    width: number;
+    height: number;
+    mimeType: string;
+    dirty: boolean;
+  };
   fileInputRef: RefObject<HTMLInputElement | null>;
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onLoadDemo: () => void;

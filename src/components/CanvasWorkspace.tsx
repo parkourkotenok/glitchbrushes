@@ -2,20 +2,12 @@ import type { CSSProperties, RefObject } from 'react';
 import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
 import { Aperture, Check, X } from 'lucide-react';
 import { EffectIcon, algorithmIconIds } from '../icons/effects';
-import type {
-  AlgorithmId,
-  ApplyMode,
-  CanvasOverlayState,
-  EditorDocument,
-  MaskView,
-  Point,
-  Tool,
-} from '../types';
+import type { AlgorithmId, ApplyMode, CanvasOverlayState, MaskView, Point, Tool } from '../types';
 import type { BrushProgress } from '../brush/engine';
 import { isRetouchTool } from '../retouch/tools';
 
 interface CanvasWorkspaceProps {
-  doc: EditorDocument;
+  doc: { width: number; height: number };
   zoom: number;
   pan: Point;
   workClip: string | undefined;

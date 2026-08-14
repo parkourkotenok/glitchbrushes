@@ -3,7 +3,6 @@ import {
   Suspense,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   type ChangeEvent,
@@ -72,6 +71,7 @@ import {
   createLayerStack,
   deserializeLayerStack,
   eraseActiveLayerWithMask,
+  flattenLayerStack,
   layerMemoryBytes,
   restoreLayerStack,
   serializeLayerStack,
@@ -93,7 +93,11 @@ import {
   serializeImageBrushProject,
 } from './imageBrush/assets';
 import { cropRgbaRegion, estimateImageBrushReadBounds } from './imageBrush/bounds';
-import { imageBrushFxCacheKey, resolveImageBrushQuality } from './imageBrush/performance';
+import {
+  imageBrushFxCacheKey,
+  imageBrushLiveStampBudget,
+  resolveImageBrushQuality,
+} from './imageBrush/performance';
 import {
   appendStampPath,
   anchorPoint,
@@ -169,6 +173,74 @@ function PanelLoading() {
       Loading…
     </div>
   );
+}
+
+function decodeDocumentOffThread(file: File): Promise<{
+  width: number;
+  height: number;
+  sourceWidth: number;
+  sourceHeight: number;
+  resized: boolean;
+  original: ArrayBuffer;
+  pixels: ArrayBuffer;
+  raw: ArrayBuffer;
+  mask: ArrayBuffer;
+}> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./workers/documentDecode.worker.ts', import.meta.url), {
+      type: 'module',
+    });
+    const jobId = `document-decode-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    let settled = false;
+    const watchdog = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      worker.terminate();
+      reject(new Error('Image decoding timed out. The decoder was stopped safely.'));
+    }, 12_000);
+    const finish = (terminate: boolean) => {
+      if (settled) return false;
+      settled = true;
+      window.clearTimeout(watchdog);
+      if (terminate) worker.terminate();
+      return true;
+    };
+    worker.onerror = () => {
+      if (!finish(true)) return;
+      reject(new Error('The off-thread image decoder failed.'));
+    };
+    worker.onmessage = (
+      event: MessageEvent<
+        | {
+            jobId: string;
+            type: 'result';
+            width: number;
+            height: number;
+            sourceWidth: number;
+            sourceHeight: number;
+            resized: boolean;
+            original: ArrayBuffer;
+            pixels: ArrayBuffer;
+            raw: ArrayBuffer;
+            mask: ArrayBuffer;
+          }
+        | { jobId: string; type: 'error'; message: string }
+      >,
+    ) => {
+      if (event.data.jobId !== jobId) return;
+      if (event.data.type === 'error') {
+        if (!finish(true)) return;
+        reject(new Error(event.data.message));
+      } else {
+        // Do not synchronously terminate a Firefox Worker while adopting its transferred RGBA
+        // buffers. The Worker closes itself after postMessage; killing it here can strand the
+        // transferred ArrayBuffers and freeze the content process.
+        if (!finish(false)) return;
+        resolve(event.data);
+      }
+    };
+    worker.postMessage({ jobId, file });
+  });
 }
 
 export function App() {
@@ -353,6 +425,8 @@ export function App() {
     setImageBrushLockSeed,
     imageBrushPresetId,
     setImageBrushPresetId,
+    imageBrushStrokeNonce,
+    setImageBrushStrokeNonce,
     imageBrushLibrary,
     setImageBrushLibrary,
     activeImageBrushId,
@@ -387,6 +461,15 @@ export function App() {
   const regionDragRef = useRef<RegionDragState | null>(null);
   const spaceDownRef = useRef(false);
   const fileDropCounter = useRef(0);
+  const cursorInfoRef = useRef(cursorInfo);
+  const imageBrushGhostFrameRef = useRef<number | null>(null);
+  const imageBrushGhostPendingRef = useRef<{ point: Point; direction: Point } | null>(null);
+  const imageBrushGhostBoundsRef = useRef<Rectangle | null>(null);
+  const imageBrushOverlayHasTrailRef = useRef(false);
+  const cursorVisualFrameRef = useRef<number | null>(null);
+  const cursorVisualPointRef = useRef<Point | null>(null);
+  const cursorVisualDiameterRef = useRef(-1);
+  const renderedOriginalPixelsRef = useRef<Uint8ClampedArray | null>(null);
 
   useEffect(() => {
     setImageBrushLibrary((library) =>
@@ -400,48 +483,77 @@ export function App() {
     );
   }, [imageBrushSettings.trimThreshold, imageBrushSettings.trimTransparent]);
 
+  const imageBrushPreviewBackground = useMemo(
+    () => ({
+      ...resizeRgba(docRef.current.pixels, docRef.current.width, docRef.current.height, 320),
+      version: documentVersion,
+    }),
+    [documentVersion],
+  );
+
+  const imageBrushVisualSettingsKey = useMemo(() => {
+    const visual = { ...imageBrushSettings } as Partial<typeof imageBrushSettings>;
+    delete visual.showOutline;
+    delete visual.trimTransparent;
+    delete visual.trimThreshold;
+    delete visual.previewStroke;
+    delete visual.maxLiveStampsPerFrame;
+    return JSON.stringify(visual);
+  }, [imageBrushSettings]);
+
   const imageBrushPreviewKey = useMemo(() => {
     const active = imageBrushLibrary.find((asset) => asset.id === activeImageBrushId);
     return active
-      ? imageBrushFxCacheKey(active, imageBrushSettings, imageBrushRack, imageBrushSeed)
+      ? JSON.stringify({
+          tip: imageBrushFxCacheKey(active, imageBrushSettings, imageBrushRack, imageBrushSeed),
+          stroke: imageBrushVisualSettingsKey,
+          strokeNonce: imageBrushStrokeNonce,
+          backgroundVersion: imageBrushPreviewBackground.version,
+        })
       : 'no-image-brush';
-  }, [activeImageBrushId, imageBrushLibrary, imageBrushRack, imageBrushSeed, imageBrushSettings]);
+  }, [
+    activeImageBrushId,
+    imageBrushLibrary,
+    imageBrushRack,
+    imageBrushSeed,
+    imageBrushVisualSettingsKey,
+    imageBrushStrokeNonce,
+    imageBrushPreviewBackground.version,
+  ]);
 
   useEffect(() => {
-    const active = imageBrushLibrary.find((asset) => asset.id === activeImageBrushId);
     imageBrushPreviewWorkerRef.current?.terminate();
     imageBrushPreviewWorkerRef.current = null;
-    imageBrushGhostVariantsRef.current = [];
-    imageBrushGhostSourceRef.current = null;
+    if (activePanel !== 'image-brush') return;
+    const active = imageBrushLibrary.find((asset) => asset.id === activeImageBrushId);
     if (!active) {
       setProcessedBrushPreview(null);
+      imageBrushGhostVariantsRef.current = [];
       imageBrushGhostSourceRef.current = null;
       return;
     }
     const generation = ++imageBrushPreviewGenerationRef.current;
     const jobId = `image-brush-preview-${generation}`;
-    const worker = new Worker(new URL('./workers/imageBrushPreview.worker.ts', import.meta.url), {
-      type: 'module',
-    });
-    imageBrushPreviewWorkerRef.current = worker;
-    const acceptResult = (result: ImageBrushPreviewResult) => {
+    let worker: Worker | null = null;
+    let fullTimer: number | null = null;
+    const acceptResult = (result: ImageBrushPreviewResult, activeWorker: Worker) => {
       if (
         result.generation !== imageBrushPreviewGenerationRef.current ||
-        imageBrushPreviewWorkerRef.current !== worker
+        imageBrushPreviewWorkerRef.current !== activeWorker
       ) {
         return;
       }
       setProcessedBrushPreview(result);
-      const sources = result.variants.map((variant) => {
-        const source = document.createElement('canvas');
-        source.width = variant.width;
-        source.height = variant.height;
-        source
-          .getContext('2d')
-          ?.putImageData(new ImageData(variant.pixels, variant.width, variant.height), 0, 0);
-        return source;
-      });
       if (result.quality === 'full') {
+        const sources = result.variants.map((variant) => {
+          const source = document.createElement('canvas');
+          source.width = variant.width;
+          source.height = variant.height;
+          source
+            .getContext('2d')
+            ?.putImageData(new ImageData(variant.pixels, variant.width, variant.height), 0, 0);
+          return source;
+        });
         imageBrushGhostVariantsRef.current = sources;
         imageBrushGhostSourceRef.current = sources[0] ?? null;
       }
@@ -452,7 +564,9 @@ export function App() {
       }
     };
     const postPreview = (quality: 'draft' | 'full') => {
+      if (!worker || generation !== imageBrushPreviewGenerationRef.current) return;
       const pixels = active.pixels.slice().buffer;
+      const backgroundPixels = imageBrushPreviewBackground.pixels.slice().buffer;
       worker.postMessage(
         {
           jobId,
@@ -462,47 +576,64 @@ export function App() {
           pixels,
           width: active.width,
           height: active.height,
+          backgroundPixels,
+          backgroundWidth: imageBrushPreviewBackground.width,
+          backgroundHeight: imageBrushPreviewBackground.height,
           rack: imageBrushRack.map((item) => ({ ...item })),
           settings: {
             ...imageBrushSettings,
             customAnchor: { ...imageBrushSettings.customAnchor },
           },
           seed: imageBrushSeed,
+          strokeId: `stamp-stroke-${imageBrushStrokeNonce}`,
+          evolutionOffset:
+            imageBrushSettings.resetEachStroke && !imageBrushSettings.continueBetweenStrokes
+              ? 0
+              : imageBrushEvolutionOffsetRef.current,
         },
-        [pixels],
+        [pixels, backgroundPixels],
       );
     };
-    let fullTimer: number | null = null;
-    worker.onmessage = (
-      event: MessageEvent<
-        ImageBrushPreviewResult | { type: 'error'; generation: number; message: string }
-      >,
-    ) => {
-      if ('type' in event.data && event.data.type === 'error') {
-        if (event.data.generation === imageBrushPreviewGenerationRef.current) {
-          setNotice(event.data.message);
+    const startPreview = () => {
+      if (generation !== imageBrushPreviewGenerationRef.current) return;
+      const activeWorker = new Worker(
+        new URL('./workers/imageBrushPreview.worker.ts', import.meta.url),
+        { type: 'module' },
+      );
+      worker = activeWorker;
+      imageBrushPreviewWorkerRef.current = activeWorker;
+      activeWorker.onmessage = (
+        event: MessageEvent<
+          ImageBrushPreviewResult | { type: 'error'; generation: number; message: string }
+        >,
+      ) => {
+        if ('type' in event.data && event.data.type === 'error') {
+          if (event.data.generation === imageBrushPreviewGenerationRef.current) {
+            setNotice(event.data.message);
+          }
+          return;
         }
-        return;
-      }
-      const result = event.data as ImageBrushPreviewResult;
-      acceptResult(result);
-      if (result.quality === 'draft' && result.generation === generation) {
-        fullTimer = window.setTimeout(() => postPreview('full'), 60);
-      }
+        const result = event.data as ImageBrushPreviewResult;
+        acceptResult(result, activeWorker);
+        if (result.quality === 'draft' && result.generation === generation) {
+          fullTimer = window.setTimeout(() => postPreview('full'), 750);
+        }
+      };
+      activeWorker.onerror = () => {
+        if (generation === imageBrushPreviewGenerationRef.current) {
+          setNotice('Image Brush preview Worker failed safely; drawing remains available.');
+        }
+      };
+      postPreview('draft');
     };
-    worker.onerror = () => {
-      if (generation === imageBrushPreviewGenerationRef.current) {
-        setNotice('Image Brush preview Worker failed safely; drawing remains available.');
-      }
-    };
-    const draftTimer = window.setTimeout(() => postPreview('draft'), 24);
+    const draftTimer = window.setTimeout(startPreview, 160);
     return () => {
       window.clearTimeout(draftTimer);
       if (fullTimer !== null) window.clearTimeout(fullTimer);
-      worker.terminate();
+      worker?.terminate();
       if (imageBrushPreviewWorkerRef.current === worker) imageBrushPreviewWorkerRef.current = null;
     };
-  }, [imageBrushPreviewKey]);
+  }, [activePanel, imageBrushPreviewKey]);
 
   const doc = docRef.current;
   const history = historyRef.current;
@@ -513,21 +644,6 @@ export function App() {
     }),
     [doc, documentVersion],
   );
-  const retouchRestorePreviewSource = useMemo(() => {
-    let pixels = doc.original;
-    if (retouchSettings.restoreSource === 'lower-layer') {
-      pixels = composeLayerStackBelowActive(layerStackRef.current, doc.original);
-    } else if (retouchSettings.restoreSource === 'previous-history') {
-      const latest = historyRef.current.undoEntries.at(-1);
-      if (latest?.layerBefore) {
-        pixels = composeLayerStack(restoreLayerStack(latest.layerBefore), doc.original);
-      }
-    }
-    return {
-      ...resizeRgba(pixels, doc.width, doc.height, 180),
-      version: documentVersion + layerVersion + historyVersion,
-    };
-  }, [doc, documentVersion, historyVersion, layerVersion, retouchSettings.restoreSource]);
   const memoryEstimate =
     doc.pixels.byteLength * 3 +
     maskRef.current.byteLength +
@@ -995,6 +1111,10 @@ export function App() {
       imageBrushWorkerRef.current = null;
       imageBrushPreviewWorkerRef.current?.terminate();
       imageBrushPreviewWorkerRef.current = null;
+      if (pointerRafRef.current !== null) window.clearTimeout(pointerRafRef.current);
+      if (cursorVisualFrameRef.current !== null) cancelAnimationFrame(cursorVisualFrameRef.current);
+      const retouchRaf = strokeRef.current?.retouchRaf;
+      if (retouchRaf != null) cancelAnimationFrame(retouchRaf);
     },
     [],
   );
@@ -1007,29 +1127,69 @@ export function App() {
     context?.putImageData(imageDataFrom(current.original, current.width, current.height), 0, 0);
   }, []);
 
-  useLayoutEffect(() => {
-    const current = docRef.current;
-    for (const canvas of [
-      baseCanvasRef.current,
-      workCanvasRef.current,
-      overlayCanvasRef.current,
-      imageBrushOverlayCanvasRef.current,
-      selectionCanvasRef.current,
-    ]) {
-      if (!canvas) continue;
-      if (canvas.width !== current.width) canvas.width = current.width;
-      if (canvas.height !== current.height) canvas.height = current.height;
-    }
-    updateOriginalCanvas();
-    updateWorkingCanvas();
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const current = docRef.current;
+      let canvasResized = false;
+      for (const canvas of [baseCanvasRef.current, workCanvasRef.current]) {
+        if (!canvas) continue;
+        if (canvas.width !== current.width) {
+          canvas.width = current.width;
+          canvasResized = true;
+        }
+        if (canvas.height !== current.height) {
+          canvas.height = current.height;
+          canvasResized = true;
+        }
+      }
+      if (canvasResized || renderedOriginalPixelsRef.current !== current.original) {
+        updateOriginalCanvas();
+        renderedOriginalPixelsRef.current = current.original;
+      }
+      if (!current.dirty && baseCanvasRef.current && workCanvasRef.current) {
+        const context = workCanvasRef.current.getContext('2d', { alpha: true });
+        context?.clearRect(0, 0, current.width, current.height);
+        context?.drawImage(baseCanvasRef.current, 0, 0);
+      } else {
+        updateWorkingCanvas();
+      }
+    });
+    return () => cancelAnimationFrame(frame);
   }, [documentVersion, updateOriginalCanvas, updateWorkingCanvas]);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
+    const canvas = overlayCanvasRef.current;
+    if (!canvas) return;
+    const width = maskView === 'hidden' ? 1 : doc.width;
+    const height = maskView === 'hidden' ? 1 : doc.height;
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+  }, [doc.height, doc.width, maskView]);
+
+  useEffect(() => {
+    const canvas = imageBrushOverlayCanvasRef.current;
+    if (!canvas) return;
+    const enabled = activePanel === 'image-brush';
+    const width = enabled ? doc.width : 1;
+    const height = enabled ? doc.height : 1;
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+    imageBrushGhostBoundsRef.current = null;
+    imageBrushOverlayHasTrailRef.current = false;
+  }, [activePanel, doc.height, doc.width]);
+
+  useEffect(() => {
     const canvas = selectionCanvasRef.current;
     if (!canvas) return;
+    const renderSelection = selectedPixels.length > 1;
+    const width = renderSelection ? doc.width : 1;
+    const height = renderSelection ? doc.height : 1;
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
     const context = canvas.getContext('2d');
     if (!context) return;
     context.clearRect(0, 0, canvas.width, canvas.height);
+    if (!renderSelection) return;
     context.fillStyle = 'rgba(242, 190, 82, .82)';
     for (const pixel of selectedPixels) {
       if (pixel < 0 || pixel >= docRef.current.width * docRef.current.height) continue;
@@ -1040,7 +1200,7 @@ export function App() {
         1,
       );
     }
-  }, [documentVersion, selectedPixels]);
+  }, [doc.width, doc.height, selectedPixels]);
 
   useEffect(() => {
     if (compareMode !== 'blink') {
@@ -1062,8 +1222,23 @@ export function App() {
   }, []);
 
   const clearImageBrushOverlay = useCallback(() => {
+    if (imageBrushGhostFrameRef.current !== null) {
+      cancelAnimationFrame(imageBrushGhostFrameRef.current);
+      imageBrushGhostFrameRef.current = null;
+    }
+    imageBrushGhostPendingRef.current = null;
     const canvas = imageBrushOverlayCanvasRef.current;
-    canvas?.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
+    const context = canvas?.getContext('2d');
+    if (canvas && context) {
+      const bounds = imageBrushGhostBoundsRef.current;
+      if (imageBrushOverlayHasTrailRef.current) {
+        context.clearRect(0, 0, canvas.width, canvas.height);
+      } else if (bounds) {
+        context.clearRect(bounds.x, bounds.y, bounds.width, bounds.height);
+      }
+    }
+    imageBrushGhostBoundsRef.current = null;
+    imageBrushOverlayHasTrailRef.current = false;
   }, []);
 
   const drawImageBrushGhost = useCallback(
@@ -1079,7 +1254,6 @@ export function App() {
       }
       const context = canvas.getContext('2d');
       if (!context) return;
-      context.clearRect(0, 0, canvas.width, canvas.height);
       const current = imageBrushSettingsRef.current;
       const random = createSeededRandom(`${imageBrushSeed}:ghost`);
       const rotation = rotationForStamp(
@@ -1099,9 +1273,41 @@ export function App() {
       const paddingY = Math.max(0, (source.height - active.height) / 2);
       const anchorX = (paddingX + baseAnchor.x * active.width) * scale;
       const anchorY = (paddingY + baseAnchor.y * active.height) * scale;
+      const radians = (rotation * Math.PI) / 180;
+      const cosine = Math.cos(radians);
+      const sine = Math.sin(radians);
+      const corners = [
+        { x: -anchorX, y: -anchorY },
+        { x: drawWidth - anchorX, y: -anchorY },
+        { x: drawWidth - anchorX, y: drawHeight - anchorY },
+        { x: -anchorX, y: drawHeight - anchorY },
+      ].map((corner) => ({
+        x: point.x + corner.x * cosine - corner.y * sine,
+        y: point.y + corner.x * sine + corner.y * cosine,
+      }));
+      const padding = Math.max(3, 8 / Math.max(0.05, zoomRef.current));
+      const left = Math.floor(Math.min(...corners.map((corner) => corner.x)) - padding);
+      const top = Math.floor(Math.min(...corners.map((corner) => corner.y)) - padding);
+      const right = Math.ceil(Math.max(...corners.map((corner) => corner.x)) + padding);
+      const bottom = Math.ceil(Math.max(...corners.map((corner) => corner.y)) + padding);
+      const previousBounds = imageBrushGhostBoundsRef.current;
+      if (previousBounds) {
+        context.clearRect(
+          previousBounds.x,
+          previousBounds.y,
+          previousBounds.width,
+          previousBounds.height,
+        );
+      }
+      imageBrushGhostBoundsRef.current = {
+        x: left,
+        y: top,
+        width: Math.max(1, right - left),
+        height: Math.max(1, bottom - top),
+      };
       context.save();
       context.translate(point.x, point.y);
-      context.rotate((rotation * Math.PI) / 180);
+      context.rotate(radians);
       context.globalAlpha = clamp(current.opacity * current.flow * 0.62, 0.12, 0.75);
       context.drawImage(source, -anchorX, -anchorY, drawWidth, drawHeight);
       if (current.showOutline) {
@@ -1122,6 +1328,20 @@ export function App() {
     [activePanel, clearImageBrushOverlay, imageBrushSeed, tool],
   );
 
+  const scheduleImageBrushGhost = useCallback(
+    (point: Point, direction: Point) => {
+      imageBrushGhostPendingRef.current = { point, direction };
+      if (imageBrushGhostFrameRef.current !== null) return;
+      imageBrushGhostFrameRef.current = requestAnimationFrame(() => {
+        imageBrushGhostFrameRef.current = null;
+        const pending = imageBrushGhostPendingRef.current;
+        imageBrushGhostPendingRef.current = null;
+        if (pending) drawImageBrushGhost(pending.point, pending.direction);
+      });
+    },
+    [drawImageBrushGhost],
+  );
+
   const drawLiveImageBrushStamps = useCallback(
     (strokeId: string, stamps: StampPoint[]) => {
       const canvas = imageBrushOverlayCanvasRef.current;
@@ -1132,6 +1352,7 @@ export function App() {
       if (!canvas || !source || !active || !stamps.length) return;
       const context = canvas.getContext('2d');
       if (!context) return;
+      imageBrushOverlayHasTrailRef.current = true;
       const current = imageBrushSettingsRef.current;
       const sources = imageBrushGhostVariantsRef.current.length
         ? imageBrushGhostVariantsRef.current
@@ -1431,6 +1652,7 @@ export function App() {
         updateWorkingCanvas(result.bounds);
         clearImageBrushOverlay();
         if (!patches.length) {
+          setImageBrushStrokeNonce((nonce) => nonce + 1);
           setNotice('Image Brush stroke completed without changing visible pixels.');
           return;
         }
@@ -1465,6 +1687,7 @@ export function App() {
           setNotice(`${action.label} committed as one exact history action.`);
         }
         bumpDocument();
+        setImageBrushStrokeNonce((nonce) => nonce + 1);
       };
 
       const requiredAssets =
@@ -1681,6 +1904,7 @@ export function App() {
       cancelBrushJob(true);
       const current = docRef.current;
       const sourceDocument = current;
+      const capturedLayerBefore = stroke.layerBefore ?? snapshotLayerStack(layerStackRef.current);
       const capturedAlgorithm = algorithm;
       const capturedTool = tool === 'restore' ? 'restore' : 'brush';
       const capturedSettings = { ...settingsRef.current };
@@ -1761,7 +1985,7 @@ export function App() {
           return;
         }
         current.pixels.set(output);
-        const committed = commitCurrentBufferToActiveLayer(stroke.layerBefore, result.writeBounds);
+        const committed = commitCurrentBufferToActiveLayer(capturedLayerBefore, result.writeBounds);
         const patches = committed.patches;
         updateWorkingCanvas(result.writeBounds);
         if (!patches.length) {
@@ -1845,20 +2069,18 @@ export function App() {
   const compactMaskForStroke = useCallback((stroke: StrokeState): Uint8Array => {
     if (!stroke.bounds) return new Uint8Array(0);
     const current = docRef.current;
-    const mask = new Uint8Array(stroke.bounds.width * stroke.bounds.height);
-    for (const index of stroke.touched) {
-      const x = index % current.width;
-      const y = Math.floor(index / current.width);
-      if (
-        x < stroke.bounds.x ||
-        x >= stroke.bounds.x + stroke.bounds.width ||
-        y < stroke.bounds.y ||
-        y >= stroke.bounds.y + stroke.bounds.height
-      )
-        continue;
-      mask[(y - stroke.bounds.y) * stroke.bounds.width + x - stroke.bounds.x] = Math.round(
-        clamp(maskRef.current[index]!, 0, 1) * 255,
-      );
+    const bounds = stroke.bounds;
+    const mask = new Uint8Array(bounds.width * bounds.height);
+    for (let y = bounds.y; y < bounds.y + bounds.height; y += 1) {
+      const sourceRow = y * current.width;
+      const targetRow = (y - bounds.y) * bounds.width;
+      for (let x: number = bounds.x; x < bounds.x + bounds.width; x += 1) {
+        const sourceIndex = sourceRow + x;
+        mask[targetRow + x - bounds.x] = Math.round(
+          clamp(maskRef.current[sourceIndex]!, 0, 1) * 255,
+        );
+        maskRef.current[sourceIndex] = 0;
+      }
     }
     return mask;
   }, []);
@@ -1867,7 +2089,8 @@ export function App() {
     (stroke: StrokeState, mask: Uint8Array, label: string) => {
       if (!stroke.bounds) return;
       const current = docRef.current;
-      const beforePixels = current.pixels.slice();
+      const layerBefore = stroke.layerBefore ?? snapshotLayerStack(layerStackRef.current);
+      const beforeRows = rowPatchesBefore(current.pixels, current.width, stroke.bounds);
       const changed = eraseActiveLayerWithMask(
         layerStackRef.current,
         mask,
@@ -1875,7 +2098,6 @@ export function App() {
         brushRef.current.strength * stroke.pressure,
       );
       current.pixels.set(composeLayerStack(layerStackRef.current, current.original));
-      const beforeRows = rowPatchesBefore(beforePixels, current.width, stroke.bounds);
       const patches = finalizePatches(beforeRows, current.pixels);
       const action: HistoryAction = {
         id: `retouch-layer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -1887,7 +2109,7 @@ export function App() {
         affectedPixels: changed,
         affectedBytes: patches.reduce((total, patch) => total + patch.after.byteLength, 0),
         detail: 'Sparse active layer · atomic stroke',
-        layerBefore: stroke.layerBefore,
+        layerBefore,
         layerAfter: snapshotLayerStack(layerStackRef.current),
       };
       updateWorkingCanvas(stroke.bounds);
@@ -1915,6 +2137,7 @@ export function App() {
       cancelBrushJob(true);
       const current = docRef.current;
       const sourceDocument = current;
+      const capturedLayerBefore = stroke.layerBefore ?? snapshotLayerStack(layerStackRef.current);
       const capturedTool = tool;
       const capturedBounds = { ...stroke.bounds };
       const capturedSettings = { ...retouchSettingsRef.current };
@@ -2009,7 +2232,7 @@ export function App() {
         setBrushProcessing(false);
         setBrushProgress(null);
         current.pixels.set(new Uint8ClampedArray(result.pixels));
-        const committed = commitCurrentBufferToActiveLayer(stroke.layerBefore, result.writeBounds);
+        const committed = commitCurrentBufferToActiveLayer(capturedLayerBefore, result.writeBounds);
         updateWorkingCanvas(result.writeBounds);
         if (!committed.patches.length) {
           setNotice(`${capturedTool} completed without changing pixels.`);
@@ -2099,8 +2322,9 @@ export function App() {
         algorithms[algorithm].family === 'pixel' ? currentBrush.density : 1,
         stampRandom,
         currentBrush.accumulate,
+        !isRetouchTool(tool),
       );
-      stamp.touched.forEach((index) => stroke.touched.add(index));
+      if (!isRetouchTool(tool)) stamp.touched.forEach((index) => stroke.touched.add(index));
       stroke.bounds = unionRect(stroke.bounds, stamp.bounds);
       stroke.pressure = pressure;
       drawMaskStamp(scattered, radius);
@@ -2133,7 +2357,6 @@ export function App() {
     if (!stroke) return;
     if (isRetouchTool(tool) && stroke.bounds) {
       const mask = compactMaskForStroke(stroke);
-      maskRef.current = new Float32Array(maskRef.current.length);
       clearOverlay();
       strokeRef.current = null;
       if (
@@ -2171,7 +2394,7 @@ export function App() {
     }
     const committed =
       patches.length && stroke.bounds
-        ? commitCurrentBufferToActiveLayer(stroke.layerBefore, stroke.bounds)
+        ? commitCurrentBufferToActiveLayer(stroke.layerBefore!, stroke.bounds)
         : null;
     if (committed) patches = committed.patches;
     const action: HistoryAction = {
@@ -2243,7 +2466,46 @@ export function App() {
     setNotice('Preview cancelled.');
   }, [pendingPreview, restoreLayerSnapshot, updateWorkingCanvas]);
 
+  const processRetouchFrame = (stroke: StrokeState) => {
+    if (strokeRef.current !== stroke) return;
+    stroke.retouchRaf = null;
+    const frameStarted = performance.now();
+    while (stroke.pendingRetouchSamples.length) {
+      const sample = stroke.pendingRetouchSamples[0]!;
+      const dx = sample.point.x - stroke.last.x;
+      const dy = sample.point.y - stroke.last.y;
+      const distance = Math.hypot(dx, dy);
+      const spacing = Math.max(1, (brushRef.current.size * brushRef.current.spacing) / 100);
+      if (distance < spacing) {
+        stroke.pendingRetouchSamples.shift();
+        continue;
+      }
+      const ratio = Math.min(1, spacing / distance);
+      const next = {
+        x: stroke.last.x + dx * ratio,
+        y: stroke.last.y + dy * ratio,
+      };
+      const movement = { x: next.x - stroke.last.x, y: next.y - stroke.last.y };
+      stampAt(next, sample.pressure, movement);
+      if (performance.now() - frameStarted >= 5) break;
+    }
+    if (stroke.pendingRetouchSamples.length) {
+      stroke.retouchRaf = requestAnimationFrame(() => processRetouchFrame(stroke));
+    } else if (stroke.retouchEnded) {
+      commitStroke();
+    }
+  };
+
+  const scheduleRetouchFrame = (stroke: StrokeState) => {
+    if (stroke.retouchRaf !== null) return;
+    stroke.retouchRaf = requestAnimationFrame(() => processRetouchFrame(stroke));
+  };
+
   const beginPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (strokeRef.current?.retouchEnded) {
+      setNotice('Finishing the previous Retouch stroke...');
+      return;
+    }
     const point = screenToImage(event.clientX, event.clientY);
     if (
       algorithm === 'clone-corruption-brush' &&
@@ -2308,6 +2570,9 @@ export function App() {
         setNotice('Load or select an Image Brush asset before drawing.');
         return;
       }
+      imageBrushPreviewGenerationRef.current += 1;
+      imageBrushPreviewWorkerRef.current?.terminate();
+      imageBrushPreviewWorkerRef.current = null;
       cancelImageBrushJob(true);
       if (moshPreviewBufferRef.current || moshJobGateRef.current.currentJobId) cancelMosh();
       if (pendingPreview) cancelPreview();
@@ -2316,7 +2581,7 @@ export function App() {
       clearImageBrushOverlay();
       const imageStroke: ImageBrushStrokeState = {
         pointerId: event.pointerId,
-        strokeId: `stamp-stroke-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        strokeId: `stamp-stroke-${imageBrushStrokeNonce}`,
         path: begun.state,
         stamps: [begun.stamp],
         pendingSamples: [],
@@ -2380,7 +2645,10 @@ export function App() {
       pressure: pressureFor(event),
       movement: { x: 0, y: 0 },
       path: [{ x: point.x, y: point.y, pressure: pressureFor(event) }],
-      layerBefore: snapshotLayerStack(layerStackRef.current),
+      layerBefore: isRetouchTool(tool) ? null : snapshotLayerStack(layerStackRef.current),
+      pendingRetouchSamples: [],
+      retouchRaf: null,
+      retouchEnded: false,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
     stampAt(point, pressureFor(event), { x: 0, y: 0 });
@@ -2399,17 +2667,22 @@ export function App() {
     };
     if (imageBrushStrokeRef.current) return;
     if (pointerRafRef.current !== null) return;
-    pointerRafRef.current = requestAnimationFrame(() => {
-      setCursorInfo(cursorPendingRef.current);
+    pointerRafRef.current = window.setTimeout(() => {
+      const next = cursorPendingRef.current;
+      const previous = cursorInfoRef.current;
+      if (next.x !== previous.x || next.y !== previous.y || next.inside !== previous.inside) {
+        cursorInfoRef.current = next;
+        setCursorInfo(next);
+      }
       pointerRafRef.current = null;
-    });
+    }, 80);
   };
 
-  const flushImageBrushSamples = (stroke: ImageBrushStrokeState) => {
+  const flushImageBrushSamples = (stroke: ImageBrushStrokeState, maximumSamples = Infinity) => {
     if (!stroke.pendingSamples.length) return;
     const interpolationStarted = performance.now();
     const current = imageBrushSettingsRef.current;
-    const samples = stroke.pendingSamples.splice(0);
+    const samples = stroke.pendingSamples.splice(0, maximumSamples);
     for (const sample of samples) {
       const stamps = appendStampPath(
         stroke.path,
@@ -2439,7 +2712,7 @@ export function App() {
     if (imageBrushStrokeRef.current !== stroke) return;
     const frameStarted = performance.now();
     stroke.liveRaf = null;
-    flushImageBrushSamples(stroke);
+    flushImageBrushSamples(stroke, 24);
     const current = imageBrushSettingsRef.current;
     const active = imageBrushLibraryRef.current.find(
       (asset) => asset.id === activeImageBrushIdRef.current,
@@ -2451,8 +2724,11 @@ export function App() {
       stroke.stamps.length,
       imageBrushRackRef.current,
     );
-    const configuredLimit = Math.max(1, current.maxLiveStampsPerFrame);
-    const limit = quality === 'realtime' ? Math.min(12, configuredLimit) : configuredLimit;
+    const limit = imageBrushLiveStampBudget(
+      current.maxLiveStampsPerFrame,
+      current.stampsPerStep,
+      quality,
+    );
     const live = stroke.pendingLiveStamps.splice(0, limit);
     drawLiveImageBrushStamps(stroke.strokeId, live);
     const frameMs = performance.now() - frameStarted;
@@ -2469,25 +2745,53 @@ export function App() {
     stroke.liveRaf = requestAnimationFrame(() => processImageBrushLiveFrame(stroke));
   };
 
-  const movePointer = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const point = screenToImage(event.clientX, event.clientY);
-    scheduleCursorInfo(point);
-    const viewportRect = viewportRef.current?.getBoundingClientRect();
+  const hideBrushCursorVisual = () => {
+    if (cursorVisualFrameRef.current !== null) {
+      cancelAnimationFrame(cursorVisualFrameRef.current);
+      cursorVisualFrameRef.current = null;
+    }
+    cursorVisualPointRef.current = null;
     const cursor = cursorRef.current;
-    if (cursor && viewportRect) {
-      const diameter = brushRef.current.size * zoomRef.current;
-      cursor.style.width = `${diameter}px`;
-      cursor.style.height = `${diameter}px`;
-      cursor.style.transform = `translate(${event.clientX - viewportRect.left - diameter / 2}px, ${
-        event.clientY - viewportRect.top - diameter / 2
-      }px)`;
-      cursor.style.opacity =
+    if (cursor && cursor.style.opacity !== '0') cursor.style.opacity = '0';
+  };
+
+  const scheduleBrushCursorVisual = (point: Point) => {
+    cursorVisualPointRef.current = point;
+    if (cursorVisualFrameRef.current !== null) return;
+    cursorVisualFrameRef.current = requestAnimationFrame(() => {
+      cursorVisualFrameRef.current = null;
+      const cursor = cursorRef.current;
+      const pending = cursorVisualPointRef.current;
+      if (!cursor || !pending) return;
+      const visible =
         cursorPendingRef.current.inside &&
         tool !== 'hand' &&
         !spaceDownRef.current &&
-        activePanel !== 'image-brush'
-          ? '1'
-          : '0';
+        activePanel !== 'image-brush';
+      if (!visible) {
+        if (cursor.style.opacity !== '0') cursor.style.opacity = '0';
+        return;
+      }
+      const diameter = brushRef.current.size * zoomRef.current;
+      if (diameter !== cursorVisualDiameterRef.current) {
+        cursorVisualDiameterRef.current = diameter;
+        cursor.style.width = `${diameter}px`;
+        cursor.style.height = `${diameter}px`;
+      }
+      cursor.style.transform = `translate(${pending.x * zoomRef.current + panRef.current.x - diameter / 2}px, ${
+        pending.y * zoomRef.current + panRef.current.y - diameter / 2
+      }px)`;
+      if (cursor.style.opacity !== '1') cursor.style.opacity = '1';
+    });
+  };
+
+  const movePointer = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const point = screenToImage(event.clientX, event.clientY);
+    scheduleCursorInfo(point);
+    if (activePanel === 'image-brush' || tool === 'hand' || spaceDownRef.current) {
+      hideBrushCursorVisual();
+    } else {
+      scheduleBrushCursorVisual(point);
     }
     if (activePanel === 'image-brush' && !imageBrushStrokeRef.current) {
       const direction = {
@@ -2495,7 +2799,7 @@ export function App() {
         y: Math.sin((imageBrushSettingsRef.current.fallbackAngle * Math.PI) / 180),
       };
       if (cursorPendingRef.current.inside && tool === 'brush' && !spaceDownRef.current) {
-        drawImageBrushGhost(point, direction);
+        scheduleImageBrushGhost(point, direction);
       } else {
         clearImageBrushOverlay();
       }
@@ -2566,6 +2870,11 @@ export function App() {
     }
     const stroke = strokeRef.current;
     if (!stroke || stroke.pointerId !== event.pointerId) return;
+    if (isRetouchTool(tool)) {
+      stroke.pendingRetouchSamples.push({ point, pressure: pressureFor(event) });
+      scheduleRetouchFrame(stroke);
+      return;
+    }
     const distance = Math.hypot(point.x - stroke.last.x, point.y - stroke.last.y);
     const spacing = Math.max(1, (brushRef.current.size * brushRef.current.spacing) / 100);
     if (distance < spacing) return;
@@ -2594,6 +2903,7 @@ export function App() {
       const liveLimit = Math.max(1, imageBrushSettingsRef.current.maxLiveStampsPerFrame);
       drawLiveImageBrushStamps(stroke.strokeId, stroke.pendingLiveStamps.splice(0, liveLimit));
       imageBrushStrokeRef.current = null;
+      cursorInfoRef.current = cursorPendingRef.current;
       setCursorInfo(cursorPendingRef.current);
       startImageBrushJob(stroke);
       if (stroke.limitReached) {
@@ -2621,7 +2931,19 @@ export function App() {
     }
     if (panDragRef.current?.pointerId === event.pointerId) panDragRef.current = null;
     if (altDragRef.current?.pointerId === event.pointerId) altDragRef.current = null;
-    if (strokeRef.current?.pointerId === event.pointerId) commitStroke();
+    if (strokeRef.current?.pointerId === event.pointerId) {
+      const stroke = strokeRef.current;
+      if (isRetouchTool(tool)) {
+        stroke.retouchEnded = true;
+        if (stroke.pendingRetouchSamples.length || stroke.retouchRaf !== null) {
+          scheduleRetouchFrame(stroke);
+        } else {
+          commitStroke();
+        }
+      } else {
+        commitStroke();
+      }
+    }
   };
 
   const wheelCanvas = (event: ReactWheelEvent<HTMLDivElement>) => {
@@ -2769,13 +3091,14 @@ export function App() {
         setNotice('Unsupported format. Choose PNG, JPEG, or WebP.');
         return;
       }
-      if (file.size > 120 * 1024 * 1024) {
-        setNotice('The file exceeds the 120 MB safety limit.');
+      if (file.size > 64 * 1024 * 1024) {
+        setNotice('The file exceeds the 64 MB safety limit.');
         return;
       }
       if (docRef.current.dirty && !window.confirm('Replace the image and discard unsaved changes?'))
         return;
       cancelMosh();
+      setMoshPreviewEnabled(false);
       cancelBrushJob(true);
       cancelImageBrushJob(true);
       imageBrushStrokeRef.current = null;
@@ -2784,35 +3107,23 @@ export function App() {
       clearAdvancedBrushTransientState();
       setPendingPreview(null);
       setProcessing(true);
+      setNotice(`Decoding ${file.name} off the UI thread...`);
       try {
-        const bitmap = await createImageBitmap(file);
-        if (bitmap.width * bitmap.height > 80_000_000) {
-          bitmap.close();
-          throw new Error('The decoded image is too large for the browser memory safety limit.');
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = bitmap.width;
-        canvas.height = bitmap.height;
-        const context = canvas.getContext('2d', { willReadFrequently: true });
-        if (!context) throw new Error('Canvas 2D context is unavailable.');
-        context.drawImage(bitmap, 0, 0);
-        bitmap.close();
-        const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
-        const raw = new Uint8Array(await file.arrayBuffer());
+        const decoded = await decodeDocumentOffThread(file);
         docRef.current = {
-          width: canvas.width,
-          height: canvas.height,
-          original: data.slice(),
-          pixels: data.slice(),
+          width: decoded.width,
+          height: decoded.height,
+          original: new Uint8ClampedArray(decoded.original).slice(),
+          pixels: new Uint8ClampedArray(decoded.pixels).slice(),
           fileName: file.name,
           mimeType: file.type,
-          rawOriginal: raw,
+          rawOriginal: new Uint8Array(decoded.raw),
           rawMutated: null,
           dirty: false,
         };
-        layerStackRef.current = createLayerStack(canvas.width, canvas.height);
+        layerStackRef.current = createLayerStack(decoded.width, decoded.height);
         bumpLayers();
-        maskRef.current = new Float32Array(canvas.width * canvas.height);
+        maskRef.current = new Float32Array(decoded.mask).slice();
         lastBrushMaskRef.current = { data: new Uint8Array(0), bounds: null };
         lastBrushDirectionRef.current = { x: 1, y: 0 };
         setBrushContext((context) => ({
@@ -2834,7 +3145,11 @@ export function App() {
         setExportName(file.name.replace(/\.[^.]+$/, ''));
         bumpDocument();
         bumpHistory();
-        setNotice(`${file.name} decoded locally at ${canvas.width} × ${canvas.height}.`);
+        setNotice(
+          decoded.resized
+            ? `${file.name} opened at ${decoded.width} x ${decoded.height} for responsive editing (source ${decoded.sourceWidth} x ${decoded.sourceHeight}).`
+            : `${file.name} decoded locally at ${decoded.width} x ${decoded.height}.`,
+        );
       } catch (error) {
         setNotice(error instanceof Error ? error.message : 'Image decoding failed.');
       } finally {
@@ -3390,6 +3705,9 @@ export function App() {
       movement: { x: 0, y: 0 },
       path: [{ x: point.x, y: point.y, pressure: 1 }],
       layerBefore: snapshotLayerStack(layerStackRef.current),
+      pendingRetouchSamples: [],
+      retouchRaf: null,
+      retouchEnded: false,
     };
     stampAt(point, 1, { x: random.int(-20, 20), y: random.int(-20, 20) });
     commitStroke();
@@ -3574,7 +3892,13 @@ export function App() {
   const isAnyProcessing = processing || moshProcessing || brushProcessing || imageBrushProcessing;
   const visibleHistoryEntries = [...history.undoEntries].reverse();
   const workClip = compareMode === 'split' ? `inset(0 ${100 - splitPosition}% 0 0)` : undefined;
-
+  const documentMeta = {
+    fileName: doc.fileName,
+    width: doc.width,
+    height: doc.height,
+    mimeType: doc.mimeType,
+    dirty: doc.dirty,
+  };
   return (
     <main
       className={`app ${isAnyProcessing ? 'is-processing' : ''}`}
@@ -3598,7 +3922,7 @@ export function App() {
       }}
     >
       <TopBar
-        doc={doc}
+        doc={documentMeta}
         fileInputRef={fileInputRef}
         onFileChange={onFileChange}
         onLoadDemo={loadDemo}
@@ -3646,7 +3970,7 @@ export function App() {
         />
 
         <CanvasWorkspace
-          doc={doc}
+          doc={documentMeta}
           zoom={zoom}
           pan={pan}
           workClip={workClip}
@@ -3687,7 +4011,7 @@ export function App() {
           onCanvasPointerUp={endPointer}
           onCanvasPointerCancel={endPointer}
           onCanvasPointerLeave={() => {
-            if (cursorRef.current) cursorRef.current.style.opacity = '0';
+            hideBrushCursorVisual();
             clearImageBrushOverlay();
             scheduleCursorInfo({ x: -1, y: -1 });
           }}
@@ -3767,7 +4091,11 @@ export function App() {
                 layerStack={layerStack}
                 layerVersion={layerVersion}
                 currentLayer={currentLayer}
-                original={doc.original}
+                onFlattenLayers={() =>
+                  runLayerOperation('Flatten layer stack', (stack) => {
+                    flattenLayerStack(stack, docRef.current.original);
+                  })
+                }
                 onSelectLayer={(id, name) => {
                   layerStackRef.current.activeLayerId = id;
                   bumpLayers();
@@ -3781,8 +4109,6 @@ export function App() {
               <RetouchPanel
                 tool={tool}
                 onToolChange={setTool}
-                previewSource={effectPreviewSource}
-                restorePreviewSource={retouchRestorePreviewSource}
                 brush={brush}
                 onUpdateBrush={updateBrush}
                 retouchSettings={retouchSettings}
@@ -3906,7 +4232,7 @@ export function App() {
         moshProcessing={moshProcessing}
         moshProgress={moshProgress}
         cursorInfo={cursorInfo}
-        doc={doc}
+        documentWidth={doc.width}
         zoom={zoom}
         undoCount={history.undoCount}
         redoCount={history.redoCount}

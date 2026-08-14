@@ -210,6 +210,19 @@ export function resolveImageBrushQuality(
   return 'high';
 }
 
+export function imageBrushLiveStampBudget(
+  maxLiveStampsPerFrame: number,
+  stampsPerStep: number,
+  quality: Exclude<ImageBrushRenderingQuality, 'auto'>,
+): number {
+  const copies = Math.max(1, Math.round(stampsPerStep));
+  const drawBudget = quality === 'high' ? 16 : quality === 'balanced' ? 12 : 8;
+  return Math.min(
+    Math.max(1, Math.round(maxLiveStampsPerFrame)),
+    Math.max(1, Math.floor(drawBudget / copies)),
+  );
+}
+
 export function estimateImageBrushCost(
   documentPixels: number,
   tipPixels: number,

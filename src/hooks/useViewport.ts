@@ -17,6 +17,7 @@ export function useViewport(docRef: DocRef) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef<HTMLDivElement>(null);
+  const viewportBoundsRef = useRef<DOMRect | null>(null);
   const pointerRafRef = useRef<number | null>(null);
   const cursorPendingRef = useRef({ x: 0, y: 0, inside: false });
 
@@ -26,6 +27,23 @@ export function useViewport(docRef: DocRef) {
   useEffect(() => {
     panRef.current = pan;
   }, [pan]);
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const updateBounds = () => {
+      viewportBoundsRef.current = viewport.getBoundingClientRect();
+    };
+    updateBounds();
+    const observer = new ResizeObserver(updateBounds);
+    observer.observe(viewport);
+    window.addEventListener('resize', updateBounds);
+    window.addEventListener('scroll', updateBounds, true);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateBounds);
+      window.removeEventListener('scroll', updateBounds, true);
+    };
+  }, []);
 
   const fitToScreen = useCallback(() => {
     const viewport = viewportRef.current;
@@ -47,8 +65,9 @@ export function useViewport(docRef: DocRef) {
   }, [docRef]);
 
   const screenToImage = useCallback((clientX: number, clientY: number): Point => {
-    const rect = viewportRef.current?.getBoundingClientRect();
+    const rect = viewportBoundsRef.current ?? viewportRef.current?.getBoundingClientRect();
     if (!rect) return { x: 0, y: 0 };
+    viewportBoundsRef.current = rect;
     return {
       x: (clientX - rect.left - panRef.current.x) / zoomRef.current,
       y: (clientY - rect.top - panRef.current.y) / zoomRef.current,

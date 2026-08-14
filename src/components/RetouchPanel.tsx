@@ -1,6 +1,4 @@
 import { Brush, Droplets, Eraser, Focus, RefreshCcw, WandSparkles } from 'lucide-react';
-import { RetouchPreviewStage } from './RetouchPreviewStage';
-import type { EffectPreviewSource } from './EffectPreviewStage';
 import { SliderField } from './SliderField';
 import { PanelSection, Toggle } from './ui/controls';
 import { EffectIcon } from '../icons/effects';
@@ -10,8 +8,6 @@ import type { RetouchSettings, RetouchTool } from '../retouch/types';
 interface RetouchPanelProps {
   tool: RetouchTool;
   onToolChange: (tool: RetouchTool) => void;
-  previewSource: EffectPreviewSource;
-  restorePreviewSource: EffectPreviewSource;
   brush: BrushSettings;
   onUpdateBrush: <K extends keyof BrushSettings>(key: K, value: BrushSettings[K]) => void;
   retouchSettings: RetouchSettings;
@@ -21,8 +17,6 @@ interface RetouchPanelProps {
 export function RetouchPanel({
   tool,
   onToolChange,
-  previewSource,
-  restorePreviewSource,
   brush,
   onUpdateBrush,
   retouchSettings,
@@ -67,13 +61,6 @@ export function RetouchPanel({
           </button>
         ))}
       </div>
-      <RetouchPreviewStage
-        tool={tool}
-        source={previewSource}
-        restoreSource={restorePreviewSource}
-        brush={brush}
-        settings={retouchSettings}
-      />
       <PanelSection title="Brush shape" icon={<Brush size={15} />}>
         <SliderField
           label="Size"

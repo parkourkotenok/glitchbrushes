@@ -199,12 +199,15 @@ describe('contextual help', () => {
     const simple = renderImageBrush('simple');
     expect(simple).toContain('data-testid="image-brush-essential"');
     expect(simple).toContain('CURRENT BRUSH');
-    expect(simple).toContain('Maximum generated stamps');
+    expect(simple).not.toContain('Maximum generated stamps');
     expect(simple).not.toContain('image-brush-style-cards');
     expect(simple).not.toContain('image-brush-interface-level');
-    expect(simple.match(/<canvas/g) ?? []).toHaveLength(5);
+    expect(simple).toContain('LIVE STROKE PREVIEW');
+    expect(simple).toContain('aria-label="Live Image Brush stroke preview"');
+    expect(simple).not.toContain('WHAT THIS CONTROL CHANGES');
+    expect(simple.match(/<canvas/g) ?? []).toHaveLength(4);
     const advanced = renderImageBrush('advanced');
-    expect(advanced).toBe(simple);
+    expect(advanced).not.toBe(simple);
     expect(advanced).toContain('Maximum generated stamps');
     expect(advanced).toContain('Stamp Layout');
     expect(advanced).toContain('<summary>Mutation</summary>');

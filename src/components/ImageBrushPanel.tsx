@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState, type DragEvent, type PointerEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type PointerEvent,
+  type ReactNode,
+} from 'react';
 import {
   Clipboard,
   Copy,
@@ -15,7 +23,6 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import { decodeImageBrushFile } from '../imageBrush/assets';
 import { imageBrushFxLevelAmount, imageBrushFxStageCopy } from '../imageBrush/performance';
 import {
   builtInImageBrushPresets,
@@ -63,6 +70,13 @@ interface ProcessedBrushPreview {
     width: number;
     height: number;
   }>;
+  stroke: {
+    pixels: Uint8ClampedArray;
+    width: number;
+    height: number;
+    stampCount: number;
+    processingMs: number;
+  };
 }
 
 interface ImageBrushPanelProps {
@@ -176,159 +190,67 @@ function drawPreview(
   );
 }
 
-const controlExampleDescriptions: Record<
-  string,
-  { copy: string; low: string; high: string; cost: string }
-> = {
-  Size: {
-    copy: 'Low size places small copies. High size makes each copy occupy more of the trail.',
-    low: 'SMALL',
-    high: 'LARGE',
-    cost: 'Larger stamps increase pixel work.',
-  },
-  Spacing: {
-    copy: 'Low spacing overlaps consecutive copies. High spacing creates visible gaps.',
-    low: 'OVERLAP',
-    high: 'GAPS',
-    cost: 'Low spacing creates more stamps.',
-  },
-  Opacity: {
-    copy: 'Low opacity keeps the document visible through each copy. High opacity makes copies solid.',
-    low: 'FAINT',
-    high: 'SOLID',
-    cost: 'No meaningful processing impact.',
-  },
-  'Glitch Amount': {
-    copy: 'Low damage keeps the uploaded image readable. High damage uses the real processed variants.',
-    low: 'LOW DAMAGE',
-    high: 'HIGH DAMAGE',
-    cost: 'Stronger multi-FX recipes cost more.',
-  },
-  Variation: {
-    copy: 'Low variation repeats one result. High variation cycles different real corrupted variants.',
-    low: 'REPEATED',
-    high: 'VARIED',
-    cost: 'More variants use more cache memory.',
-  },
-  'Mutation step': {
-    copy: 'Low values change slowly between copies. High values move through the corrupted variants quickly.',
-    low: 'SLOW',
-    high: 'FAST',
-    cost: 'Fast evolution may generate more variants.',
-  },
-  'Decay speed': {
-    copy: 'Controls how quickly consecutive stamps travel from the start damage to maximum corruption.',
-    low: 'SLOW',
-    high: 'FAST',
-    cost: 'Higher values do not add stamps.',
-  },
-  'Previous stamp carry': {
-    copy: 'Low carry lets each mutation recover. High carry keeps more structure from the previous corrupted stamp.',
-    low: 'RECOVER',
-    high: 'CARRY',
-    cost: 'Evolving chains require sequential processing.',
-  },
-};
-
-function stampSourceCanvas(
-  pixels: Uint8ClampedArray,
-  width: number,
-  height: number,
-): HTMLCanvasElement {
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  canvas.getContext('2d')?.putImageData(new ImageData(pixels, width, height), 0, 0);
-  return canvas;
-}
-
-function ImageBrushControlExample({
-  asset,
-  preview,
-  control,
-}: {
-  asset: ImageBrushAsset | null;
-  preview: ProcessedBrushPreview | null;
-  control: string;
-}) {
-  const lowRef = useRef<HTMLCanvasElement>(null);
-  const highRef = useRef<HTMLCanvasElement>(null);
-  const copy = controlExampleDescriptions[control] ?? {
-    copy: `The left example keeps ${control.toLowerCase()} low; the right example shows a high-value result using the current stamp image.`,
-    low: 'LOW',
-    high: 'HIGH',
-    cost: 'Processing impact depends on the selected FX stack.',
-  };
-
-  useEffect(() => {
-    if (!asset) return;
-    const clean = stampSourceCanvas(asset.pixels, asset.width, asset.height);
-    const variants = preview?.variants?.length
-      ? preview.variants.map((variant) =>
-          stampSourceCanvas(variant.pixels, variant.width, variant.height),
-        )
-      : [clean];
-    const paint = (canvas: HTMLCanvasElement | null, high: boolean) => {
-      const context = canvas?.getContext('2d');
-      if (!canvas || !context) return;
-      context.clearRect(0, 0, canvas.width, canvas.height);
-      const count = 8;
-      const size = control === 'Size' ? (high ? 54 : 24) : 38;
-      const step = control === 'Spacing' ? (high ? 26 : 9) : 16;
-      const totalWidth = size + step * (count - 1);
-      const startX = (canvas.width - totalWidth) / 2;
-      for (let index = 0; index < count; index += 1) {
-        const source =
-          high &&
-          [
-            'Variation',
-            'Mutation step',
-            'Decay speed',
-            'Glitch Amount',
-            'Previous stamp carry',
-          ].includes(control)
-            ? variants[index % variants.length]!
-            : high && preview?.pixels
-              ? variants[index % variants.length]!
-              : clean;
-        context.globalAlpha = control === 'Opacity' ? (high ? 1 : 0.2) : 0.9;
-        const y =
-          (canvas.height - size) / 2 +
-          Math.sin(index * 0.9) * (high && control === 'Variation' ? 8 : 2);
-        context.drawImage(source, startX + index * step, y, size, size);
-      }
-      context.globalAlpha = 1;
+function decodeImageBrushFilesOffThread(
+  files: File[],
+  settings: Pick<ImageBrushSettings, 'trimTransparent' | 'trimThreshold'>,
+): Promise<ImageBrushAsset[]> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('../workers/imageBrushAsset.worker.ts', import.meta.url), {
+      type: 'module',
+    });
+    const jobId = `image-brush-assets-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const finish = () => worker.terminate();
+    worker.onerror = () => {
+      finish();
+      reject(new Error('The off-thread brush image decoder failed.'));
     };
-    paint(lowRef.current, false);
-    paint(highRef.current, true);
-  }, [asset, control, preview]);
-
-  return (
-    <section className="image-brush-control-example" data-control-example={control}>
-      <header>
-        <strong>WHAT THIS CONTROL CHANGES</strong>
-        <span>{control}</span>
-      </header>
-      <div>
-        <figure>
-          <canvas ref={lowRef} width={180} height={82} />
-          <figcaption>{copy.low}</figcaption>
-        </figure>
-        <figure>
-          <canvas ref={highRef} width={180} height={82} />
-          <figcaption>{copy.high}</figcaption>
-        </figure>
-      </div>
-      <p>{copy.copy}</p>
-      <small>{copy.cost}</small>
-    </section>
-  );
+    worker.onmessage = (
+      event: MessageEvent<
+        | { jobId: string; type: 'result'; assets: ImageBrushAsset[] }
+        | { jobId: string; type: 'error'; message: string }
+      >,
+    ) => {
+      if (event.data.jobId !== jobId) return;
+      finish();
+      if (event.data.type === 'error') {
+        reject(new Error(event.data.message));
+      } else {
+        resolve(event.data.assets);
+      }
+    };
+    worker.postMessage({ jobId, files, settings, maximumDimension: 512 });
+  });
 }
 
 function BrushThumbnail({ asset }: { asset: ImageBrushAsset }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => drawPreview(ref.current, asset.pixels, asset.width, asset.height), [asset]);
   return <canvas ref={ref} width={40} height={40} aria-label={`${asset.name} thumbnail`} />;
+}
+
+function LazyAdvancedDetails({
+  summary,
+  className = '',
+  initiallyMounted,
+  children,
+}: {
+  summary: string;
+  className?: string;
+  initiallyMounted: boolean;
+  children: ReactNode;
+}) {
+  const [mounted, setMounted] = useState(initiallyMounted);
+  return (
+    <details
+      className={`image-brush-advanced-group ${className}`.trim()}
+      onToggle={(event) => {
+        setMounted(event.currentTarget.open);
+      }}
+    >
+      <summary>{summary}</summary>
+      {mounted ? children : null}
+    </details>
+  );
 }
 
 function Toggle({
@@ -447,6 +369,7 @@ function mutationSummary(settings: ImageBrushSettings): [string, string] {
 }
 
 export function ImageBrushPanel({
+  initialInterfaceLevel,
   library,
   activeAssetId,
   settings,
@@ -482,13 +405,13 @@ export function ImageBrushPanel({
 }: ImageBrushPanelProps) {
   const active = library.find((asset) => asset.id === activeAssetId) ?? null;
   const previewRef = useRef<HTMLCanvasElement>(null);
+  const liveStrokePreviewRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const presetInputRef = useRef<HTMLInputElement>(null);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [addEffect, setAddEffect] = useState<ImageBrushFxId>('slice');
   const [contextAssetId, setContextAssetId] = useState<string | null>(null);
   const [optimizationSize, setOptimizationSize] = useState('auto');
-  const [controlExample, setControlExample] = useState('Spacing');
   const [userPresets, setUserPresets] = useState<ImageBrushPreset[]>(() => loadImageBrushPresets());
   const allPresets = [...builtInImageBrushPresets, ...userPresets];
   const selectedPreset = allPresets.find((preset) => preset.id === activePresetId);
@@ -523,31 +446,45 @@ export function ImageBrushPanel({
         );
 
   useEffect(() => {
-    drawPreview(
-      previewRef.current,
-      processedPreview?.pixels ?? active?.pixels,
-      processedPreview?.width ?? active?.width ?? 1,
-      processedPreview?.height ?? active?.height ?? 1,
-    );
-  }, [active, processedPreview]);
+    drawPreview(previewRef.current, active?.pixels, active?.width ?? 1, active?.height ?? 1);
+  }, [active]);
 
-  const addFiles = async (files: File[]) => {
-    const accepted = files.filter((file) =>
-      ['image/png', 'image/jpeg', 'image/webp'].includes(file.type),
+  useEffect(() => {
+    drawPreview(
+      liveStrokePreviewRef.current,
+      processedPreview?.stroke.pixels,
+      processedPreview?.stroke.width ?? 1,
+      processedPreview?.stroke.height ?? 1,
     );
-    if (!accepted.length) {
-      onNotice('Image Brush accepts PNG, JPEG and WebP images.');
-      return;
-    }
-    try {
-      const decoded: ImageBrushAsset[] = [];
-      for (const file of accepted) decoded.push(await decodeImageBrushFile(file, settings));
-      onAddAssets(decoded);
-      onNotice(`${decoded.length} brush image${decoded.length === 1 ? '' : 's'} decoded locally.`);
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : 'Brush image decoding failed.');
-    }
-  };
+  }, [processedPreview]);
+
+  const addFiles = useCallback(
+    async (files: File[]) => {
+      const accepted = files.filter((file) =>
+        ['image/png', 'image/jpeg', 'image/webp'].includes(file.type),
+      );
+      if (!accepted.length) {
+        onNotice('Image Brush accepts PNG, JPEG and WebP images.');
+        return;
+      }
+      try {
+        onNotice(
+          `Preparing ${accepted.length} brush image${accepted.length === 1 ? '' : 's'} off the UI thread…`,
+        );
+        const decoded = await decodeImageBrushFilesOffThread(accepted, {
+          trimTransparent: settings.trimTransparent,
+          trimThreshold: settings.trimThreshold,
+        });
+        onAddAssets(decoded);
+        onNotice(
+          `${decoded.length} brush image${decoded.length === 1 ? '' : 's'} prepared locally at a responsive working resolution.`,
+        );
+      } catch (error) {
+        onNotice(error instanceof Error ? error.message : 'Brush image decoding failed.');
+      }
+    },
+    [onAddAssets, onNotice, settings.trimThreshold, settings.trimTransparent],
+  );
 
   useEffect(() => {
     const paste = (event: ClipboardEvent) => {
@@ -558,7 +495,7 @@ export function ImageBrushPanel({
     };
     window.addEventListener('paste', paste);
     return () => window.removeEventListener('paste', paste);
-  });
+  }, [addFiles]);
 
   useEffect(() => {
     if (!contextAssetId) return;
@@ -743,18 +680,6 @@ export function ImageBrushPanel({
   return (
     <section
       className={`image-brush-lab image-brush-compact ${draggingFiles ? 'dragging-files' : ''}`}
-      onPointerOver={(event) => {
-        const input = (event.target as HTMLElement).closest<HTMLInputElement>(
-          'input[type="range"]',
-        );
-        if (input?.getAttribute('aria-label')) setControlExample(input.getAttribute('aria-label')!);
-      }}
-      onFocusCapture={(event) => {
-        const input = (event.target as HTMLElement).closest<HTMLInputElement>(
-          'input[type="range"]',
-        );
-        if (input?.getAttribute('aria-label')) setControlExample(input.getAttribute('aria-label')!);
-      }}
       onDragEnter={(event) => {
         if (!event.dataTransfer.types.includes('Files')) return;
         event.preventDefault();
@@ -1058,6 +983,39 @@ export function ImageBrushPanel({
         </p>
       </section>
 
+      <section className="image-brush-compact-section image-brush-live-preview">
+        <header>
+          <strong>LIVE STROKE PREVIEW</strong>
+          <span>
+            {processedPreview
+              ? `${processedPreview.quality} · ${processedPreview.stroke.stampCount} stamps`
+              : active
+                ? 'UPDATING'
+                : 'IMAGE NEEDED'}
+          </span>
+        </header>
+        <div className="image-brush-live-preview-stage brush-checker">
+          <canvas
+            ref={liveStrokePreviewRef}
+            width={480}
+            height={168}
+            aria-label="Live Image Brush stroke preview"
+          />
+          {!active && <span>Add or select an image to preview the complete brush stroke.</span>}
+        </div>
+        <p>
+          One bounded preview shows the current image, spacing, opacity, layout, mutation, Stamp FX,
+          alpha and blend settings together. It renders off the main thread.
+        </p>
+        {processedPreview && (
+          <small>
+            {processedPreview.stroke.processingMs.toFixed(1)} ms ·{' '}
+            {processedPreview.diagnostics.cacheVariants} cached variant
+            {processedPreview.diagnostics.cacheVariants === 1 ? '' : 's'}
+          </small>
+        )}
+      </section>
+
       <section
         className="image-brush-compact-section image-brush-essential"
         data-testid="image-brush-essential"
@@ -1122,12 +1080,6 @@ export function ImageBrushPanel({
           onChange={(value) => update('effectVariation', value)}
         />
       </section>
-
-      <ImageBrushControlExample
-        asset={active}
-        preview={processedPreview}
-        control={controlExample}
-      />
 
       <section className="image-brush-compact-section image-brush-mutation-main">
         <header>
@@ -1194,8 +1146,11 @@ export function ImageBrushPanel({
                 .join(' · ')
             : 'No Stamp FX. Clean Repeat keeps the uploaded image unchanged.'}
         </p>
-        <details className="image-brush-advanced-group image-brush-fx-editor">
-          <summary>Edit effect stack</summary>
+        <LazyAdvancedDetails
+          summary="Edit effect stack"
+          className="image-brush-fx-editor"
+          initiallyMounted={initialInterfaceLevel === 'advanced'}
+        >
           <div className="image-brush-add-fx">
             <label className="image-brush-select">
               <span>
@@ -1357,13 +1312,15 @@ export function ImageBrushPanel({
               <div className="image-brush-empty">Add an effect to build a Stamp FX stack.</div>
             )}
           </div>
-        </details>
+        </LazyAdvancedDetails>
       </section>
 
       <div className="image-brush-advanced-label">ADVANCED</div>
 
-      <details className="image-brush-advanced-group">
-        <summary>Stamp Layout</summary>
+      <LazyAdvancedDetails
+        summary="Stamp Layout"
+        initiallyMounted={initialInterfaceLevel === 'advanced'}
+      >
         <SelectField
           label="Brush mode"
           value={settings.mode}
@@ -1556,10 +1513,12 @@ export function ImageBrushPanel({
             onChange={(value) => update('showOutline', value)}
           />
         </div>
-      </details>
+      </LazyAdvancedDetails>
 
-      <details className="image-brush-advanced-group">
-        <summary>Mutation</summary>
+      <LazyAdvancedDetails
+        summary="Mutation"
+        initiallyMounted={initialInterfaceLevel === 'advanced'}
+      >
         <SelectField
           helpId="image-brush.fx-stage"
           label="Processing stage"
@@ -2003,10 +1962,12 @@ export function ImageBrushPanel({
             <Clipboard size={12} />
           </button>
         </div>
-      </details>
+      </LazyAdvancedDetails>
 
-      <details className="image-brush-advanced-group">
-        <summary>Whole Trail FX</summary>
+      <LazyAdvancedDetails
+        summary="Whole Trail FX"
+        initiallyMounted={initialInterfaceLevel === 'advanced'}
+      >
         <p className="image-brush-inline-note">
           Whole Trail and Tip + Trail process one connected local stroke region after placement.
         </p>
@@ -2031,10 +1992,12 @@ export function ImageBrushPanel({
           defaultValue={0.24}
           onChange={(value) => update('structuralDrift', value)}
         />
-      </details>
+      </LazyAdvancedDetails>
 
-      <details className="image-brush-advanced-group">
-        <summary>Alpha and Blending</summary>
+      <LazyAdvancedDetails
+        summary="Alpha and Blending"
+        initiallyMounted={initialInterfaceLevel === 'advanced'}
+      >
         <SelectField
           label="Alpha mode"
           value={settings.alphaMode}
@@ -2097,10 +2060,12 @@ export function ImageBrushPanel({
             onChange={(value) => update('trimThreshold', value)}
           />
         )}
-      </details>
+      </LazyAdvancedDetails>
 
-      <details className="image-brush-advanced-group">
-        <summary>Pressure</summary>
+      <LazyAdvancedDetails
+        summary="Pressure"
+        initiallyMounted={initialInterfaceLevel === 'advanced'}
+      >
         <div className="image-brush-toggle-grid">
           <Toggle
             label="Pressure → size"
@@ -2140,10 +2105,12 @@ export function ImageBrushPanel({
             onChange={(value) => update('minPressureOpacity', value)}
           />
         )}
-      </details>
+      </LazyAdvancedDetails>
 
-      <details className="image-brush-advanced-group">
-        <summary>Performance</summary>
+      <LazyAdvancedDetails
+        summary="Performance"
+        initiallyMounted={initialInterfaceLevel === 'advanced'}
+      >
         <SelectField
           helpId="control.rendering-quality"
           label="Rendering quality"
@@ -2234,10 +2201,12 @@ export function ImageBrushPanel({
             <dd>{performance.fullDocumentCopies}</dd>
           </dl>
         )}
-      </details>
+      </LazyAdvancedDetails>
 
-      <details className="image-brush-advanced-group">
-        <summary>Library and Project</summary>
+      <LazyAdvancedDetails
+        summary="Library and Project"
+        initiallyMounted={initialInterfaceLevel === 'advanced'}
+      >
         <div className="image-brush-library-project-actions">
           <button disabled={!active} onClick={() => active && duplicateAsset(active)}>
             <Copy size={12} /> Duplicate image
@@ -2289,7 +2258,7 @@ export function ImageBrushPanel({
             <Zap size={11} /> Randomize Everything
           </button>
         </div>
-      </details>
+      </LazyAdvancedDetails>
 
       <footer className="image-brush-reset">
         <button

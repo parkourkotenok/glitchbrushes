@@ -30,7 +30,6 @@ import {
   clearActiveLayer,
   deleteActiveLayer,
   duplicateActiveLayer,
-  flattenLayerStack,
   layerTileCount,
   mergeActiveLayerDown,
   moveActiveLayer,
@@ -89,7 +88,7 @@ interface EffectPanelProps {
   layerStack: LayerStack;
   layerVersion: number;
   currentLayer: { id: string; name: string; opacity: number; blendMode: LayerBlendMode };
-  original: Uint8ClampedArray;
+  onFlattenLayers: () => void;
   onSelectLayer: (id: string, name: string) => void;
   onRunLayerOperation: (label: string, mutate: (stack: LayerStack) => boolean | void) => void;
 }
@@ -132,7 +131,7 @@ export function EffectPanel({
   layerStack,
   layerVersion,
   currentLayer,
-  original,
+  onFlattenLayers,
   onSelectLayer,
   onRunLayerOperation,
 }: EffectPanelProps) {
@@ -516,14 +515,7 @@ export function EffectPanel({
           >
             <Trash2 size={13} /> Delete
           </button>
-          <button
-            className="layer-flatten-button"
-            onClick={() =>
-              onRunLayerOperation('Flatten layer stack', (stack) => {
-                flattenLayerStack(stack, original);
-              })
-            }
-          >
+          <button className="layer-flatten-button" onClick={onFlattenLayers}>
             Flatten visible result
           </button>
         </div>

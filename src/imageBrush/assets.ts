@@ -135,6 +135,40 @@ export function resizeRgba(
   return { pixels: output, width: nextWidth, height: nextHeight };
 }
 
+function resizeRgbaBounds(
+  pixels: Uint8ClampedArray,
+  sourceWidth: number,
+  bounds: Rectangle,
+  maximumDimension: number | null,
+): { pixels: Uint8ClampedArray; width: number; height: number } {
+  if (maximumDimension === null || Math.max(bounds.width, bounds.height) <= maximumDimension) {
+    return {
+      pixels: cropRgba(pixels, sourceWidth, bounds),
+      width: bounds.width,
+      height: bounds.height,
+    };
+  }
+  const scale = Math.max(1, Math.round(maximumDimension)) / Math.max(bounds.width, bounds.height);
+  const width = Math.max(1, Math.round(bounds.width * scale));
+  const height = Math.max(1, Math.round(bounds.height * scale));
+  const output = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    const sourceY =
+      bounds.y + Math.min(bounds.height - 1, Math.floor(((y + 0.5) * bounds.height) / height));
+    for (let x = 0; x < width; x += 1) {
+      const sourceX =
+        bounds.x + Math.min(bounds.width - 1, Math.floor(((x + 0.5) * bounds.width) / width));
+      const source = (sourceY * sourceWidth + sourceX) * 4;
+      const target = (y * width + x) * 4;
+      output[target] = pixels[source]!;
+      output[target + 1] = pixels[source + 1]!;
+      output[target + 2] = pixels[source + 2]!;
+      output[target + 3] = pixels[source + 3]!;
+    }
+  }
+  return { pixels: output, width, height };
+}
+
 export function optimizeImageBrushAsset(
   asset: ImageBrushAsset,
   maximumDimension: number | null,
@@ -144,11 +178,12 @@ export function optimizeImageBrushAsset(
   const bounds = trim
     ? transparentBounds(asset.originalPixels, asset.originalWidth, asset.originalHeight, threshold)
     : { x: 0, y: 0, width: asset.originalWidth, height: asset.originalHeight };
-  const cropped = cropRgba(asset.originalPixels, asset.originalWidth, bounds);
-  const resized =
-    maximumDimension === null
-      ? { pixels: cropped, width: bounds.width, height: bounds.height }
-      : resizeRgba(cropped, bounds.width, bounds.height, maximumDimension);
+  const resized = resizeRgbaBounds(
+    asset.originalPixels,
+    asset.originalWidth,
+    bounds,
+    maximumDimension,
+  );
   return {
     ...asset,
     width: resized.width,
@@ -167,11 +202,18 @@ export function createImageBrushAsset(
   height: number,
   trim = true,
   threshold = 2,
-  options: { id?: string; demo?: boolean; defaultSize?: number } = {},
+  options: {
+    id?: string;
+    demo?: boolean;
+    defaultSize?: number;
+    maximumDimension?: number | null;
+    reuseOriginalPixels?: boolean;
+  } = {},
 ): ImageBrushAsset {
   const trimBounds = trim
     ? transparentBounds(pixels, width, height, threshold)
     : { x: 0, y: 0, width, height };
+  const working = resizeRgbaBounds(pixels, width, trimBounds, options.maximumDimension ?? null);
   return {
     id: options.id ?? `image-brush-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     name,
@@ -179,12 +221,11 @@ export function createImageBrushAsset(
     mimeType,
     originalWidth: width,
     originalHeight: height,
-    originalPixels: pixels.slice(),
-    width: trimBounds.width,
-    height: trimBounds.height,
-    pixels: cropRgba(pixels, width, trimBounds),
+    originalPixels: options.reuseOriginalPixels ? pixels : pixels.slice(),
+    width: working.width,
+    height: working.height,
+    pixels: working.pixels,
     trimBounds,
-    embeddedDataUrl: embeddedRgbaDataUrl(pixels, width, height),
     defaultSize: options.defaultSize ?? Math.min(160, Math.max(32, Math.max(width, height))),
     anchor: 'center',
     customAnchor: { x: 0.5, y: 0.5 },
@@ -384,6 +425,10 @@ export function createDemoBrushAssets(): ImageBrushAsset[] {
 }
 
 export function serializeImageBrushAsset(asset: ImageBrushAsset): SerializedImageBrushAsset {
+  const dataUrl =
+    asset.embeddedDataUrl ??
+    embeddedRgbaDataUrl(asset.originalPixels, asset.originalWidth, asset.originalHeight);
+  asset.embeddedDataUrl = dataUrl;
   return {
     id: asset.id,
     name: asset.name,
@@ -391,7 +436,7 @@ export function serializeImageBrushAsset(asset: ImageBrushAsset): SerializedImag
     mimeType: asset.mimeType,
     originalWidth: asset.originalWidth,
     originalHeight: asset.originalHeight,
-    embeddedDataUrl: asset.embeddedDataUrl,
+    embeddedDataUrl: dataUrl,
     defaultSize: asset.defaultSize,
     anchor: asset.anchor,
     customAnchor: { ...asset.customAnchor },
@@ -416,6 +461,7 @@ export function restoreImageBrushAsset(
     settings.trimThreshold,
     { id: serialized.id, demo: serialized.demo, defaultSize: serialized.defaultSize },
   );
+  restored.embeddedDataUrl = serialized.embeddedDataUrl;
   restored.anchor = serialized.anchor;
   restored.customAnchor = { ...serialized.customAnchor };
   restored.fxPresetId = serialized.fxPresetId;

@@ -56,6 +56,7 @@ import {
   createImageBrushLivePreviewBackground,
   createImageBrushLivePreviewLayout,
   imageBrushLivePreviewMagnification,
+  imageBrushLivePreviewStampCount,
 } from './imageBrush/livePreview';
 import {
   applyImageBrushGlitchAmount,
@@ -275,8 +276,8 @@ describe('Image Brush processing', () => {
     const draft = createImageBrushLivePreviewLayout(defaultImageBrushSettings, 'draft', 1120, 720);
     expect([compact.width, compact.height]).toEqual([480, 168]);
     expect([draft.width, draft.height]).toEqual([240, 84]);
-    expect(compact.stamps.length).toBeGreaterThan(sparse.stamps.length);
-    expect(compact.stamps.length).toBeLessThanOrEqual(24);
+    expect(compact.stamps).toHaveLength(imageBrushLivePreviewStampCount);
+    expect(sparse.stamps).toHaveLength(imageBrushLivePreviewStampCount);
     expect(compact.settings.size).toBeCloseTo(
       96 * Math.max(480 / 1120, 168 / 720) * imageBrushLivePreviewMagnification,
     );
@@ -286,6 +287,7 @@ describe('Image Brush processing', () => {
     expect(compact.stamps[1]!.position.x - compact.stamps[0]!.position.x).toBeCloseTo(
       compact.settings.spacing,
     );
+    expect(compact.settings.spacing).toBeGreaterThan(compact.settings.size * 0.75);
     expect(draft.settings.maxCachedVariants).toBeLessThanOrEqual(2);
     expect(compact.settings.maxCachedVariants).toBeLessThanOrEqual(4);
     expect(compact.settings.renderingQuality).toBe('balanced');

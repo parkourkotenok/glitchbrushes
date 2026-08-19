@@ -60,7 +60,10 @@ import {
   supportsImageBrushStages,
 } from '../effects/sharedRegistry';
 import { decodeImageBrushFilesOffThread } from '../imageBrush/decode';
-import { imageBrushLivePreviewMagnification } from '../imageBrush/livePreview';
+import {
+  imageBrushLivePreviewMagnification,
+  imageBrushLivePreviewStampCount,
+} from '../imageBrush/livePreview';
 
 interface ProcessedBrushPreview {
   pixels: Uint8ClampedArray;
@@ -991,9 +994,9 @@ export function ImageBrushPanel({
         </div>
         <p>
           One bounded preview shows the current image, spacing, opacity, layout, mutation, Stamp FX,
-          alpha and blend settings together. Stamps are enlarged{' '}
-          {imageBrushLivePreviewMagnification}× for readability; the canvas uses the exact Size. It
-          renders off the main thread.
+          alpha and blend settings together. It uses {imageBrushLivePreviewStampCount} enlarged
+          stamps with opened-up spacing ({imageBrushLivePreviewMagnification}×) for readability; the
+          canvas uses the exact Size and spacing. It renders off the main thread.
         </p>
         {processedPreview && (
           <small>

@@ -53,7 +53,7 @@
 
 ### 2026-08-19 publication gate
 
-- Image Brush Live Stroke Preview увеличивает только демонстрационную геометрию штампа и spacing в `1.5×`; реальный canvas Size и финальный Worker stroke не меняются. UI явно показывает коэффициент.
+- Image Brush Live Stroke Preview показывает пять демонстрационных штампов, увеличивает их до `2.25×` и раздвигает spacing для читаемости; реальный canvas Size/Spacing и финальный Worker stroke не меняются. UI явно показывает коэффициент.
 - Проверены все три Markdown-файла репозитория. `README.md` описывает текущий продукт, этот worklog содержит актуальный срез, а `DECOMPOSITION_REPORT.md` помечен как исторический отчёт с follow-up после удаления File Corruption и добавления текущих компонентов.
 - `npm run typecheck` ✓
 - `npm test -- --run` ✓ — 10 файлов, 188/188 тестов.

@@ -12,7 +12,8 @@ export interface ImageBrushLivePreviewLayout {
  * The inspector preview is intentionally enlarged so small stamp details and FX remain readable.
  * This affects only the demonstration strip; the canvas stroke continues to use the exact Size.
  */
-export const imageBrushLivePreviewMagnification = 1.5;
+export const imageBrushLivePreviewMagnification = 2.25;
+export const imageBrushLivePreviewStampCount = 5;
 
 export function createImageBrushLivePreviewBackground(
   width: number,
@@ -61,16 +62,17 @@ export function createImageBrushLivePreviewLayout(
   const height = quality === 'draft' ? 84 : 168;
   const scale = Math.max(width / Math.max(1, documentWidth), height / Math.max(1, documentHeight));
   const previewSize = Math.max(0.5, settings.size * scale * imageBrushLivePreviewMagnification);
-  const spacingPixels =
+  const requestedSpacing =
     settings.spacingUnit === 'percent'
       ? previewSize * (settings.spacing / 100)
       : settings.spacing * scale * imageBrushLivePreviewMagnification;
-  const spacing = Math.max(0.5, spacingPixels);
   const left = Math.min(width / 2, previewSize * 0.62);
   const right = Math.max(width / 2, width - previewSize * 0.62);
   const available = Math.max(1, right - left);
-  const stampCount = Math.max(1, Math.min(24, Math.floor(available / spacing) + 1));
-  const step = spacing;
+  const stampCount = imageBrushLivePreviewStampCount;
+  const maximumStep = available / Math.max(1, stampCount - 1);
+  const readableStep = Math.min(maximumStep, previewSize * 0.82);
+  const step = clamp(requestedSpacing * 1.35, readableStep, maximumStep);
   const occupied = Math.min(available, Math.max(0, stampCount - 1) * step);
   const centeredLeft = (width - occupied) / 2;
   const points = Array.from({ length: stampCount }, (_, index) => ({
@@ -104,9 +106,9 @@ export function createImageBrushLivePreviewLayout(
       ...settings,
       customAnchor: { ...settings.customAnchor },
       size: previewSize,
-      spacing,
+      spacing: step,
       spacingUnit: 'pixels',
-      maxGeneratedStamps: Math.min(settings.maxGeneratedStamps, 24),
+      maxGeneratedStamps: Math.min(settings.maxGeneratedStamps, imageBrushLivePreviewStampCount),
       maxCachedVariants:
         quality === 'draft'
           ? Math.min(settings.maxCachedVariants, 2)

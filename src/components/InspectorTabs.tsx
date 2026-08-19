@@ -1,7 +1,7 @@
-import { Droplets, SlidersHorizontal, Zap } from 'lucide-react';
+import { Droplets, SlidersHorizontal } from 'lucide-react';
 import { EffectIcon } from '../icons/effects';
 
-export type InspectorPanelId = 'effect' | 'retouch' | 'mosh' | 'image-brush' | 'raw';
+export type InspectorPanelId = 'effect' | 'retouch' | 'mosh' | 'image-brush';
 
 interface InspectorTabsProps {
   activePanel: InspectorPanelId;
@@ -31,9 +31,6 @@ export function InspectorTabs({ activePanel, onSelect }: InspectorTabsProps) {
         onClick={() => onSelect('image-brush')}
       >
         <EffectIcon id="image-brush" size={15} /> Image Brush
-      </button>
-      <button className={activePanel === 'raw' ? 'active' : ''} onClick={() => onSelect('raw')}>
-        <Zap size={15} /> File Corruption
       </button>
     </nav>
   );

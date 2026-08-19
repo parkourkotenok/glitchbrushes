@@ -2,9 +2,25 @@
 
 ## Project Goal
 
-Создать полностью локальное React + TypeScript + Vite приложение для художественного глитчинга PNG, JPEG и WebP: кисть должна изменять RGBA-байты только в области мазка, интерактивный HEX-редактор должен быть связан с canvas, оригинал должен оставаться восстанавливаемым, а проект — поддерживать историю, пресеты, экспорт, слои и отдельный безопасный режим Raw File Glitch.
+Поддерживать полностью локальный React + TypeScript + Vite редактор **Parkour Kotenok / Glitch Brushes** для художественного глитчинга PNG, JPEG и WebP. Текущее направление — понятный Simple/Advanced интерфейс, быстрые локальные кисти, полноценные слои, предсказуемые предпросмотры, восстанавливаемый оригинал, история и экспорт. HEX и File Corruption больше не входят в продукт.
 
-## Current Status
+## Current Status — 2026-08-19
+
+- У приложения есть минимальный входной экран Parkour Kotenok с одной кнопкой входа в Glitch Brushes; название и метаданные приведены к текущему бренду.
+- В production остаются четыре рабочих раздела: Effect, Retouch, Mosh Lab и Image Brush. HEX и File Corruption вместе с их Worker/тестами удалены.
+- Effect получил Simple/Advanced режим, компактный читаемый picker и статичные заранее подготовленные Original / Effect Result / Changed Pixels previews на пейзажном фоне.
+- Retouch получил Smudge и отдельный Photoshop-like Finger; тяжёлое bookkeeping и полноразмерные очистки убраны с pointer hot path, Real Tool Preview удалён.
+- Реальные sparse raster layers выбираются в отдельном нижнем dock: Original неизменяем, остальные слои поддерживают видимость, lock, opacity, blend, rename, add/duplicate/delete/reorder/merge/flatten и History.
+- Image Brush использует одно демо астронавта, сохраняет пользовательскую библиотеку в IndexedDB и держит Essential Controls выше Style. Style меняет художественный рецепт, но не Size/Spacing/Orientation/Opacity/Glitch Amount.
+- Live Image Brush drawing и ghost preview ограничены временным бюджетом кадра; layout/rotation общие с финальным engine, обратное направление больше не переворачивает осевую кисть на 180°.
+- Live Stroke Preview работает вне main thread, показывает тот же pipeline и намеренно увеличивает демонстрационные штампы в 1.5× для читаемости, не меняя реальный canvas Size.
+- Загрузка документа и Image Brush assets вынесена в Worker с ограничением размера, progressive-JPEG watchdog/fallback и без автоматического запуска тяжёлого Mosh preview после Open.
+- Статичные preview assets генерируются командой `npm run generate:effect-previews`; Windows launcher — `start-local.bat`.
+- Актуальные проверки текущей ветки фиксируются в конце этого файла после финального запуска `typecheck`, Vitest и production build.
+
+## Historical Status Snapshot
+
+Следующие пункты сохраняют состояние более ранних этапов. Упоминания HEX, File Corruption, старых demo-наборов и прежних счётчиков не описывают текущий production UI.
 
 - Созданы Vite/React/TypeScript приложение, полный desktop UI и модульная структура `src/`.
 - Реализованы seeded RGBA-алгоритмы, кисть, маска, canvas, zoom/pan, Continuous/Stroke/Preview и патч-история.
@@ -32,6 +48,19 @@
 - Финальная матрица repair: TypeScript success, 6 test files / 108 tests, production build success, visible Edge pointer acceptance на 1000²/2000²/4000², Cancel 16.8 ms без изменения документа и успешный Firefox headless render.
 
 ## Current Priority
+
+Опубликовать текущий интегрированный editor/UI/performance набор после полного typecheck/test/build.
+
+### 2026-08-19 publication gate
+
+- Image Brush Live Stroke Preview увеличивает только демонстрационную геометрию штампа и spacing в `1.5×`; реальный canvas Size и финальный Worker stroke не меняются. UI явно показывает коэффициент.
+- Проверены все три Markdown-файла репозитория. `README.md` описывает текущий продукт, этот worklog содержит актуальный срез, а `DECOMPOSITION_REPORT.md` помечен как исторический отчёт с follow-up после удаления File Corruption и добавления текущих компонентов.
+- `npm run typecheck` ✓
+- `npm test -- --run` ✓ — 10 файлов, 188/188 тестов.
+- `npm run build` ✓ — 1656 modules transformed, production assets собраны.
+- Prettier применён к текущим исходникам и документации; `git diff --check` запускается перед commit.
+
+## Historical Priorities
 
 2026-08-01 P0 completed: major editor cleanup and rebuild using the user-supplied `астронавт2.png` as the mandatory visual source. All eight stages are implemented and accepted in headed Firefox; visible Edge passed the final layout and real Glitched Repeat commit smoke test. The measured slow Edge whole-trail case is recorded below instead of being hidden.
 

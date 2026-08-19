@@ -10,8 +10,8 @@ interface DecodeRequest {
 self.onmessage = async (event: MessageEvent<DecodeRequest>) => {
   const { jobId, file } = event.data;
   try {
-    const raw = await file.arrayBuffer();
-    const encoded = readEncodedImageDimensions(raw, file.type);
+    const encodedBytes = await file.arrayBuffer();
+    const encoded = readEncodedImageDimensions(encodedBytes, file.type);
     const requested = encoded ? fitImportedDocument(encoded.width, encoded.height) : null;
     const resizeOptions: ImageBitmapOptions | undefined =
       requested?.resized && encoded
@@ -45,11 +45,10 @@ self.onmessage = async (event: MessageEvent<DecodeRequest>) => {
         ...dimensions,
         original: original.buffer,
         pixels: pixels.buffer,
-        raw,
         mask: mask.buffer,
       };
       self.postMessage(response, {
-        transfer: [response.original, response.pixels, response.raw, response.mask],
+        transfer: [response.original, response.pixels, response.mask],
       });
       self.close();
     } finally {

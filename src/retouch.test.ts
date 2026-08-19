@@ -82,6 +82,21 @@ describe('retouch engine', () => {
     expect(result.pixels[destination + 1]).toBeLessThan(pixels[destination + 1]!);
   });
 
+  it('Finger continuously pushes the live neighborhood in the drag direction', () => {
+    const width = 18;
+    const height = 5;
+    const pixels = new Uint8ClampedArray(width * height * 4);
+    for (let x = 0; x < width; x += 1) {
+      const offset = (2 * width + x) * 4;
+      pixels[offset] = x < 4 ? 255 : 0;
+      pixels[offset + 3] = 255;
+    }
+    const result = processRetouch(request('finger', pixels, width, height));
+    // The bright pickup beneath the first dab is carried to the final dab on the right.
+    expect(result.pixels[(2 * width + 14) * 4]!).toBeGreaterThan(0);
+    expect(result.affectedPixels).toBeGreaterThan(0);
+  });
+
   it('Blur reduces local high-frequency variation', () => {
     const width = 14;
     const height = 10;

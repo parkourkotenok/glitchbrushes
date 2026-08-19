@@ -31,7 +31,8 @@ export type AlgorithmFamily =
   'pixel' | 'block' | 'line' | 'region' | 'datamosh' | 'mixed' | 'advanced-brush';
 export type ApplyMode = 'continuous' | 'stroke' | 'preview';
 export type MaskView = 'red' | 'mono' | 'hidden';
-export type Tool = 'brush' | 'hand' | 'smudge' | 'blur' | 'sharpen' | 'restore' | 'eraser';
+export type Tool =
+  'brush' | 'hand' | 'smudge' | 'finger' | 'blur' | 'sharpen' | 'restore' | 'eraser';
 export type SpillMode = 'local' | 'small' | 'medium' | 'strong';
 export type Orientation = 'horizontal' | 'vertical' | 'mixed';
 export type EdgeMode = 'wrap' | 'clamp' | 'neighbor';
@@ -67,6 +68,7 @@ export type EffectIconId =
   | 'flow-field'
   | 'image-brush'
   | 'smudge'
+  | 'finger'
   | 'blur'
   | 'sharpen'
   | 'eraser'
@@ -351,8 +353,6 @@ export interface EditorDocument {
   pixels: Uint8ClampedArray;
   fileName: string;
   mimeType: string;
-  rawOriginal: Uint8Array | null;
-  rawMutated: Uint8Array | null;
   dirty: boolean;
 }
 

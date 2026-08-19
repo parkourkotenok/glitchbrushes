@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { GlitchAlgorithm } from '../types';
-import type { AlgorithmSettings } from '../types';
 import { EffectIcon, algorithmIconIds } from '../icons/effects';
-import { EffectPreviewStage, type EffectPreviewSource } from './EffectPreviewStage';
+import { EffectPreviewStage, effectPreviewAssetUrl } from './EffectPreviewStage';
 import { sharedEffectForAlgorithm } from '../effects/sharedRegistry';
 
 interface EffectPickerProps {
@@ -10,9 +9,6 @@ interface EffectPickerProps {
   items: GlitchAlgorithm[];
   descriptions: Record<string, string>;
   legacyItems?: GlitchAlgorithm[];
-  previewSource: EffectPreviewSource;
-  settings: AlgorithmSettings;
-  seed: string;
   onChange(id: GlitchAlgorithm['id']): void;
 }
 
@@ -21,9 +17,6 @@ export function EffectPicker({
   items,
   descriptions,
   legacyItems = [],
-  previewSource,
-  settings,
-  seed,
   onChange,
 }: EffectPickerProps) {
   const [open, setOpen] = useState(false);
@@ -36,11 +29,32 @@ export function EffectPicker({
     const close = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
     window.addEventListener('pointerdown', close);
-    return () => window.removeEventListener('pointerdown', close);
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('pointerdown', close);
+      window.removeEventListener('keydown', closeOnEscape);
+    };
   }, [open]);
 
   useEffect(() => setPreviewId(value.id), [value.id]);
+  useEffect(() => {
+    const ids = [...items, ...legacyItems].map((item) => item.id);
+    const urls = [
+      '/assets/effect-previews/original.webp',
+      ...ids.flatMap((id) => [
+        effectPreviewAssetUrl(id, 'after'),
+        effectPreviewAssetUrl(id, 'difference'),
+      ]),
+    ];
+    for (const url of urls) {
+      const image = new Image();
+      image.src = url;
+    }
+  }, [items, legacyItems]);
   const previewItem = [...items, ...legacyItems].find((item) => item.id === previewId) ?? value;
   const sharedPreviewItem = sharedEffectForAlgorithm(previewId);
 
@@ -78,7 +92,7 @@ export function EffectPicker({
     <div className={`effect-picker ${open ? 'open' : ''}`} ref={rootRef}>
       <button
         aria-expanded={open}
-        aria-haspopup="listbox"
+        aria-haspopup="dialog"
         className="effect-picker-trigger"
         onClick={() => setOpen((current) => !current)}
       >
@@ -87,58 +101,59 @@ export function EffectPicker({
         <span aria-hidden="true">⌄</span>
       </button>
       {open && (
-        <div className="effect-picker-menu" role="listbox">
-          <EffectPreviewStage
-            algorithm={previewId}
-            source={previewSource}
-            settings={settings}
-            seed={seed}
-            description={sharedPreviewItem?.description ?? descriptions[previewId]}
-            estimatedCost={(
-              sharedPreviewItem?.cost ??
-              (previewItem.family === 'advanced-brush'
-                ? 'high'
-                : previewItem.family === 'pixel'
-                  ? 'low'
-                  : 'medium')
-            ).toUpperCase()}
-          />
-          {renderGroup(
-            'ADVANCED BRUSH EFFECTS',
-            items.filter((item) => item.family === 'advanced-brush'),
-          )}
-          {renderGroup(
-            'STRUCTURAL GLITCH STAMPS',
-            items.filter(
-              (item) =>
-                item.family !== 'pixel' &&
-                item.family !== 'advanced-brush' &&
-                item.id !== 'structural-mixed',
-            ),
-          )}
-          {renderGroup(
-            'META / COMBINATION EFFECTS',
-            items.filter((item) => item.id === 'structural-mixed'),
-            true,
-          )}
-          {legacyItems.length > 0 && (
-            <div className="effect-picker-legacy-toggle">
-              <button
-                aria-expanded={showLegacy}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setShowLegacy((current) => !current);
-                }}
-              >
-                {showLegacy ? 'Hide Legacy Effects' : 'Show Legacy Effects'}
-              </button>
-              <small>
-                Older byte-level effects. They are simpler and less structural than the main glitch
-                tools.
-              </small>
-            </div>
-          )}
-          {showLegacy && renderGroup('LEGACY EFFECTS', legacyItems)}
+        <div className="effect-picker-menu" role="dialog" aria-label="Choose an effect">
+          <div className="effect-picker-preview-pinned">
+            <EffectPreviewStage
+              algorithm={previewId}
+              description={sharedPreviewItem?.description ?? descriptions[previewId]}
+              estimatedCost={(
+                sharedPreviewItem?.cost ??
+                (previewItem.family === 'advanced-brush'
+                  ? 'high'
+                  : previewItem.family === 'pixel'
+                    ? 'low'
+                    : 'medium')
+              ).toUpperCase()}
+            />
+          </div>
+          <div className="effect-picker-options" role="listbox" aria-label="Effects">
+            {renderGroup(
+              'ADVANCED BRUSH EFFECTS',
+              items.filter((item) => item.family === 'advanced-brush'),
+            )}
+            {renderGroup(
+              'STRUCTURAL GLITCH STAMPS',
+              items.filter(
+                (item) =>
+                  item.family !== 'pixel' &&
+                  item.family !== 'advanced-brush' &&
+                  item.id !== 'structural-mixed',
+              ),
+            )}
+            {renderGroup(
+              'META / COMBINATION EFFECTS',
+              items.filter((item) => item.id === 'structural-mixed'),
+              true,
+            )}
+            {legacyItems.length > 0 && (
+              <div className="effect-picker-legacy-toggle">
+                <button
+                  aria-expanded={showLegacy}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setShowLegacy((current) => !current);
+                  }}
+                >
+                  {showLegacy ? 'Hide Legacy Effects' : 'Show Legacy Effects'}
+                </button>
+                <small>
+                  Older byte-level effects. They are simpler and less structural than the main
+                  glitch tools.
+                </small>
+              </div>
+            )}
+            {showLegacy && renderGroup('LEGACY EFFECTS', legacyItems)}
+          </div>
         </div>
       )}
     </div>

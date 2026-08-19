@@ -1,6 +1,6 @@
 import type { BrushSettings, Point, Rectangle } from '../types';
 
-export type RetouchTool = 'smudge' | 'blur' | 'sharpen' | 'restore' | 'eraser';
+export type RetouchTool = 'smudge' | 'finger' | 'blur' | 'sharpen' | 'restore' | 'eraser';
 export type RestoreSource = 'original' | 'lower-layer' | 'previous-history';
 
 export interface RetouchSettings {

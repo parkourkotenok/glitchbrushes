@@ -201,12 +201,12 @@ const imageBrushHelp: ControlHelp[] = [
     defaultValue: 'Auto',
   },
   {
-    id: 'image-brush.lock-seed',
-    title: 'Lock seed',
+    id: 'image-brush.lock-recipe',
+    title: 'Lock recipe',
     short:
       'Keeps the current seed and variation nonce so the same randomization action reproduces the same recipe.',
     description:
-      'Turn it off to increment the nonce on every randomize click, or use New Variation to increment it explicitly.',
+      'Turn it off to generate a fresh variation on every Randomize style click. Turn it on to replay the current seeded recipe.',
     performance: 'No direct processing cost.',
     output: 'Changes recipe generation, not committed pixels by itself.',
     defaultValue: 'Off',
@@ -1190,77 +1190,11 @@ const imageBrushMutationControlHelp: ControlHelp[] = [
   output: 'Affects live preview and the final IMAGE BRUSH stroke.',
 }));
 
-const fileCorruptionHelp: ControlHelp[] = [
-  {
-    id: 'file-corruption.protected-prefix',
-    title: 'Protected Prefix',
-    short: 'Keeps the beginning of the encoded file unchanged.',
-    description:
-      'The configured percentage, with an absolute minimum of 64 leading bytes, is excluded from every mutation attempt.',
-    performance: 'No material processing cost.',
-    output:
-      'A larger prefix may preserve decoding but leaves fewer bytes available for corruption.',
-    defaultValue: '8%',
-  },
-  {
-    id: 'file-corruption.mutation-count',
-    title: 'Mutation Count',
-    short: 'Sets the exact number of seeded byte mutation operations per decode attempt.',
-    description:
-      'Offsets may repeat, so the number of distinct changed byte positions can be lower than this operation count.',
-    performance: 'Cost rises linearly but decoding usually dominates.',
-    output: 'Higher counts generally create more destructive encoded-file damage.',
-    defaultValue: '24',
-  },
-  {
-    id: 'file-corruption.mutation-range-start',
-    title: 'Mutation Range Start',
-    short: 'Sets the first eligible position after the protected prefix.',
-    description:
-      'The percentage is measured across the unprotected remainder of the encoded file, not across decoded image coordinates.',
-    performance: 'No material processing cost.',
-    output: 'Changes which encoded sections may be mutated.',
-    defaultValue: '0%',
-  },
-  {
-    id: 'file-corruption.mutation-range-end',
-    title: 'Mutation Range End',
-    short: 'Sets the last eligible position in the unprotected encoded bytes.',
-    description:
-      'The range has no direct relationship to left/right or top/bottom positions in the visible image.',
-    performance: 'No material processing cost.',
-    output: 'Narrows or expands the eligible encoded byte interval.',
-    defaultValue: '100%',
-  },
-  {
-    id: 'file-corruption.xor-amount',
-    title: 'XOR Amount',
-    short: 'XORs every chosen encoded byte with this exact 8-bit value.',
-    description: 'For example, 0x08 toggles bit 3 at every selected byte offset.',
-    performance: 'No material processing cost.',
-    output: 'Different bit patterns can produce very different codec failures.',
-    defaultValue: '0x08',
-  },
-  {
-    id: 'file-corruption.retry-limit',
-    title: 'Retry Limit',
-    short: 'Limits how many independently seeded mutations the browser may try to decode.',
-    description:
-      'Every retry starts from the unchanged pre-operation bytes. Failed candidates are discarded.',
-    performance: 'Each retry may require another full image decode.',
-    output:
-      'Does not strengthen one mutation; it only increases the chance of finding a valid candidate.',
-    defaultValue: '4',
-  },
-];
-
 export const helpRegistry: Readonly<Record<string, ControlHelp>> = Object.fromEntries(
-  [
-    ...motionFieldHelp,
-    ...imageBrushHelp,
-    ...imageBrushMutationControlHelp,
-    ...fileCorruptionHelp,
-  ].map((entry) => [entry.id, entry]),
+  [...motionFieldHelp, ...imageBrushHelp, ...imageBrushMutationControlHelp].map((entry) => [
+    entry.id,
+    entry,
+  ]),
 );
 
 export function genericControlHelp(id: string, label: string): ControlHelp {

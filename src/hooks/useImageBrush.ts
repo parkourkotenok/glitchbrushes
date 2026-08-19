@@ -34,6 +34,12 @@ export interface ImageBrushStrokeState {
   layerBefore: LayerStackSnapshot;
 }
 
+export interface ImageBrushGhostVariant {
+  canvas: HTMLCanvasElement;
+  contentWidth: number;
+  contentHeight: number;
+}
+
 export function useImageBrush() {
   const [imageBrushProcessing, setImageBrushProcessing] = useState(false);
   const [imageBrushProgress, setImageBrushProgress] = useState<ImageBrushProgress | null>(null);
@@ -71,8 +77,8 @@ export function useImageBrush() {
   const activeImageBrushIdRef = useRef(activeImageBrushId);
   const imageBrushEvolutionOffsetRef = useRef(0);
   const pendingImageBrushEvolutionRef = useRef<number | null>(null);
-  const imageBrushGhostSourceRef = useRef<HTMLCanvasElement | null>(null);
-  const imageBrushGhostVariantsRef = useRef<HTMLCanvasElement[]>([]);
+  const imageBrushGhostSourceRef = useRef<ImageBrushGhostVariant | null>(null);
+  const imageBrushGhostVariantsRef = useRef<ImageBrushGhostVariant[]>([]);
   const imageBrushLockedRandomizationRef = useRef<{
     key: string;
     settings: ImageBrushSettings;

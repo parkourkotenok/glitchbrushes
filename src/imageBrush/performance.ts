@@ -216,11 +216,32 @@ export function imageBrushLiveStampBudget(
   quality: Exclude<ImageBrushRenderingQuality, 'auto'>,
 ): number {
   const copies = Math.max(1, Math.round(stampsPerStep));
-  const drawBudget = quality === 'high' ? 16 : quality === 'balanced' ? 12 : 8;
+  const drawBudget = quality === 'high' ? 8 : quality === 'balanced' ? 6 : 4;
   return Math.min(
     Math.max(1, Math.round(maxLiveStampsPerFrame)),
     Math.max(1, Math.floor(drawBudget / copies)),
   );
+}
+
+/**
+ * Samples an overloaded disposable live-overlay queue. The final worker still receives the
+ * untouched full stroke, so this protects pointer responsiveness without changing final pixels.
+ */
+export function takeImageBrushLiveBatch<T>(pending: T[], budget: number, backlogLimit = 48): T[] {
+  const count = Math.max(1, Math.floor(budget));
+  if (pending.length <= Math.max(count, backlogLimit)) return pending.splice(0, count);
+  const sourceLength = pending.length;
+  const sampleCount = Math.min(count, sourceLength);
+  const batch: T[] = [];
+  for (let index = 0; index < sampleCount; index += 1) {
+    const sourceIndex =
+      sampleCount === 1
+        ? sourceLength - 1
+        : Math.round((index * (sourceLength - 1)) / (sampleCount - 1));
+    batch.push(pending[sourceIndex]!);
+  }
+  pending.length = 0;
+  return batch;
 }
 
 export function estimateImageBrushCost(

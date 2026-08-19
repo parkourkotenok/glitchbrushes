@@ -227,7 +227,7 @@ export function pickMaskedPoint(
 export function forEachPixel(
   rectangle: Rectangle,
   context: GlitchContext,
-  visitor: (x: number, y: number) => void,
+  visitor: (x: number, y: number, maskInfluence: number) => void,
 ): number {
   const writeBounds = context.writeBounds ?? context.bounds;
   const clipped = clipRectangle(
@@ -247,7 +247,9 @@ export function forEachPixel(
   let touched = 0;
   for (let y = clipped.y; y < clipped.y + clipped.height; y += 1) {
     for (let x = clipped.x; x < clipped.x + clipped.width; x += 1) {
-      visitor(x, y);
+      const maskInfluence = maskAt(context, x, y);
+      if (maskInfluence <= 0.01) continue;
+      visitor(x, y, maskInfluence);
       touched += 1;
     }
   }

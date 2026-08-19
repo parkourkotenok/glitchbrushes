@@ -30,7 +30,7 @@ export function StatusBar({
 }: StatusBarProps) {
   return (
     <footer className="statusbar">
-      <div className="status-message">
+      <div className="status-message" aria-live="polite">
         <span className={`status-light ${isAnyProcessing ? 'busy' : ''}`} />
         {isAnyProcessing
           ? moshProcessing && moshProgress

@@ -8,6 +8,12 @@ export interface ImageBrushLivePreviewLayout {
   stamps: StampPoint[];
 }
 
+/**
+ * The inspector preview is intentionally enlarged so small stamp details and FX remain readable.
+ * This affects only the demonstration strip; the canvas stroke continues to use the exact Size.
+ */
+export const imageBrushLivePreviewMagnification = 1.5;
+
 export function createImageBrushLivePreviewBackground(
   width: number,
   height: number,
@@ -48,23 +54,27 @@ export function createImageBrushLivePreviewBackground(
 export function createImageBrushLivePreviewLayout(
   settings: ImageBrushSettings,
   quality: ImageBrushPreviewQuality,
+  documentWidth: number,
+  documentHeight: number,
 ): ImageBrushLivePreviewLayout {
   const width = quality === 'draft' ? 240 : 480;
   const height = quality === 'draft' ? 84 : 168;
-  const scale = width / 480;
-  const previewSize = clamp(settings.size * scale, quality === 'draft' ? 14 : 28, height * 0.58);
+  const scale = Math.max(width / Math.max(1, documentWidth), height / Math.max(1, documentHeight));
+  const previewSize = Math.max(0.5, settings.size * scale * imageBrushLivePreviewMagnification);
   const spacingPixels =
     settings.spacingUnit === 'percent'
       ? previewSize * (settings.spacing / 100)
-      : settings.spacing * scale;
-  const spacing = clamp(spacingPixels, previewSize * 0.14, previewSize * 1.25);
-  const left = previewSize * 0.62;
-  const right = width - previewSize * 0.62;
+      : settings.spacing * scale * imageBrushLivePreviewMagnification;
+  const spacing = Math.max(0.5, spacingPixels);
+  const left = Math.min(width / 2, previewSize * 0.62);
+  const right = Math.max(width / 2, width - previewSize * 0.62);
   const available = Math.max(1, right - left);
-  const stampCount = Math.max(4, Math.min(12, Math.floor(available / Math.max(1, spacing)) + 1));
-  const step = Math.min(spacing, available / Math.max(1, stampCount - 1));
+  const stampCount = Math.max(1, Math.min(24, Math.floor(available / spacing) + 1));
+  const step = spacing;
+  const occupied = Math.min(available, Math.max(0, stampCount - 1) * step);
+  const centeredLeft = (width - occupied) / 2;
   const points = Array.from({ length: stampCount }, (_, index) => ({
-    x: left + index * step,
+    x: centeredLeft + index * step,
     y: height * 0.5,
   }));
   const stamps = points.map<StampPoint>((position, index) => {
@@ -98,12 +108,23 @@ export function createImageBrushLivePreviewLayout(
       spacingUnit: 'pixels',
       maxGeneratedStamps: Math.min(settings.maxGeneratedStamps, 24),
       maxCachedVariants:
-        quality === 'draft' ? Math.min(settings.maxCachedVariants, 4) : settings.maxCachedVariants,
+        quality === 'draft'
+          ? Math.min(settings.maxCachedVariants, 2)
+          : Math.min(settings.maxCachedVariants, 4),
       maxLiveFxIterations:
         quality === 'draft'
           ? Math.min(settings.maxLiveFxIterations, 2)
-          : settings.maxLiveFxIterations,
-      renderingQuality: quality === 'draft' ? 'realtime' : settings.renderingQuality,
+          : Math.min(settings.maxLiveFxIterations, 3),
+      variantCount:
+        quality === 'draft'
+          ? Math.min(settings.variantCount, 2)
+          : Math.min(settings.variantCount, 4),
+      renderingQuality:
+        quality === 'draft'
+          ? 'realtime'
+          : settings.renderingQuality === 'auto'
+            ? 'balanced'
+            : settings.renderingQuality,
       pressureSize: false,
       pressureOpacity: false,
       pressureSpacing: false,

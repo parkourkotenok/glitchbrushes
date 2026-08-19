@@ -5,6 +5,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   type ChangeEvent,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
@@ -17,7 +18,6 @@ const MoshLab = lazy(() => import('./components/MoshLab').then((m) => ({ default
 const ImageBrushPanel = lazy(() =>
   import('./components/ImageBrushPanel').then((m) => ({ default: m.ImageBrushPanel })),
 );
-import { FileCorruptionPanel } from './components/FileCorruptionPanel';
 import { StatusBar } from './components/StatusBar';
 import { TopBar } from './components/TopBar';
 import { HistoryPopover } from './components/HistoryPopover';
@@ -26,6 +26,9 @@ import { CanvasWorkspace } from './components/CanvasWorkspace';
 import { InspectorTabs } from './components/InspectorTabs';
 import { EffectPanel } from './components/EffectPanel';
 import { RetouchPanel } from './components/RetouchPanel';
+import { LayersDock } from './components/LayersDock';
+import { LandingScreen } from './components/LandingScreen';
+import { InterfaceModeSwitch, type InterfaceMode } from './components/InterfaceModeSwitch';
 import { ShortcutsModal, ExportModal, ProjectModal } from './components/Modals';
 import {
   algorithmList,
@@ -45,7 +48,7 @@ import { isRetouchTool } from './retouch/tools';
 import { structuralWriteBounds } from './glitchAlgorithms/structuralUtils';
 import { createPatch } from './history/PatchHistory';
 import { useHistory } from './hooks/useHistory';
-import { createDemoDocument, useDocument } from './hooks/useDocument';
+import { useDocument } from './hooks/useDocument';
 import { useLayerStack } from './hooks/useLayerStack';
 import { useMosh } from './hooks/useMosh';
 import { useImageBrush, type ImageBrushStrokeState } from './hooks/useImageBrush';
@@ -83,20 +86,25 @@ import {
 import { algorithmIconIds } from './icons/effects';
 import { countChangedPixels } from './mosh/engine';
 import {
-  createDemoBrushAssets,
   removeImageBrushAsset as removeImageBrushAssetFromLibrary,
-  removeImageBrushAssets,
   resizeRgba,
   optimizeImageBrushAsset,
   restoreImageBrushProject,
   retrimImageBrushAsset,
   serializeImageBrushProject,
 } from './imageBrush/assets';
+import { astronautDemoAssetId, loadAstronautDemoAsset } from './imageBrush/decode';
+import {
+  loadImageBrushState,
+  saveImageBrushLibrary,
+  saveImageBrushPreferences,
+} from './imageBrush/libraryStorage';
 import { cropRgbaRegion, estimateImageBrushReadBounds } from './imageBrush/bounds';
 import {
   imageBrushFxCacheKey,
   imageBrushLiveStampBudget,
   resolveImageBrushQuality,
+  takeImageBrushLiveBatch,
 } from './imageBrush/performance';
 import {
   appendStampPath,
@@ -110,6 +118,7 @@ import {
   randomizeImageBrush,
   type ImageBrushRandomizeScope,
 } from './imageBrush/presets';
+import { applyImageBrushStyleKeepingEssentials } from './imageBrush/simple';
 import {
   type ImageBrushAsset,
   type ImageBrushProcessResult,
@@ -183,7 +192,6 @@ function decodeDocumentOffThread(file: File): Promise<{
   resized: boolean;
   original: ArrayBuffer;
   pixels: ArrayBuffer;
-  raw: ArrayBuffer;
   mask: ArrayBuffer;
 }> {
   return new Promise((resolve, reject) => {
@@ -221,7 +229,6 @@ function decodeDocumentOffThread(file: File): Promise<{
             resized: boolean;
             original: ArrayBuffer;
             pixels: ArrayBuffer;
-            raw: ArrayBuffer;
             mask: ArrayBuffer;
           }
         | { jobId: string; type: 'error'; message: string }
@@ -243,7 +250,77 @@ function decodeDocumentOffThread(file: File): Promise<{
   });
 }
 
+type SiteSurface = 'landing' | 'glitch-brushes';
+
+function readSiteState(): { surface: SiteSurface; interfaceMode: InterfaceMode } {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    surface: params.get('tool') === 'glitch-brushes' ? 'glitch-brushes' : 'landing',
+    interfaceMode: params.get('controls') === 'advanced' ? 'advanced' : 'simple',
+  };
+}
+
+function writeSiteState(surface: SiteSurface, interfaceMode: InterfaceMode): void {
+  const url = new URL(window.location.href);
+  if (surface === 'glitch-brushes') url.searchParams.set('tool', 'glitch-brushes');
+  else url.searchParams.delete('tool');
+  if (surface === 'glitch-brushes') url.searchParams.set('controls', interfaceMode);
+  else url.searchParams.delete('controls');
+  window.history.pushState({ surface, interfaceMode }, '', url);
+}
+
 export function App() {
+  const initial = useMemo(readSiteState, []);
+  const [surface, setSurface] = useState<SiteSurface>(initial.surface);
+  const [interfaceMode, setInterfaceMode] = useState<InterfaceMode>(initial.interfaceMode);
+
+  useEffect(() => {
+    const syncFromUrl = () => {
+      const next = readSiteState();
+      setSurface(next.surface);
+      setInterfaceMode(next.interfaceMode);
+    };
+    window.addEventListener('popstate', syncFromUrl);
+    return () => window.removeEventListener('popstate', syncFromUrl);
+  }, []);
+
+  if (surface === 'landing') {
+    return (
+      <LandingScreen
+        onEnter={() => {
+          writeSiteState('glitch-brushes', interfaceMode);
+          setSurface('glitch-brushes');
+        }}
+      />
+    );
+  }
+
+  return (
+    <GlitchBrushesEditor
+      interfaceMode={interfaceMode}
+      onInterfaceModeChange={(next) => {
+        writeSiteState('glitch-brushes', next);
+        setInterfaceMode(next);
+      }}
+      onExit={() => {
+        writeSiteState('landing', interfaceMode);
+        setSurface('landing');
+      }}
+    />
+  );
+}
+
+interface GlitchBrushesEditorProps {
+  interfaceMode: InterfaceMode;
+  onInterfaceModeChange(value: InterfaceMode): void;
+  onExit(): void;
+}
+
+function GlitchBrushesEditor({
+  interfaceMode,
+  onInterfaceModeChange,
+  onExit,
+}: GlitchBrushesEditorProps) {
   const { helpMode, panelOpen: helpPanelOpen, togglePanel: toggleHelpPanel } = useHelp();
   const {
     docRef,
@@ -271,8 +348,6 @@ export function App() {
     seed,
     setSeed,
     seedRef,
-    applyMode,
-    setApplyMode,
     applyModeRef,
     metaRecipeLocked,
     setMetaRecipeLocked,
@@ -370,6 +445,23 @@ export function App() {
     setCursorInfo,
   } = usePixelState();
   const { notice, setNotice } = useNotice();
+  const [originalLayerSelected, setOriginalLayerSelected] = useState(false);
+  const originalLayerSelectedRef = useRef(false);
+  const selectOriginalLayer = useCallback(() => {
+    originalLayerSelectedRef.current = true;
+    setOriginalLayerSelected(true);
+    setNotice('Original selected as a locked background. Select a glitch layer to paint.');
+  }, [setNotice]);
+  const selectEditableLayer = useCallback(
+    (id: string, name: string) => {
+      layerStackRef.current.activeLayerId = id;
+      originalLayerSelectedRef.current = false;
+      setOriginalLayerSelected(false);
+      bumpLayers();
+      setNotice(`${name} is now the active paint target.`);
+    },
+    [bumpLayers, layerStackRef, setNotice],
+  );
   const {
     historyRef,
     historyVersion,
@@ -456,6 +548,7 @@ export function App() {
   const imageBrushOverlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const selectionCanvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const initialDemoRequestedRef = useRef(false);
   const panDragRef = useRef<{ pointerId: number; start: Point; origin: Point } | null>(null);
   const altDragRef = useRef<{ pointerId: number; start: Point; brush: BrushSettings } | null>(null);
   const regionDragRef = useRef<RegionDragState | null>(null);
@@ -470,6 +563,96 @@ export function App() {
   const cursorVisualPointRef = useRef<Point | null>(null);
   const cursorVisualDiameterRef = useRef(-1);
   const renderedOriginalPixelsRef = useRef<Uint8ClampedArray | null>(null);
+  const imageBrushPreviewBackgroundVersionRef = useRef(0);
+  const imageBrushStorageHydratedRef = useRef(false);
+  const imageBrushStorageWarningRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([
+      loadImageBrushState().catch(() => null),
+      loadAstronautDemoAsset({
+        trimTransparent: imageBrushSettingsRef.current.trimTransparent,
+        trimThreshold: imageBrushSettingsRef.current.trimThreshold,
+      }).catch(() => null),
+    ]).then(([stored, astronaut]) => {
+      if (cancelled) return;
+      const savedAssets = (stored?.library ?? []).filter(
+        (asset) => !asset.demo && asset.id !== astronautDemoAssetId,
+      );
+      const library = astronaut ? [astronaut, ...savedAssets] : savedAssets;
+      const activeAssetId = library.some((asset) => asset.id === stored?.activeAssetId)
+        ? (stored?.activeAssetId ?? null)
+        : (astronaut?.id ?? library[0]?.id ?? null);
+      const settings = stored?.settings ?? imageBrushSettingsRef.current;
+      const rack = stored?.rack ?? imageBrushRackRef.current;
+
+      imageBrushLibraryRef.current = library;
+      activeImageBrushIdRef.current = activeAssetId;
+      imageBrushSettingsRef.current = settings;
+      imageBrushRackRef.current = rack;
+      setImageBrushLibrary(library);
+      setActiveImageBrushId(activeAssetId);
+      setImageBrushSettings(settings);
+      setImageBrushRack(rack);
+      if (stored) {
+        setImageBrushSeed(stored.seed);
+        setImageBrushPresetId(stored.activePresetId);
+        setImageBrushVariationNonce(stored.variationNonce);
+        setImageBrushLockSeed(stored.lockSeed);
+      }
+      imageBrushStorageHydratedRef.current = true;
+      if (!astronaut)
+        setNotice('The astronaut brush demo could not be loaded; custom brushes still work.');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!imageBrushStorageHydratedRef.current) return;
+    const timer = window.setTimeout(() => {
+      void saveImageBrushPreferences({
+        version: 1,
+        activeAssetId: activeImageBrushId,
+        settings: imageBrushSettings,
+        rack: imageBrushRack,
+        seed: imageBrushSeed,
+        activePresetId: imageBrushPresetId,
+        variationNonce: imageBrushVariationNonce,
+        lockSeed: imageBrushLockSeed,
+      }).catch(() => {
+        if (imageBrushStorageWarningRef.current) return;
+        imageBrushStorageWarningRef.current = true;
+        setNotice('Brushes work normally, but this browser could not persist the library.');
+      });
+    }, 650);
+    return () => window.clearTimeout(timer);
+  }, [
+    activeImageBrushId,
+    imageBrushLockSeed,
+    imageBrushPresetId,
+    imageBrushRack,
+    imageBrushSeed,
+    imageBrushSettings,
+    imageBrushVariationNonce,
+  ]);
+
+  useEffect(() => {
+    if (!imageBrushStorageHydratedRef.current) return;
+    const timer = window.setTimeout(() => {
+      const customAssets = imageBrushLibrary
+        .filter((asset) => !asset.demo)
+        .map((asset) => ({ ...asset, embeddedDataUrl: undefined }));
+      void saveImageBrushLibrary(customAssets).catch(() => {
+        if (imageBrushStorageWarningRef.current) return;
+        imageBrushStorageWarningRef.current = true;
+        setNotice('Brushes work normally, but this browser could not persist the library.');
+      });
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [imageBrushLibrary]);
 
   useEffect(() => {
     setImageBrushLibrary((library) =>
@@ -478,18 +661,27 @@ export function App() {
           asset,
           imageBrushSettings.trimTransparent,
           imageBrushSettings.trimThreshold,
+          512,
         ),
       ),
     );
   }, [imageBrushSettings.trimThreshold, imageBrushSettings.trimTransparent]);
 
-  const imageBrushPreviewBackground = useMemo(
-    () => ({
-      ...resizeRgba(docRef.current.pixels, docRef.current.width, docRef.current.height, 320),
-      version: documentVersion,
-    }),
-    [documentVersion],
-  );
+  const imageBrushPreviewSource = docRef.current.original;
+  const imageBrushPreviewSourceWidth = docRef.current.width;
+  const imageBrushPreviewSourceHeight = docRef.current.height;
+  const imageBrushPreviewBackground = useMemo(() => {
+    imageBrushPreviewBackgroundVersionRef.current += 1;
+    return {
+      ...resizeRgba(
+        imageBrushPreviewSource,
+        imageBrushPreviewSourceWidth,
+        imageBrushPreviewSourceHeight,
+        320,
+      ),
+      version: imageBrushPreviewBackgroundVersionRef.current,
+    };
+  }, [imageBrushPreviewSource, imageBrushPreviewSourceHeight, imageBrushPreviewSourceWidth]);
 
   const imageBrushVisualSettingsKey = useMemo(() => {
     const visual = { ...imageBrushSettings } as Partial<typeof imageBrushSettings>;
@@ -507,7 +699,6 @@ export function App() {
       ? JSON.stringify({
           tip: imageBrushFxCacheKey(active, imageBrushSettings, imageBrushRack, imageBrushSeed),
           stroke: imageBrushVisualSettingsKey,
-          strokeNonce: imageBrushStrokeNonce,
           backgroundVersion: imageBrushPreviewBackground.version,
         })
       : 'no-image-brush';
@@ -517,7 +708,6 @@ export function App() {
     imageBrushRack,
     imageBrushSeed,
     imageBrushVisualSettingsKey,
-    imageBrushStrokeNonce,
     imageBrushPreviewBackground.version,
   ]);
 
@@ -535,7 +725,6 @@ export function App() {
     const generation = ++imageBrushPreviewGenerationRef.current;
     const jobId = `image-brush-preview-${generation}`;
     let worker: Worker | null = null;
-    let fullTimer: number | null = null;
     const acceptResult = (result: ImageBrushPreviewResult, activeWorker: Worker) => {
       if (
         result.generation !== imageBrushPreviewGenerationRef.current ||
@@ -544,15 +733,19 @@ export function App() {
         return;
       }
       setProcessedBrushPreview(result);
-      if (result.quality === 'full') {
+      if (result.variants.length) {
         const sources = result.variants.map((variant) => {
-          const source = document.createElement('canvas');
-          source.width = variant.width;
-          source.height = variant.height;
-          source
+          const canvas = document.createElement('canvas');
+          canvas.width = variant.width;
+          canvas.height = variant.height;
+          canvas
             .getContext('2d')
             ?.putImageData(new ImageData(variant.pixels, variant.width, variant.height), 0, 0);
-          return source;
+          return {
+            canvas,
+            contentWidth: variant.contentWidth,
+            contentHeight: variant.contentHeight,
+          };
         });
         imageBrushGhostVariantsRef.current = sources;
         imageBrushGhostSourceRef.current = sources[0] ?? null;
@@ -579,13 +772,15 @@ export function App() {
           backgroundPixels,
           backgroundWidth: imageBrushPreviewBackground.width,
           backgroundHeight: imageBrushPreviewBackground.height,
+          documentWidth: imageBrushPreviewSourceWidth,
+          documentHeight: imageBrushPreviewSourceHeight,
           rack: imageBrushRack.map((item) => ({ ...item })),
           settings: {
             ...imageBrushSettings,
             customAnchor: { ...imageBrushSettings.customAnchor },
           },
           seed: imageBrushSeed,
-          strokeId: `stamp-stroke-${imageBrushStrokeNonce}`,
+          strokeId: 'image-brush-preview-stroke',
           evolutionOffset:
             imageBrushSettings.resetEachStroke && !imageBrushSettings.continueBetweenStrokes
               ? 0
@@ -615,21 +810,17 @@ export function App() {
         }
         const result = event.data as ImageBrushPreviewResult;
         acceptResult(result, activeWorker);
-        if (result.quality === 'draft' && result.generation === generation) {
-          fullTimer = window.setTimeout(() => postPreview('full'), 750);
-        }
       };
       activeWorker.onerror = () => {
         if (generation === imageBrushPreviewGenerationRef.current) {
           setNotice('Image Brush preview Worker failed safely; drawing remains available.');
         }
       };
-      postPreview('draft');
+      postPreview('full');
     };
-    const draftTimer = window.setTimeout(startPreview, 160);
+    const previewTimer = window.setTimeout(startPreview, 280);
     return () => {
-      window.clearTimeout(draftTimer);
-      if (fullTimer !== null) window.clearTimeout(fullTimer);
+      window.clearTimeout(previewTimer);
       worker?.terminate();
       if (imageBrushPreviewWorkerRef.current === worker) imageBrushPreviewWorkerRef.current = null;
     };
@@ -637,13 +828,6 @@ export function App() {
 
   const doc = docRef.current;
   const history = historyRef.current;
-  const effectPreviewSource = useMemo(
-    () => ({
-      ...resizeRgba(doc.pixels, doc.width, doc.height, 180),
-      version: documentVersion,
-    }),
-    [doc, documentVersion],
-  );
   const memoryEstimate =
     doc.pixels.byteLength * 3 +
     maskRef.current.byteLength +
@@ -726,6 +910,10 @@ export function App() {
   const commitMoshBuffer = useCallback(
     (pixels: Uint8ClampedArray, affectedPixels: number, completedEffects: number) => {
       const current = docRef.current;
+      if (originalLayerSelectedRef.current) {
+        setNotice('Original is a locked background. Select a glitch layer before applying MOSH.');
+        return;
+      }
       if (activeLayer(layerStackRef.current).locked) {
         setNotice('MOSH LAB cannot apply because the active glitch layer is locked.');
         return;
@@ -1160,11 +1348,11 @@ export function App() {
   useEffect(() => {
     const canvas = overlayCanvasRef.current;
     if (!canvas) return;
-    const width = maskView === 'hidden' ? 1 : doc.width;
-    const height = maskView === 'hidden' ? 1 : doc.height;
+    const width = doc.width;
+    const height = doc.height;
     if (canvas.width !== width) canvas.width = width;
     if (canvas.height !== height) canvas.height = height;
-  }, [doc.height, doc.width, maskView]);
+  }, [doc.height, doc.width]);
 
   useEffect(() => {
     const canvas = imageBrushOverlayCanvasRef.current;
@@ -1265,14 +1453,14 @@ export function App() {
         current.randomRotation,
         0,
       );
-      const scale = current.size / Math.max(1, active.width);
-      const drawWidth = source.width * scale;
-      const drawHeight = source.height * scale;
+      const scale = current.size / Math.max(1, source.contentWidth);
+      const drawWidth = source.canvas.width * scale;
+      const drawHeight = source.canvas.height * scale;
       const baseAnchor = anchorPoint(current.anchor, current.customAnchor);
-      const paddingX = Math.max(0, (source.width - active.width) / 2);
-      const paddingY = Math.max(0, (source.height - active.height) / 2);
-      const anchorX = (paddingX + baseAnchor.x * active.width) * scale;
-      const anchorY = (paddingY + baseAnchor.y * active.height) * scale;
+      const paddingX = Math.max(0, (source.canvas.width - source.contentWidth) / 2);
+      const paddingY = Math.max(0, (source.canvas.height - source.contentHeight) / 2);
+      const anchorX = (paddingX + baseAnchor.x * source.contentWidth) * scale;
+      const anchorY = (paddingY + baseAnchor.y * source.contentHeight) * scale;
       const radians = (rotation * Math.PI) / 180;
       const cosine = Math.cos(radians);
       const sine = Math.sin(radians);
@@ -1309,7 +1497,7 @@ export function App() {
       context.translate(point.x, point.y);
       context.rotate(radians);
       context.globalAlpha = clamp(current.opacity * current.flow * 0.62, 0.12, 0.75);
-      context.drawImage(source, -anchorX, -anchorY, drawWidth, drawHeight);
+      context.drawImage(source.canvas, -anchorX, -anchorY, drawWidth, drawHeight);
       if (current.showOutline) {
         context.globalAlpha = 0.95;
         context.strokeStyle = '#f1d08a';
@@ -1359,10 +1547,6 @@ export function App() {
         : [source];
       const copies = Math.max(1, Math.round(current.stampsPerStep));
       const baseAnchor = anchorPoint(current.anchor, current.customAnchor);
-      const paddingX = Math.max(0, (source.width - active.width) / 2);
-      const paddingY = Math.max(0, (source.height - active.height) / 2);
-      const anchorX = paddingX + baseAnchor.x * active.width;
-      const anchorY = paddingY + baseAnchor.y * active.height;
       const quality = resolveImageBrushQuality(
         current.renderingQuality,
         docRef.current.width * docRef.current.height,
@@ -1371,68 +1555,91 @@ export function App() {
         imageBrushRackRef.current,
       );
       const liveSources = quality === 'realtime' ? [sources[0] ?? source] : sources;
+      context.save();
       context.imageSmoothingEnabled = quality !== 'realtime';
-      for (const stamp of stamps) {
-        for (let copy = 0; copy < copies; copy += 1) {
-          const flatIndex = stamp.index * copies + copy;
-          if (flatIndex >= current.maxGeneratedStamps) return;
-          const random = createSeededRandom(`${imageBrushSeed}:${strokeId}:layout:${flatIndex}`);
-          const scatterMultiplier =
-            current.mode === 'scatter' || current.mode === 'random-hose' ? 1 : 0;
-          const position = {
-            x:
-              stamp.position.x +
-              (random.next() * 2 - 1) * current.scatterX * current.size * scatterMultiplier,
-            y:
-              stamp.position.y +
-              (random.next() * 2 - 1) * current.scatterY * current.size * scatterMultiplier,
-          };
-          const pressureSize = current.pressureSize
-            ? current.minPressureSize + (1 - current.minPressureSize) * stamp.pressure
-            : 1;
-          const jitterScale = Math.max(0.08, 1 + (random.next() * 2 - 1) * current.scaleJitter);
-          const scale = (current.size / Math.max(1, active.width)) * pressureSize * jitterScale;
-          const pressureOpacity = current.pressureOpacity
-            ? current.minPressureOpacity + (1 - current.minPressureOpacity) * stamp.pressure
-            : 1;
-          const opacity = clamp(
-            current.opacity *
-              current.flow *
-              pressureOpacity *
-              (1 - random.next() * current.opacityJitter),
-            0.01,
-            1,
-          );
-          const direction = current.followDirection
-            ? stamp.direction
-            : {
-                x: Math.cos((current.fallbackAngle * Math.PI) / 180),
-                y: Math.sin((current.fallbackAngle * Math.PI) / 180),
-              };
-          const rotation = rotationForStamp(
-            current.rotationMode,
-            current.angle,
-            direction,
-            flatIndex,
-            random.next(),
-            current.randomRotation,
-            current.rotationJitter,
-          );
-          const flipX = random.next() < current.flipXChance ? -1 : 1;
-          const flipY = random.next() < current.flipYChance ? -1 : 1;
-          context.save();
-          context.translate(position.x, position.y);
-          context.rotate((rotation * Math.PI) / 180);
-          context.scale(scale * flipX, scale * flipY);
-          context.globalAlpha = opacity;
-          context.globalCompositeOperation = current.blendMode as GlobalCompositeOperation;
-          context.drawImage(
-            liveSources[flatIndex % liveSources.length] ?? source,
-            -anchorX,
-            -anchorY,
-          );
-          context.restore();
+      try {
+        for (const stamp of stamps) {
+          for (let copy = 0; copy < copies; copy += 1) {
+            const flatIndex = stamp.index * copies + copy;
+            if (flatIndex >= current.maxGeneratedStamps) return;
+            const random = createSeededRandom(`${imageBrushSeed}:${strokeId}:layout:${flatIndex}`);
+            const scatterMultiplier =
+              current.mode === 'scatter' || current.mode === 'random-hose' ? 1 : 0;
+            const position = {
+              x:
+                stamp.position.x +
+                (random.next() * 2 - 1) * current.scatterX * current.size * scatterMultiplier,
+              y:
+                stamp.position.y +
+                (random.next() * 2 - 1) * current.scatterY * current.size * scatterMultiplier,
+            };
+            const pressureSize = current.pressureSize
+              ? current.minPressureSize + (1 - current.minPressureSize) * stamp.pressure
+              : 1;
+            const jitterScale = Math.max(0.08, 1 + (random.next() * 2 - 1) * current.scaleJitter);
+            const selectedSource = liveSources[flatIndex % liveSources.length] ?? source;
+            const scale =
+              (current.size / Math.max(1, selectedSource.contentWidth)) *
+              pressureSize *
+              jitterScale;
+            const paddingX = Math.max(
+              0,
+              (selectedSource.canvas.width - selectedSource.contentWidth) / 2,
+            );
+            const paddingY = Math.max(
+              0,
+              (selectedSource.canvas.height - selectedSource.contentHeight) / 2,
+            );
+            const anchorX = paddingX + baseAnchor.x * selectedSource.contentWidth;
+            const anchorY = paddingY + baseAnchor.y * selectedSource.contentHeight;
+            const pressureOpacity = current.pressureOpacity
+              ? current.minPressureOpacity + (1 - current.minPressureOpacity) * stamp.pressure
+              : 1;
+            const opacity = clamp(
+              current.opacity *
+                current.flow *
+                pressureOpacity *
+                (1 - random.next() * current.opacityJitter),
+              0.01,
+              1,
+            );
+            const direction = current.followDirection
+              ? stamp.direction
+              : {
+                  x: Math.cos((current.fallbackAngle * Math.PI) / 180),
+                  y: Math.sin((current.fallbackAngle * Math.PI) / 180),
+                };
+            const rotation = rotationForStamp(
+              current.rotationMode,
+              current.angle,
+              direction,
+              flatIndex,
+              random.next(),
+              current.randomRotation,
+              current.rotationJitter,
+            );
+            const flipX = random.next() < current.flipXChance ? -1 : 1;
+            const flipY = random.next() < current.flipYChance ? -1 : 1;
+            const radians = (rotation * Math.PI) / 180;
+            const cosine = Math.cos(radians);
+            const sine = Math.sin(radians);
+            const scaleX = scale * flipX;
+            const scaleY = scale * flipY;
+            context.setTransform(
+              cosine * scaleX,
+              sine * scaleX,
+              -sine * scaleY,
+              cosine * scaleY,
+              position.x,
+              position.y,
+            );
+            context.globalAlpha = opacity;
+            context.globalCompositeOperation = current.blendMode as GlobalCompositeOperation;
+            context.drawImage(selectedSource.canvas, -anchorX, -anchorY);
+          }
         }
+      } finally {
+        context.restore();
       }
     },
     [imageBrushSeed],
@@ -1488,6 +1695,10 @@ export function App() {
   const removeImageBrushAsset = useCallback(
     (id: string) => {
       const current = imageBrushLibraryRef.current;
+      if (current.find((asset) => asset.id === id)?.demo) {
+        setNotice('The astronaut demo stays available; add your own image to replace it.');
+        return;
+      }
       const removal = removeImageBrushAssetFromLibrary(current, activeImageBrushIdRef.current, id);
       if (!removal.removed.length) return;
       if (activeImageBrushIdRef.current === id) {
@@ -1506,31 +1717,18 @@ export function App() {
   );
 
   const clearImageBrushLibrary = useCallback(() => {
-    if (!imageBrushLibraryRef.current.length) return;
+    const demos = imageBrushLibraryRef.current.filter((asset) => asset.demo);
+    if (demos.length === imageBrushLibraryRef.current.length) return;
     cancelImageBrushJob(true);
-    imageBrushLibraryRef.current = [];
-    activeImageBrushIdRef.current = null;
-    setImageBrushLibrary([]);
-    setActiveImageBrushId(null);
+    const nextActive = demos[0]?.id ?? null;
+    imageBrushLibraryRef.current = demos;
+    activeImageBrushIdRef.current = nextActive;
+    setImageBrushLibrary(demos);
+    setActiveImageBrushId(nextActive);
     clearImageBrushAssetCaches();
-    setNotice('Image Brush library cleared. Committed document pixels were preserved.');
-  }, [cancelImageBrushJob, clearImageBrushAssetCaches]);
-
-  const removeImageBrushDemoAssets = useCallback(() => {
-    const current = imageBrushLibraryRef.current;
-    const removal = removeImageBrushAssets(current, activeImageBrushIdRef.current, (asset) =>
-      Boolean(asset.demo),
+    setNotice(
+      'Custom brush images cleared. The astronaut demo and document pixels were preserved.',
     );
-    if (!removal.removed.length) return;
-    if (removal.activeAssetId !== activeImageBrushIdRef.current) {
-      cancelImageBrushJob(true);
-      clearImageBrushAssetCaches();
-    }
-    imageBrushLibraryRef.current = removal.library;
-    activeImageBrushIdRef.current = removal.activeAssetId;
-    setImageBrushLibrary(removal.library);
-    setActiveImageBrushId(removal.activeAssetId);
-    setNotice(`${removal.removed.length} demo brush image(s) removed.`);
   }, [cancelImageBrushJob, clearImageBrushAssetCaches]);
 
   const startImageBrushJob = useCallback(
@@ -1756,10 +1954,31 @@ export function App() {
   );
 
   const drawMaskStamp = useCallback(
-    (point: Point, radius: number) => {
-      if (maskView === 'hidden') return;
-      const context = overlayCanvasRef.current?.getContext('2d');
-      if (!context) return;
+    (point: Point, radius: number, previous: Point) => {
+      const canvas = overlayCanvasRef.current;
+      const context = canvas?.getContext('2d');
+      if (!canvas || !context) return;
+      if (maskView === 'hidden') {
+        canvas.style.opacity = '0.24';
+        context.save();
+        context.lineCap = 'round';
+        context.lineJoin = 'round';
+        context.lineWidth = radius * 2;
+        context.strokeStyle = 'rgb(109, 255, 176)';
+        context.beginPath();
+        context.moveTo(previous.x, previous.y);
+        context.lineTo(point.x, point.y);
+        context.stroke();
+        if (Math.hypot(point.x - previous.x, point.y - previous.y) < 0.01) {
+          context.beginPath();
+          context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+          context.fillStyle = 'rgb(109, 255, 176)';
+          context.fill();
+        }
+        context.restore();
+        return;
+      }
+      canvas.style.opacity = '1';
       const gradient = context.createRadialGradient(
         point.x,
         point.y,
@@ -2327,7 +2546,7 @@ export function App() {
       if (!isRetouchTool(tool)) stamp.touched.forEach((index) => stroke.touched.add(index));
       stroke.bounds = unionRect(stroke.bounds, stamp.bounds);
       stroke.pressure = pressure;
-      drawMaskStamp(scattered, radius);
+      drawMaskStamp(scattered, radius, stroke.last);
       const useWorker = tool === 'brush' && algorithms[algorithm].family !== 'pixel';
       if (applyModeRef.current === 'continuous' && !useWorker && !isRetouchTool(tool)) {
         const strengthPressure =
@@ -2556,6 +2775,10 @@ export function App() {
     ) {
       return;
     }
+    if (originalLayerSelectedRef.current) {
+      setNotice('Original is a locked background. Select a glitch layer before painting.');
+      return;
+    }
     if (activeLayer(layerStackRef.current).locked) {
       setNotice(
         'The active glitch layer is locked. Unlock it or select another layer before painting.',
@@ -2635,6 +2858,7 @@ export function App() {
     }
     if (moshPreviewBufferRef.current || moshJobGateRef.current.currentJobId) cancelMosh();
     if (pendingPreview) cancelPreview();
+    clearOverlay();
     strokeRef.current = {
       pointerId: event.pointerId,
       last: point,
@@ -2729,7 +2953,7 @@ export function App() {
       current.stampsPerStep,
       quality,
     );
-    const live = stroke.pendingLiveStamps.splice(0, limit);
+    const live = takeImageBrushLiveBatch(stroke.pendingLiveStamps, limit);
     drawLiveImageBrushStamps(stroke.strokeId, live);
     const frameMs = performance.now() - frameStarted;
     stroke.liveFrames += 1;
@@ -2900,7 +3124,10 @@ export function App() {
       flushImageBrushSamples(stroke);
       if (stroke.liveRaf !== null) cancelAnimationFrame(stroke.liveRaf);
       stroke.liveRaf = null;
-      const liveLimit = Math.max(1, imageBrushSettingsRef.current.maxLiveStampsPerFrame);
+      const liveLimit = Math.min(
+        6,
+        Math.max(1, imageBrushSettingsRef.current.maxLiveStampsPerFrame),
+      );
       drawLiveImageBrushStamps(stroke.strokeId, stroke.pendingLiveStamps.splice(0, liveLimit));
       imageBrushStrokeRef.current = null;
       cursorInfoRef.current = cursorPendingRef.current;
@@ -2933,6 +3160,7 @@ export function App() {
     if (altDragRef.current?.pointerId === event.pointerId) altDragRef.current = null;
     if (strokeRef.current?.pointerId === event.pointerId) {
       const stroke = strokeRef.current;
+      clearOverlay();
       if (isRetouchTool(tool)) {
         stroke.retouchEnded = true;
         if (stroke.pendingRetouchSamples.length || stroke.retouchRaf !== null) {
@@ -3117,8 +3345,6 @@ export function App() {
           pixels: new Uint8ClampedArray(decoded.pixels).slice(),
           fileName: file.name,
           mimeType: file.type,
-          rawOriginal: new Uint8Array(decoded.raw),
-          rawMutated: null,
           dirty: false,
         };
         layerStackRef.current = createLayerStack(decoded.width, decoded.height);
@@ -3166,51 +3392,26 @@ export function App() {
     ],
   );
 
-  const loadDemo = useCallback(() => {
-    if (docRef.current.dirty && !window.confirm('Replace the image and discard unsaved changes?'))
-      return;
-    cancelMosh();
-    cancelBrushJob(true);
-    cancelImageBrushJob(true);
-    imageBrushStrokeRef.current = null;
-    imageBrushEvolutionOffsetRef.current = 0;
-    pendingImageBrushEvolutionRef.current = null;
-    clearAdvancedBrushTransientState();
-    setPendingPreview(null);
-    docRef.current = createDemoDocument();
-    layerStackRef.current = createLayerStack(docRef.current.width, docRef.current.height);
-    bumpLayers();
-    maskRef.current = new Float32Array(docRef.current.width * docRef.current.height);
-    lastBrushMaskRef.current = { data: new Uint8Array(0), bounds: null };
-    lastBrushDirectionRef.current = { x: 1, y: 0 };
-    setBrushContext((context) => ({
-      version: context.version + 1,
-      affectedPixels: 0,
-      direction: { x: 1, y: 0 },
-    }));
-    setMoshRack((rack) =>
-      clearMoshRegions(
-        rack.map((card) => (card.target === 'brush' ? { ...card, target: 'whole' } : card)),
-      ),
-    );
-    regionDragRef.current = null;
-    setMoshDraftRegion(null);
-    setMoshRegionTool(null);
-    resetHistory();
-    setExportName('signal-study-demo');
-    setSelectedByte(0);
-    setSelectedPixels([0]);
-    bumpDocument();
-    bumpHistory();
-    setNotice('Generated demo image loaded.');
-  }, [
-    bumpHistory,
-    cancelBrushJob,
-    cancelImageBrushJob,
-    cancelMosh,
-    clearAdvancedBrushTransientState,
-    resetHistory,
-  ]);
+  const loadDemo = useCallback(async () => {
+    try {
+      const response = await fetch('/assets/parkour-kotenok-road.jpg');
+      if (!response.ok) throw new Error('The Parkour Kotenok demo image could not be loaded.');
+      const blob = await response.blob();
+      await loadDocument(
+        new File([blob], 'parkour-kotenok-road.jpg', {
+          type: blob.type || 'image/jpeg',
+        }),
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'The demo image could not be loaded.');
+    }
+  }, [loadDocument]);
+
+  useEffect(() => {
+    if (initialDemoRequestedRef.current) return;
+    initialDemoRequestedRef.current = true;
+    void loadDemo();
+  }, [loadDemo]);
 
   const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -3234,24 +3435,6 @@ export function App() {
     setActiveImageBrushId(id);
   }, []);
 
-  const restoreImageBrushDemos = useCallback(() => {
-    const existing = new Set(imageBrushLibraryRef.current.map((asset) => asset.id));
-    const additions = createDemoBrushAssets().filter((asset) => !existing.has(asset.id));
-    if (!additions.length) {
-      setNotice('All nine local Image Brush demo assets are already in the library.');
-      return;
-    }
-    const next = [...imageBrushLibraryRef.current, ...additions];
-    imageBrushLibraryRef.current = next;
-    setImageBrushLibrary(next);
-    if (!activeImageBrushIdRef.current) {
-      const nextActive = additions[0]?.id ?? null;
-      activeImageBrushIdRef.current = nextActive;
-      setActiveImageBrushId(nextActive);
-    }
-    setNotice(`${additions.length} locally generated demo brush asset(s) added.`);
-  }, []);
-
   const randomizeCurrentImageBrush = useCallback(
     (scope: ImageBrushRandomizeScope, forceNewVariation = false) => {
       let nextNonce =
@@ -3261,11 +3444,22 @@ export function App() {
       const replayKey = `${imageBrushSeed}:${scope}:${nextNonce}`;
       if (imageBrushLockSeed && imageBrushLockedRandomizationRef.current?.key === replayKey) {
         const replay = imageBrushLockedRandomizationRef.current;
-        setImageBrushSettings({
+        const replaySettings = {
           ...replay.settings,
           customAnchor: { ...replay.settings.customAnchor },
-        });
-        setImageBrushRack(replay.rack.map((item) => ({ ...item })));
+        };
+        const replayRack = replay.rack.map((item) => ({ ...item }));
+        const styled =
+          scope === 'everything'
+            ? applyImageBrushStyleKeepingEssentials(
+                imageBrushSettingsRef.current,
+                replaySettings,
+                replayRack,
+                'random-style',
+              )
+            : { settings: replaySettings, rack: replayRack };
+        setImageBrushSettings(styled.settings);
+        setImageBrushRack(styled.rack);
         setImageBrushPresetId('custom');
         setNotice(
           `Image Brush reproduced the locked ${scope} recipe with seed ${imageBrushSeed}, variation ${nextNonce}.`,
@@ -3303,6 +3497,14 @@ export function App() {
           imageBrushSeed,
           scope,
           nextNonce,
+        );
+      }
+      if (scope === 'everything') {
+        randomized = applyImageBrushStyleKeepingEssentials(
+          imageBrushSettingsRef.current,
+          randomized.settings,
+          randomized.rack,
+          'random-style',
         );
       }
       if (imageBrushLockSeed) {
@@ -3511,7 +3713,7 @@ export function App() {
     const current = docRef.current;
     const project = {
       version: 2,
-      app: 'HEX REDACTOR',
+      app: 'GLITCH BRUSHES',
       image: {
         fileName: current.fileName,
         width: current.width,
@@ -3537,7 +3739,7 @@ export function App() {
     };
     triggerDownload(
       new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' }),
-      `${exportName || 'hex-redactor'}.hexproject.json`,
+      `${exportName || 'glitch-brushes'}.glitchproject.json`,
     );
     const embeddedBytes = imageBrushLibrary.reduce(
       (total, asset) => total + asset.originalPixels.byteLength,
@@ -3663,7 +3865,7 @@ export function App() {
   const exportPresets = () => {
     triggerDownload(
       new Blob([JSON.stringify(customPresets, null, 2)], { type: 'application/json' }),
-      'hex-redactor-presets.json',
+      'glitch-brushes-presets.json',
     );
   };
 
@@ -3687,6 +3889,10 @@ export function App() {
     if (moshPreviewBufferRef.current || moshJobGateRef.current.currentJobId) cancelMosh();
     if (brushJobGateRef.current.currentJobId) cancelBrushJob();
     if (pendingPreview) cancelPreview();
+    if (originalLayerSelectedRef.current) {
+      setNotice('Original is a locked background. Select a glitch layer first.');
+      return;
+    }
     if (activeLayer(layerStackRef.current).locked) {
       setNotice('The active glitch layer is locked.');
       return;
@@ -3767,6 +3973,9 @@ export function App() {
         setActivePanel('retouch');
       } else if (action === 'smudge') {
         setTool('smudge');
+        setActivePanel('retouch');
+      } else if (action === 'finger') {
+        setTool('finger');
         setActivePanel('retouch');
       } else if (action === 'blur-retouch') {
         setTool('blur');
@@ -3879,7 +4088,10 @@ export function App() {
     } else if (algorithm === 'row-column-repeat') {
       overrides.repeatCount = [2, 4, 7, 11, 16][levelIndex]!;
     } else if (algorithm === 'structural-mixed') {
-      overrides.structuralMixCount = [1, 2, 3, 4, 5][levelIndex]!;
+      const mixMaximum = [2, 2, 2, 3, 3][levelIndex]!;
+      overrides.structuralMixCount = mixMaximum;
+      overrides.structuralMixMinEffects = 2;
+      overrides.structuralMixMaxEffects = mixMaximum;
     }
     setBrush((current) => ({ ...current, strength }));
     setSettings((current) => ({ ...current, ...overrides }));
@@ -3902,6 +4114,7 @@ export function App() {
   return (
     <main
       className={`app ${isAnyProcessing ? 'is-processing' : ''}`}
+      data-interface-mode={interfaceMode}
       onDragEnter={(event) => {
         event.preventDefault();
         fileDropCounter.current += 1;
@@ -3921,6 +4134,10 @@ export function App() {
         if (file) void loadDocument(file);
       }}
     >
+      <a className="skip-link" href="#editor-canvas">
+        Skip to canvas
+      </a>
+      <h1 className="sr-only">Glitch Brushes editor</h1>
       <TopBar
         doc={documentMeta}
         fileInputRef={fileInputRef}
@@ -3943,6 +4160,7 @@ export function App() {
         helpMode={helpMode}
         helpPanelOpen={helpPanelOpen}
         onToggleHelp={toggleHelpPanel}
+        onGoHome={onExit}
       />
 
       {historyOpen && (
@@ -3975,13 +4193,10 @@ export function App() {
           pan={pan}
           workClip={workClip}
           effectiveOriginal={effectiveOriginal}
-          selectedByte={selectedByte}
           canvasOverlays={canvasOverlays}
           compareMode={compareMode}
           splitPosition={splitPosition}
           onSplitPositionChange={setSplitPosition}
-          applyMode={applyMode}
-          onApplyModeChange={setApplyMode}
           brushProcessing={brushProcessing}
           brushProgress={brushProgress}
           onCancelBrushJob={() => cancelBrushJob()}
@@ -4010,9 +4225,11 @@ export function App() {
           onCanvasPointerMove={movePointer}
           onCanvasPointerUp={endPointer}
           onCanvasPointerCancel={endPointer}
+          onCanvasPointerLostCapture={endPointer}
           onCanvasPointerLeave={() => {
             hideBrushCursorVisual();
             clearImageBrushOverlay();
+            if (!strokeRef.current) clearOverlay();
             scheduleCursorInfo({ x: -1, y: -1 });
           }}
           onCanvasWheel={wheelCanvas}
@@ -4028,6 +4245,8 @@ export function App() {
             }}
           />
 
+          <InterfaceModeSwitch value={interfaceMode} onChange={onInterfaceModeChange} />
+
           <div className="inspector-scroll">
             {activePanel === 'effect' && (
               <EffectPanel
@@ -4036,7 +4255,6 @@ export function App() {
                 algorithmList={algorithmList}
                 legacyAlgorithmList={legacyAlgorithmList}
                 algorithmDescriptions={algorithmDescriptions}
-                effectPreviewSource={effectPreviewSource}
                 settings={settings}
                 seed={seed}
                 brush={brush}
@@ -4098,6 +4316,8 @@ export function App() {
                 }
                 onSelectLayer={(id, name) => {
                   layerStackRef.current.activeLayerId = id;
+                  originalLayerSelectedRef.current = false;
+                  setOriginalLayerSelected(false);
                   bumpLayers();
                   setNotice(`${name} is now the active paint target.`);
                 }}
@@ -4119,6 +4339,7 @@ export function App() {
             {activePanel === 'mosh' && (
               <Suspense fallback={<PanelLoading />}>
                 <MoshLab
+                  interfaceMode={interfaceMode}
                   rack={moshRack}
                   seed={moshSeed}
                   previewEnabled={moshPreviewEnabled}
@@ -4172,6 +4393,7 @@ export function App() {
             {activePanel === 'image-brush' && (
               <Suspense fallback={<PanelLoading />}>
                 <ImageBrushPanel
+                  initialInterfaceLevel={interfaceMode}
                   library={imageBrushLibrary}
                   activeAssetId={activeImageBrushId}
                   settings={imageBrushSettings}
@@ -4185,7 +4407,6 @@ export function App() {
                   onAddAssets={addImageBrushAssets}
                   onRemoveAsset={removeImageBrushAsset}
                   onClearLibrary={clearImageBrushLibrary}
-                  onRemoveDemoAssets={removeImageBrushDemoAssets}
                   onActiveAssetChange={selectImageBrushAsset}
                   onSettingsChange={setImageBrushSettings}
                   onRackChange={setImageBrushRack}
@@ -4198,9 +4419,7 @@ export function App() {
                     imageBrushLockedRandomizationRef.current = null;
                     setImageBrushLockSeed(locked);
                   }}
-                  onNewVariation={() => randomizeCurrentImageBrush('everything', true)}
                   onOptimizeAsset={optimizeActiveImageBrush}
-                  onRestoreDemos={restoreImageBrushDemos}
                   onDownloadProcessed={() => void downloadProcessedBrush()}
                   onCopyProcessed={() => void copyProcessedBrush()}
                   onTestStamp={() => testImageBrushOverlay('stamp')}
@@ -4210,19 +4429,21 @@ export function App() {
                 />
               </Suspense>
             )}
-
-            {activePanel === 'raw' && (
-              <FileCorruptionPanel
-                key={`${doc.fileName}:${doc.width}x${doc.height}`}
-                doc={doc}
-                seed={seed}
-                historyVersion={historyVersion}
-                isAnyProcessing={isAnyProcessing}
-                onNotice={setNotice}
-                onProcessingChange={setProcessing}
-              />
-            )}
           </div>
+          <LayersDock
+            layerStack={layerStack}
+            layerVersion={layerVersion}
+            currentLayer={currentLayer}
+            originalSelected={originalLayerSelected}
+            onFlattenLayers={() =>
+              runLayerOperation('Flatten layer stack', (stack) => {
+                flattenLayerStack(stack, docRef.current.original);
+              })
+            }
+            onSelectOriginal={selectOriginalLayer}
+            onSelectLayer={selectEditableLayer}
+            onRunLayerOperation={runLayerOperation}
+          />
         </aside>
       </div>
 

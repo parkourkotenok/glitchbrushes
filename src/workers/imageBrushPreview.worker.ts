@@ -13,11 +13,18 @@ self.onmessage = (event: MessageEvent<ImageBrushPreviewRequest>) => {
   const started = performance.now();
   try {
     const original = new Uint8ClampedArray(request.pixels);
-    const input =
-      request.quality === 'draft'
-        ? resizeRgbaNearest(original, request.width, request.height, 64)
-        : { pixels: original, width: request.width, height: request.height };
-    const livePreview = createImageBrushLivePreviewLayout(request.settings, request.quality);
+    const input = resizeRgbaNearest(
+      original,
+      request.width,
+      request.height,
+      request.quality === 'draft' ? 64 : 256,
+    );
+    const livePreview = createImageBrushLivePreviewLayout(
+      request.settings,
+      request.quality,
+      request.documentWidth,
+      request.documentHeight,
+    );
     const background = createImageBrushLivePreviewBackground(
       livePreview.width,
       livePreview.height,
@@ -53,7 +60,7 @@ self.onmessage = (event: MessageEvent<ImageBrushPreviewRequest>) => {
       },
       {
         collectPreviewVariants: true,
-        maxPreviewVariants: request.quality === 'draft' ? 1 : 2,
+        maxPreviewVariants: request.quality === 'draft' ? 1 : 4,
       },
     );
     const strokePixels = background.slice();
@@ -65,9 +72,15 @@ self.onmessage = (event: MessageEvent<ImageBrushPreviewRequest>) => {
         destination,
       );
     }
-    const variants = rendered.previewVariants?.length
-      ? rendered.previewVariants
-      : [{ pixels: input.pixels.slice(), width: input.width, height: input.height }];
+    const variants = (
+      rendered.previewVariants?.length
+        ? rendered.previewVariants
+        : [{ pixels: input.pixels.slice(), width: input.width, height: input.height }]
+    ).map((variant) => ({
+      ...variant,
+      contentWidth: input.width,
+      contentHeight: input.height,
+    }));
     const primary = variants[0]!;
     const comparison = compareTipPixels(
       background,

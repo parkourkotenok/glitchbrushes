@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { AlgorithmId, Tool } from '../types';
 
-export type InspectorPanelId = 'effect' | 'retouch' | 'mosh' | 'image-brush' | 'raw';
+export type InspectorPanelId = 'effect' | 'retouch' | 'mosh' | 'image-brush';
 
 export function useEditor() {
   const [tool, setTool] = useState<Tool>('brush');

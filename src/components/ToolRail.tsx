@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import type { Tool } from '../types';
 
-type ActivePanel = 'effect' | 'retouch' | 'mosh' | 'image-brush' | 'raw';
+type ActivePanel = 'effect' | 'retouch' | 'mosh' | 'image-brush';
 
 interface ToolRailProps {
   tool: Tool;
@@ -66,6 +66,17 @@ export function ToolRail({
       >
         <Droplets size={19} />
         <span>S</span>
+      </button>
+      <button
+        className={tool === 'finger' ? 'active' : ''}
+        onClick={() => {
+          onSelectTool('finger');
+          onSelectPanel('retouch');
+        }}
+        title="Finger · Photoshop-style pixel drag (R)"
+      >
+        <Hand size={19} />
+        <span>R</span>
       </button>
       <button
         className={tool === 'blur' ? 'active' : ''}

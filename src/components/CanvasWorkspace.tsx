@@ -1,8 +1,8 @@
 import type { CSSProperties, RefObject } from 'react';
 import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
-import { Aperture, Check, X } from 'lucide-react';
+import { Check, X } from 'lucide-react';
 import { EffectIcon, algorithmIconIds } from '../icons/effects';
-import type { AlgorithmId, ApplyMode, CanvasOverlayState, MaskView, Point, Tool } from '../types';
+import type { AlgorithmId, CanvasOverlayState, MaskView, Point, Tool } from '../types';
 import type { BrushProgress } from '../brush/engine';
 import { isRetouchTool } from '../retouch/tools';
 
@@ -12,13 +12,10 @@ interface CanvasWorkspaceProps {
   pan: Point;
   workClip: string | undefined;
   effectiveOriginal: boolean;
-  selectedByte: number;
   canvasOverlays: CanvasOverlayState[];
   compareMode: 'off' | 'split' | 'blink';
   splitPosition: number;
   onSplitPositionChange: (value: number) => void;
-  applyMode: ApplyMode;
-  onApplyModeChange: (mode: ApplyMode) => void;
   brushProcessing: boolean;
   brushProgress: BrushProgress | null;
   onCancelBrushJob: () => void;
@@ -44,6 +41,7 @@ interface CanvasWorkspaceProps {
   onCanvasPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onCanvasPointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onCanvasPointerCancel: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onCanvasPointerLostCapture: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onCanvasPointerLeave: () => void;
   onCanvasWheel: (event: ReactWheelEvent<HTMLDivElement>) => void;
 }
@@ -54,13 +52,10 @@ export function CanvasWorkspace({
   pan,
   workClip,
   effectiveOriginal,
-  selectedByte,
   canvasOverlays,
   compareMode,
   splitPosition,
   onSplitPositionChange,
-  applyMode,
-  onApplyModeChange,
   brushProcessing,
   brushProgress,
   onCancelBrushJob,
@@ -86,27 +81,13 @@ export function CanvasWorkspace({
   onCanvasPointerMove,
   onCanvasPointerUp,
   onCanvasPointerCancel,
+  onCanvasPointerLostCapture,
   onCanvasPointerLeave,
   onCanvasWheel,
 }: CanvasWorkspaceProps) {
   return (
-    <section className="canvas-column">
+    <section className="canvas-column" id="editor-canvas" tabIndex={-1}>
       <div className="canvas-toolbar">
-        <div className="segmented">
-          {(['continuous', 'stroke', 'preview'] as ApplyMode[]).map((mode) => (
-            <button
-              key={mode}
-              className={applyMode === mode ? 'active' : ''}
-              onClick={() => onApplyModeChange(mode)}
-            >
-              {mode === 'continuous'
-                ? 'Continuous'
-                : mode === 'stroke'
-                  ? 'Stroke commit'
-                  : 'Preview'}
-            </button>
-          ))}
-        </div>
         <div className="canvas-toolbar-center">
           {brushProcessing && brushProgress && (
             <div className="brush-worker-progress">
@@ -176,6 +157,7 @@ export function CanvasWorkspace({
         onPointerMove={onCanvasPointerMove}
         onPointerUp={onCanvasPointerUp}
         onPointerCancel={onCanvasPointerCancel}
+        onLostPointerCapture={onCanvasPointerLostCapture}
         onPointerLeave={onCanvasPointerLeave}
         onWheel={onCanvasWheel}
       >
@@ -226,13 +208,6 @@ export function CanvasWorkspace({
               </div>
             );
           })}
-          <div
-            className="pixel-highlight"
-            style={{
-              left: Math.floor(selectedByte / 4) % doc.width,
-              top: Math.floor(Math.floor(selectedByte / 4) / doc.width),
-            }}
-          />
         </div>
         <div ref={cursorRef} className="brush-cursor" />
         {compareMode === 'split' && (
@@ -251,10 +226,6 @@ export function CanvasWorkspace({
             <span>AFTER</span>
           </div>
         )}
-        <div className="canvas-corner-badge">
-          <Aperture size={14} />
-          <span>SHIFT + CLICK · SELECT PIXEL TARGET</span>
-        </div>
       </div>
     </section>
   );

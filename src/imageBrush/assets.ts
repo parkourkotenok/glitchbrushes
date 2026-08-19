@@ -237,15 +237,22 @@ export function retrimImageBrushAsset(
   asset: ImageBrushAsset,
   trim: boolean,
   threshold: number,
+  maximumDimension: number | null = 512,
 ): ImageBrushAsset {
   const bounds = trim
     ? transparentBounds(asset.originalPixels, asset.originalWidth, asset.originalHeight, threshold)
     : { x: 0, y: 0, width: asset.originalWidth, height: asset.originalHeight };
+  const working = resizeRgbaBounds(
+    asset.originalPixels,
+    asset.originalWidth,
+    bounds,
+    maximumDimension,
+  );
   return {
     ...asset,
-    width: bounds.width,
-    height: bounds.height,
-    pixels: cropRgba(asset.originalPixels, asset.originalWidth, bounds),
+    width: working.width,
+    height: working.height,
+    pixels: working.pixels,
     trimBounds: bounds,
   };
 }
@@ -282,146 +289,6 @@ export async function decodeImageBrushFile(
   } finally {
     bitmap.close();
   }
-}
-
-function createDemoPixels(
-  draw: (set: (x: number, y: number, rgba: readonly number[]) => void) => void,
-): Uint8ClampedArray {
-  const size = 64;
-  const output = new Uint8ClampedArray(size * size * 4);
-  const set = (x: number, y: number, rgba: readonly number[]) => {
-    if (x < 0 || y < 0 || x >= size || y >= size) return;
-    const offset = (Math.floor(y) * size + Math.floor(x)) * 4;
-    output[offset] = rgba[0]!;
-    output[offset + 1] = rgba[1]!;
-    output[offset + 2] = rgba[2]!;
-    output[offset + 3] = rgba[3] ?? 255;
-  };
-  draw(set);
-  return output;
-}
-
-function fillRect(
-  set: (x: number, y: number, rgba: readonly number[]) => void,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  color: readonly number[],
-): void {
-  for (let py = y; py < y + height; py += 1) {
-    for (let px = x; px < x + width; px += 1) set(px, py, color);
-  }
-}
-
-export function createDemoBrushAssets(): ImageBrushAsset[] {
-  const gold = [226, 179, 83, 255] as const;
-  const coral = [229, 86, 70, 255] as const;
-  const cyan = [68, 205, 203, 255] as const;
-  const pale = [238, 234, 218, 255] as const;
-  const demos: Array<
-    [string, (set: (x: number, y: number, rgba: readonly number[]) => void) => void]
-  > = [
-    ['Square', (set) => fillRect(set, 10, 10, 44, 44, gold)],
-    [
-      'Circle',
-      (set) => {
-        for (let y = 4; y < 60; y++)
-          for (let x = 4; x < 60; x++) {
-            const distance = Math.hypot(x - 31.5, y - 31.5);
-            if (distance <= 27) set(x, y, distance > 22 ? coral : gold);
-          }
-      },
-    ],
-    [
-      'Cross',
-      (set) => {
-        fillRect(set, 26, 5, 12, 54, pale);
-        fillRect(set, 5, 26, 54, 12, coral);
-      },
-    ],
-    [
-      'Arrow',
-      (set) => {
-        fillRect(set, 8, 27, 36, 10, cyan);
-        for (let row = 0; row < 24; row++)
-          fillRect(set, 38 + Math.floor(row / 2), 20 + row, 4, 1, gold);
-        for (let row = 0; row < 24; row++)
-          fillRect(set, 38 + Math.floor(row / 2), 43 - row, 4, 1, gold);
-      },
-    ],
-    [
-      'Checker Tile',
-      (set) => {
-        for (let y = 8; y < 56; y++)
-          for (let x = 8; x < 56; x++) {
-            set(x, y, (Math.floor(x / 8) + Math.floor(y / 8)) % 2 ? coral : cyan);
-          }
-      },
-    ],
-    [
-      'Barcode',
-      (set) => {
-        const widths = [2, 5, 1, 3, 6, 2, 4, 1, 5, 3, 2];
-        let x = 7;
-        widths.forEach((width, index) => {
-          fillRect(
-            set,
-            x,
-            7 + (index % 3) * 4,
-            width,
-            50 - (index % 3) * 8,
-            index % 2 ? gold : pale,
-          );
-          x += width + 2;
-        });
-      },
-    ],
-    [
-      'Broken UI Window',
-      (set) => {
-        fillRect(set, 6, 8, 52, 46, pale);
-        fillRect(set, 9, 12, 46, 7, coral);
-        fillRect(set, 11, 24, 18, 22, cyan);
-        fillRect(set, 34, 24, 18, 5, gold);
-        fillRect(set, 31, 34, 21, 4, coral);
-        fillRect(set, 39, 42, 16, 8, cyan);
-        fillRect(set, 17, 31, 28, 3, [0, 0, 0, 0]);
-      },
-    ],
-    [
-      'Pixel Star',
-      (set) => {
-        const rows = [4, 8, 14, 24, 50, 24, 14, 8, 4];
-        rows.forEach((width, index) =>
-          fillRect(set, 32 - width / 2, 5 + index * 6, width, 5, index % 2 ? coral : gold),
-        );
-      },
-    ],
-    [
-      'Abstract Symbol',
-      (set) => {
-        fillRect(set, 8, 8, 14, 42, cyan);
-        fillRect(set, 22, 8, 30, 10, gold);
-        fillRect(set, 30, 18, 10, 38, coral);
-        fillRect(set, 40, 42, 17, 14, pale);
-        fillRect(set, 13, 25, 40, 6, [19, 19, 18, 255]);
-      },
-    ],
-  ];
-  return demos.map(([name, draw], index) =>
-    createImageBrushAsset(
-      name,
-      `${name.toLowerCase().replace(/\s+/g, '-')}.png`,
-      'image/png',
-      createDemoPixels(draw),
-      64,
-      64,
-      true,
-      1,
-      { id: `demo-image-brush-${index}`, demo: true, defaultSize: 84 },
-    ),
-  );
 }
 
 export function serializeImageBrushAsset(asset: ImageBrushAsset): SerializedImageBrushAsset {

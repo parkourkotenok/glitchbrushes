@@ -341,6 +341,8 @@ export interface ImageBrushPreviewResult {
     pixels: Uint8ClampedArray;
     width: number;
     height: number;
+    contentWidth: number;
+    contentHeight: number;
   }>;
   stroke: {
     pixels: Uint8ClampedArray;
@@ -363,6 +365,8 @@ export interface ImageBrushPreviewRequest {
   backgroundPixels: ArrayBuffer;
   backgroundWidth: number;
   backgroundHeight: number;
+  documentWidth: number;
+  documentHeight: number;
   rack: ImageBrushFxItem[];
   settings: ImageBrushSettings;
   seed: string;

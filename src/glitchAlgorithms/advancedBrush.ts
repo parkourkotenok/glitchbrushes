@@ -45,21 +45,10 @@ function sortValue(
   return property === 'hue' ? (hue / 360) * 255 : saturation * 255;
 }
 
-function distanceToRectangle(x: number, y: number, bounds: Rectangle): number {
-  const dx = Math.max(bounds.x - x, 0, x - (bounds.x + bounds.width - 1));
-  const dy = Math.max(bounds.y - y, 0, y - (bounds.y + bounds.height - 1));
-  return Math.hypot(dx, dy);
-}
-
-function influenceAt(context: GlitchContext, x: number, y: number, spill: number): number {
+function influenceAt(context: GlitchContext, x: number, y: number, _spill = 0): number {
   if (x < 0 || y < 0 || x >= context.width || y >= context.height) return 0;
   const masked = context.mask[y * context.width + x] ?? 0;
-  if (masked > 0) return clamp(masked * context.strength * context.pressure, 0, 1);
-  if (spill <= 0) return 0;
-  const distance = distanceToRectangle(x, y, context.bounds);
-  return distance <= spill
-    ? clamp((1 - distance / Math.max(1, spill)) * context.strength * 0.52, 0, 1)
-    : 0;
+  return clamp(masked * context.strength * context.pressure, 0, 1);
 }
 
 function edgeCoordinate(value: number, size: number, edge: 'clamp' | 'wrap' | 'mirror'): number {
@@ -125,6 +114,7 @@ const pixelSortBrush: GlitchAlgorithm = {
   apply(context) {
     const { settings, width, height } = context;
     const source = context.pixels.slice();
+    const bounds = clipRectangle(context.writeBounds ?? context.bounds, width, height);
     const movement = context.movement ?? { x: 1, y: 0 };
     const strokeVertical = Math.abs(movement.y) > Math.abs(movement.x);
     let vertical =
@@ -132,14 +122,10 @@ const pixelSortBrush: GlitchAlgorithm = {
       (settings.sortBrushDirection === 'stroke' && strokeVertical) ||
       (settings.sortBrushDirection === 'perpendicular' && !strokeVertical);
     if (settings.sortBrushDirection === 'horizontal') vertical = false;
-    const lineStart = vertical ? context.bounds.x : context.bounds.y;
-    const lineEnd = vertical
-      ? context.bounds.x + context.bounds.width
-      : context.bounds.y + context.bounds.height;
-    const axisStart = vertical ? context.bounds.y : context.bounds.x;
-    const axisEnd = vertical
-      ? context.bounds.y + context.bounds.height
-      : context.bounds.x + context.bounds.width;
+    const lineStart = vertical ? bounds.x : bounds.y;
+    const lineEnd = vertical ? bounds.x + bounds.width : bounds.y + bounds.height;
+    const axisStart = vertical ? bounds.y : bounds.x;
+    const axisEnd = vertical ? bounds.y + bounds.height : bounds.x + bounds.width;
     const random = createSeededRandom(`${context.seed}:pixel-sort-brush`);
     let touched = 0;
     for (let line = lineStart; line < lineEnd; line += 1) {
@@ -219,7 +205,7 @@ const pixelSortBrush: GlitchAlgorithm = {
         }
       }
     }
-    return result(clipRectangle(context.writeBounds ?? context.bounds, width, height), touched);
+    return result(bounds, touched);
   },
 };
 
@@ -265,18 +251,34 @@ const feedbackBrush: GlitchAlgorithm = {
           const sourceX = centerX + localX * cosine - localY * sine;
           const sourceY = centerY + localX * sine + localY * cosine;
           const destination = pixelToByteOffset(x, y, width);
-          for (let channel = 0; channel < 3; channel += 1) {
-            const delay = (channel - 1) * settings.feedbackBrushRgbDelay * echo;
-            const sampled =
-              sampleNearest(source, width, height, sourceX + delay, sourceY, channel, 'clamp') *
-              brightness;
-            context.pixels[destination + channel] = blendChannel(
-              context.pixels[destination + channel]!,
-              sampled,
-              clamp(opacity * influence, 0, 1),
-              settings.feedbackBrushBlendMode,
-            );
-          }
+          const channelDelay = settings.feedbackBrushRgbDelay * echo;
+          const sampledRed =
+            sampleNearest(source, width, height, sourceX - channelDelay, sourceY, 0, 'clamp') *
+            brightness;
+          const sampledGreen =
+            sampleNearest(source, width, height, sourceX, sourceY, 1, 'clamp') * brightness;
+          const sampledBlue =
+            sampleNearest(source, width, height, sourceX + channelDelay, sourceY, 2, 'clamp') *
+            brightness;
+          const blendAmount = clamp(opacity * influence, 0, 1);
+          context.pixels[destination] = blendChannel(
+            context.pixels[destination]!,
+            sampledRed,
+            blendAmount,
+            settings.feedbackBrushBlendMode,
+          );
+          context.pixels[destination + 1] = blendChannel(
+            context.pixels[destination + 1]!,
+            sampledGreen,
+            blendAmount,
+            settings.feedbackBrushBlendMode,
+          );
+          context.pixels[destination + 2] = blendChannel(
+            context.pixels[destination + 2]!,
+            sampledBlue,
+            blendAmount,
+            settings.feedbackBrushBlendMode,
+          );
           touched += 1;
         }
       }
@@ -439,10 +441,6 @@ const flowMoshBrush: GlitchAlgorithm = {
       const decay = Math.pow(1 - settings.flowBrushDecay, iteration);
       for (let blockY = bounds.y; blockY < bounds.y + bounds.height; blockY += block) {
         for (let blockX = bounds.x; blockX < bounds.x + bounds.width; blockX += block) {
-          const centerX = Math.min(width - 1, blockX + Math.floor(block / 2));
-          const centerY = Math.min(height - 1, blockY + Math.floor(block / 2));
-          const influence = influenceAt(context, centerX, centerY, settings.flowBrushTrailWidth);
-          if (influence <= 0.015) continue;
           const blockJitter = (random.next() - 0.5) * block * settings.flowBrushJitter;
           for (
             let localY = 0;
@@ -456,6 +454,8 @@ const flowMoshBrush: GlitchAlgorithm = {
             ) {
               const x = blockX + localX;
               const y = blockY + localY;
+              const influence = influenceAt(context, x, y);
+              if (influence <= 0.015) continue;
               const destination = pixelToByteOffset(x, y, width);
               const sourceX = x - dx * distance - dy * blockJitter;
               const sourceY = y - dy * distance + dx * blockJitter;
@@ -507,11 +507,11 @@ const cloneCorruptionBrush: GlitchAlgorithm = {
   family: 'advanced-brush',
   apply(context) {
     const { cloneSource, settings, width, height } = context;
-    if (!cloneSource) return result(context.bounds, 0);
-    const sourceBounds = clipRectangle(cloneSource, width, height);
-    if (!sourceBounds.width || !sourceBounds.height) return result(context.bounds, 0);
-    const source = context.pixels.slice();
     const bounds = clipRectangle(context.writeBounds ?? context.bounds, width, height);
+    if (!cloneSource) return result(bounds, 0);
+    const sourceBounds = clipRectangle(cloneSource, width, height);
+    if (!sourceBounds.width || !sourceBounds.height) return result(bounds, 0);
+    const source = context.pixels.slice();
     let touched = 0;
     const mode = settings.cloneBrushMode;
     const block = Math.max(2, Math.round(settings.cloneBrushBlockSize));
@@ -670,8 +670,16 @@ const lineFreezeBrush: GlitchAlgorithm = {
           const y = horizontal ? bounds.y + line + sub : bounds.y + axis;
           const influence = influenceAt(context, x, y, settings.lineBrushSpill);
           if (influence <= 0.01) continue;
-          const sourceX = horizontal ? x : fixedCoordinate;
-          const sourceY = horizontal ? fixedCoordinate : y;
+          const destinationLine = horizontal ? y : x;
+          const sampleLine =
+            Math.round(fixedCoordinate) === destinationLine
+              ? fixedCoordinate +
+                (destinationLine + thickness < (horizontal ? height : width)
+                  ? thickness
+                  : -thickness)
+              : fixedCoordinate;
+          const sourceX = horizontal ? x : sampleLine;
+          const sourceY = horizontal ? sampleLine : y;
           const destination = pixelToByteOffset(x, y, width);
           for (let channel = 0; channel < 3; channel += 1) {
             const split = (channel - 1) * settings.lineBrushRgbSplit;

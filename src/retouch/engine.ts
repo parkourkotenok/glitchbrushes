@@ -11,6 +11,7 @@ export class RetouchCancelledError extends Error {
 
 const TOOL_NAMES = {
   smudge: 'Smudge',
+  finger: 'Finger',
   blur: 'Blur',
   sharpen: 'Sharpen',
   restore: 'Restore',
@@ -100,6 +101,76 @@ function applySmudge(
         sourceOffset,
         maskValue * request.brush.strength * pressure * (0.45 + wetness * 0.55),
       );
+    }
+  }
+}
+
+function applyFinger(
+  request: RetouchProcessRequest,
+  pixels: Uint8ClampedArray,
+  mask: Uint8Array,
+): void {
+  if (request.path.length < 2) return;
+  const radius = Math.max(1, request.brush.size / 2);
+  const radiusCeil = Math.ceil(radius);
+  const diameter = radiusCeil * 2 + 1;
+  const reservoir = new Float32Array(diameter * diameter * 4);
+  const valid = new Uint8Array(diameter * diameter);
+  const tipFalloff = new Float32Array(diameter * diameter);
+  const sampleSource = request.samplePixels ? new Uint8ClampedArray(request.samplePixels) : pixels;
+  const first = request.path[0]!;
+  const hardness = clamp(request.brush.hardness, 0, 1);
+
+  for (let localY = -radiusCeil; localY <= radiusCeil; localY += 1) {
+    for (let localX = -radiusCeil; localX <= radiusCeil; localX += 1) {
+      const normalizedDistance = Math.hypot(localX, localY) / radius;
+      if (normalizedDistance > 1) continue;
+      const slot = (localY + radiusCeil) * diameter + localX + radiusCeil;
+      const x = clamp(Math.round(first.x + localX), 0, request.width - 1);
+      const y = clamp(Math.round(first.y + localY), 0, request.height - 1);
+      const source = pixelToByteOffset(x, y, request.width);
+      const reservoirOffset = slot * 4;
+      valid[slot] = 1;
+      tipFalloff[slot] =
+        normalizedDistance <= hardness
+          ? 1
+          : 1 - (normalizedDistance - hardness) / Math.max(0.0001, 1 - hardness);
+      for (let channel = 0; channel < 4; channel += 1) {
+        reservoir[reservoirOffset + channel] = sampleSource[source + channel]!;
+      }
+    }
+  }
+
+  const pickup = clamp(request.settings.smudgePickup, 0, 1);
+  const wetness = clamp(request.settings.smudgeWetness, 0, 1);
+  for (let index = 1; index < request.path.length; index += 1) {
+    const point = request.path[index]!;
+    const pressure = request.settings.smudgePressureStrength ? point.pressure : 1;
+    const strength = clamp(request.brush.strength * pressure, 0, 1);
+    const reload = pickup * (0.08 + (1 - wetness) * 0.34);
+    for (let localY = -radiusCeil; localY <= radiusCeil; localY += 1) {
+      for (let localX = -radiusCeil; localX <= radiusCeil; localX += 1) {
+        const slot = (localY + radiusCeil) * diameter + localX + radiusCeil;
+        if (!valid[slot]) continue;
+        const x = Math.round(point.x + localX);
+        const y = Math.round(point.y + localY);
+        if (x < 0 || y < 0 || x >= request.width || y >= request.height) continue;
+        const maskValue = maskAt(mask, request.maskBounds, x, y);
+        if (maskValue <= 0) continue;
+        const amount = clamp(
+          maskValue * tipFalloff[slot]! * strength * (0.42 + wetness * 0.58),
+          0,
+          1,
+        );
+        const destination = pixelToByteOffset(x, y, request.width);
+        const reservoirOffset = slot * 4;
+        for (let channel = 0; channel < 4; channel += 1) {
+          const underBrush = pixels[destination + channel]!;
+          const carried = reservoir[reservoirOffset + channel]!;
+          pixels[destination + channel] = Math.round(underBrush * (1 - amount) + carried * amount);
+          reservoir[reservoirOffset + channel] = carried * (1 - reload) + underBrush * reload;
+        }
+      }
     }
   }
 }
@@ -356,6 +427,7 @@ export function processRetouch(
   guard();
   progress(6);
   if (request.tool === 'smudge') applySmudge(request, pixels, mask, before);
+  else if (request.tool === 'finger') applyFinger(request, pixels, mask);
   else if (request.tool === 'blur') applyBlur(request, pixels, mask);
   else if (request.tool === 'sharpen') applySharpen(request, pixels, mask);
   else if (request.tool === 'restore') applySourceRestore(request, pixels, mask);

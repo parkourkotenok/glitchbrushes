@@ -81,7 +81,9 @@ export const builtInPresets: Preset[] = [
     algorithm: 'structural-mixed',
     brush: { strength: 1, density: 1, hardness: 0.82 },
     settings: {
-      structuralMixCount: 5,
+      structuralMixCount: 3,
+      structuralMixMinEffects: 3,
+      structuralMixMaxEffects: 3,
       structuralIntensity: 1.45,
       structuralDensity: 1,
       spill: 'strong',

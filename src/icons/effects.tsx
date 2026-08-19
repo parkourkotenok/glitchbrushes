@@ -246,6 +246,13 @@ function Glyph({ id }: { id: EffectIconId }) {
           <path d="M2 15c4-2 7 1 12-2M5 4c1-2 3-2 4-1" />
         </>
       );
+    case 'finger':
+      return (
+        <>
+          <path d="M6 9V4a1.4 1.4 0 0 1 2.8 0v4-5a1.4 1.4 0 0 1 2.8 0v5-3.5a1.4 1.4 0 0 1 2.8 0V10" />
+          <path d="M6 8 4.7 6.7a1.5 1.5 0 0 0-2.1 2.1l4.2 5.1c.8 1 2 1.6 3.3 1.6h.8c2.5 0 4.5-2 4.5-4.5V7a1.4 1.4 0 0 0-1-1.3" />
+        </>
+      );
     case 'blur':
       return (
         <>
@@ -360,6 +367,7 @@ export const effectIconIds: readonly EffectIconId[] = [
   'edge-melt',
   'flow-field',
   'smudge',
+  'finger',
   'blur',
   'sharpen',
   'restore',

@@ -135,6 +135,40 @@ export function resizeRgba(
   return { pixels: output, width: nextWidth, height: nextHeight };
 }
 
+function resizeRgbaBounds(
+  pixels: Uint8ClampedArray,
+  sourceWidth: number,
+  bounds: Rectangle,
+  maximumDimension: number | null,
+): { pixels: Uint8ClampedArray; width: number; height: number } {
+  if (maximumDimension === null || Math.max(bounds.width, bounds.height) <= maximumDimension) {
+    return {
+      pixels: cropRgba(pixels, sourceWidth, bounds),
+      width: bounds.width,
+      height: bounds.height,
+    };
+  }
+  const scale = Math.max(1, Math.round(maximumDimension)) / Math.max(bounds.width, bounds.height);
+  const width = Math.max(1, Math.round(bounds.width * scale));
+  const height = Math.max(1, Math.round(bounds.height * scale));
+  const output = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    const sourceY =
+      bounds.y + Math.min(bounds.height - 1, Math.floor(((y + 0.5) * bounds.height) / height));
+    for (let x = 0; x < width; x += 1) {
+      const sourceX =
+        bounds.x + Math.min(bounds.width - 1, Math.floor(((x + 0.5) * bounds.width) / width));
+      const source = (sourceY * sourceWidth + sourceX) * 4;
+      const target = (y * width + x) * 4;
+      output[target] = pixels[source]!;
+      output[target + 1] = pixels[source + 1]!;
+      output[target + 2] = pixels[source + 2]!;
+      output[target + 3] = pixels[source + 3]!;
+    }
+  }
+  return { pixels: output, width, height };
+}
+
 export function optimizeImageBrushAsset(
   asset: ImageBrushAsset,
   maximumDimension: number | null,
@@ -144,11 +178,12 @@ export function optimizeImageBrushAsset(
   const bounds = trim
     ? transparentBounds(asset.originalPixels, asset.originalWidth, asset.originalHeight, threshold)
     : { x: 0, y: 0, width: asset.originalWidth, height: asset.originalHeight };
-  const cropped = cropRgba(asset.originalPixels, asset.originalWidth, bounds);
-  const resized =
-    maximumDimension === null
-      ? { pixels: cropped, width: bounds.width, height: bounds.height }
-      : resizeRgba(cropped, bounds.width, bounds.height, maximumDimension);
+  const resized = resizeRgbaBounds(
+    asset.originalPixels,
+    asset.originalWidth,
+    bounds,
+    maximumDimension,
+  );
   return {
     ...asset,
     width: resized.width,
@@ -167,11 +202,18 @@ export function createImageBrushAsset(
   height: number,
   trim = true,
   threshold = 2,
-  options: { id?: string; demo?: boolean; defaultSize?: number } = {},
+  options: {
+    id?: string;
+    demo?: boolean;
+    defaultSize?: number;
+    maximumDimension?: number | null;
+    reuseOriginalPixels?: boolean;
+  } = {},
 ): ImageBrushAsset {
   const trimBounds = trim
     ? transparentBounds(pixels, width, height, threshold)
     : { x: 0, y: 0, width, height };
+  const working = resizeRgbaBounds(pixels, width, trimBounds, options.maximumDimension ?? null);
   return {
     id: options.id ?? `image-brush-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     name,
@@ -179,12 +221,11 @@ export function createImageBrushAsset(
     mimeType,
     originalWidth: width,
     originalHeight: height,
-    originalPixels: pixels.slice(),
-    width: trimBounds.width,
-    height: trimBounds.height,
-    pixels: cropRgba(pixels, width, trimBounds),
+    originalPixels: options.reuseOriginalPixels ? pixels : pixels.slice(),
+    width: working.width,
+    height: working.height,
+    pixels: working.pixels,
     trimBounds,
-    embeddedDataUrl: embeddedRgbaDataUrl(pixels, width, height),
     defaultSize: options.defaultSize ?? Math.min(160, Math.max(32, Math.max(width, height))),
     anchor: 'center',
     customAnchor: { x: 0.5, y: 0.5 },
@@ -196,15 +237,22 @@ export function retrimImageBrushAsset(
   asset: ImageBrushAsset,
   trim: boolean,
   threshold: number,
+  maximumDimension: number | null = 512,
 ): ImageBrushAsset {
   const bounds = trim
     ? transparentBounds(asset.originalPixels, asset.originalWidth, asset.originalHeight, threshold)
     : { x: 0, y: 0, width: asset.originalWidth, height: asset.originalHeight };
+  const working = resizeRgbaBounds(
+    asset.originalPixels,
+    asset.originalWidth,
+    bounds,
+    maximumDimension,
+  );
   return {
     ...asset,
-    width: bounds.width,
-    height: bounds.height,
-    pixels: cropRgba(asset.originalPixels, asset.originalWidth, bounds),
+    width: working.width,
+    height: working.height,
+    pixels: working.pixels,
     trimBounds: bounds,
   };
 }
@@ -243,147 +291,11 @@ export async function decodeImageBrushFile(
   }
 }
 
-function createDemoPixels(
-  draw: (set: (x: number, y: number, rgba: readonly number[]) => void) => void,
-): Uint8ClampedArray {
-  const size = 64;
-  const output = new Uint8ClampedArray(size * size * 4);
-  const set = (x: number, y: number, rgba: readonly number[]) => {
-    if (x < 0 || y < 0 || x >= size || y >= size) return;
-    const offset = (Math.floor(y) * size + Math.floor(x)) * 4;
-    output[offset] = rgba[0]!;
-    output[offset + 1] = rgba[1]!;
-    output[offset + 2] = rgba[2]!;
-    output[offset + 3] = rgba[3] ?? 255;
-  };
-  draw(set);
-  return output;
-}
-
-function fillRect(
-  set: (x: number, y: number, rgba: readonly number[]) => void,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  color: readonly number[],
-): void {
-  for (let py = y; py < y + height; py += 1) {
-    for (let px = x; px < x + width; px += 1) set(px, py, color);
-  }
-}
-
-export function createDemoBrushAssets(): ImageBrushAsset[] {
-  const gold = [226, 179, 83, 255] as const;
-  const coral = [229, 86, 70, 255] as const;
-  const cyan = [68, 205, 203, 255] as const;
-  const pale = [238, 234, 218, 255] as const;
-  const demos: Array<
-    [string, (set: (x: number, y: number, rgba: readonly number[]) => void) => void]
-  > = [
-    ['Square', (set) => fillRect(set, 10, 10, 44, 44, gold)],
-    [
-      'Circle',
-      (set) => {
-        for (let y = 4; y < 60; y++)
-          for (let x = 4; x < 60; x++) {
-            const distance = Math.hypot(x - 31.5, y - 31.5);
-            if (distance <= 27) set(x, y, distance > 22 ? coral : gold);
-          }
-      },
-    ],
-    [
-      'Cross',
-      (set) => {
-        fillRect(set, 26, 5, 12, 54, pale);
-        fillRect(set, 5, 26, 54, 12, coral);
-      },
-    ],
-    [
-      'Arrow',
-      (set) => {
-        fillRect(set, 8, 27, 36, 10, cyan);
-        for (let row = 0; row < 24; row++)
-          fillRect(set, 38 + Math.floor(row / 2), 20 + row, 4, 1, gold);
-        for (let row = 0; row < 24; row++)
-          fillRect(set, 38 + Math.floor(row / 2), 43 - row, 4, 1, gold);
-      },
-    ],
-    [
-      'Checker Tile',
-      (set) => {
-        for (let y = 8; y < 56; y++)
-          for (let x = 8; x < 56; x++) {
-            set(x, y, (Math.floor(x / 8) + Math.floor(y / 8)) % 2 ? coral : cyan);
-          }
-      },
-    ],
-    [
-      'Barcode',
-      (set) => {
-        const widths = [2, 5, 1, 3, 6, 2, 4, 1, 5, 3, 2];
-        let x = 7;
-        widths.forEach((width, index) => {
-          fillRect(
-            set,
-            x,
-            7 + (index % 3) * 4,
-            width,
-            50 - (index % 3) * 8,
-            index % 2 ? gold : pale,
-          );
-          x += width + 2;
-        });
-      },
-    ],
-    [
-      'Broken UI Window',
-      (set) => {
-        fillRect(set, 6, 8, 52, 46, pale);
-        fillRect(set, 9, 12, 46, 7, coral);
-        fillRect(set, 11, 24, 18, 22, cyan);
-        fillRect(set, 34, 24, 18, 5, gold);
-        fillRect(set, 31, 34, 21, 4, coral);
-        fillRect(set, 39, 42, 16, 8, cyan);
-        fillRect(set, 17, 31, 28, 3, [0, 0, 0, 0]);
-      },
-    ],
-    [
-      'Pixel Star',
-      (set) => {
-        const rows = [4, 8, 14, 24, 50, 24, 14, 8, 4];
-        rows.forEach((width, index) =>
-          fillRect(set, 32 - width / 2, 5 + index * 6, width, 5, index % 2 ? coral : gold),
-        );
-      },
-    ],
-    [
-      'Abstract Symbol',
-      (set) => {
-        fillRect(set, 8, 8, 14, 42, cyan);
-        fillRect(set, 22, 8, 30, 10, gold);
-        fillRect(set, 30, 18, 10, 38, coral);
-        fillRect(set, 40, 42, 17, 14, pale);
-        fillRect(set, 13, 25, 40, 6, [19, 19, 18, 255]);
-      },
-    ],
-  ];
-  return demos.map(([name, draw], index) =>
-    createImageBrushAsset(
-      name,
-      `${name.toLowerCase().replace(/\s+/g, '-')}.png`,
-      'image/png',
-      createDemoPixels(draw),
-      64,
-      64,
-      true,
-      1,
-      { id: `demo-image-brush-${index}`, demo: true, defaultSize: 84 },
-    ),
-  );
-}
-
 export function serializeImageBrushAsset(asset: ImageBrushAsset): SerializedImageBrushAsset {
+  const dataUrl =
+    asset.embeddedDataUrl ??
+    embeddedRgbaDataUrl(asset.originalPixels, asset.originalWidth, asset.originalHeight);
+  asset.embeddedDataUrl = dataUrl;
   return {
     id: asset.id,
     name: asset.name,
@@ -391,7 +303,7 @@ export function serializeImageBrushAsset(asset: ImageBrushAsset): SerializedImag
     mimeType: asset.mimeType,
     originalWidth: asset.originalWidth,
     originalHeight: asset.originalHeight,
-    embeddedDataUrl: asset.embeddedDataUrl,
+    embeddedDataUrl: dataUrl,
     defaultSize: asset.defaultSize,
     anchor: asset.anchor,
     customAnchor: { ...asset.customAnchor },
@@ -416,6 +328,7 @@ export function restoreImageBrushAsset(
     settings.trimThreshold,
     { id: serialized.id, demo: serialized.demo, defaultSize: serialized.defaultSize },
   );
+  restored.embeddedDataUrl = serialized.embeddedDataUrl;
   restored.anchor = serialized.anchor;
   restored.customAnchor = { ...serialized.customAnchor };
   restored.fxPresetId = serialized.fxPresetId;

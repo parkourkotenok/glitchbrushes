@@ -6,6 +6,7 @@ import {
   legacyAlgorithmList,
 } from './glitchAlgorithms';
 import { migrateAlgorithmSelection } from './glitchAlgorithms/migration';
+import { selectStructuralMixRecipe } from './glitchAlgorithms/structural';
 import { imageBrushFxDefinitions } from './imageBrush/types';
 import { migrateImageBrushFxId } from './imageBrush/assets';
 import type { AlgorithmSettings, GlitchContext } from './types';
@@ -201,5 +202,84 @@ describe('effect consolidation and migration', () => {
     };
     expect(renderMeta('locked')).toEqual(renderMeta('locked'));
     expect(hash(renderMeta('new-recipe'))).not.toBe(hash(renderMeta('locked')));
+  });
+
+  it('builds deterministic organic recipes with two or three unique role-based effects', () => {
+    const settings = { ...defaultAlgorithmSettings };
+    const observedSizes = new Set<number>();
+    for (let index = 0; index < 48; index += 1) {
+      const seed = `organic-recipe-${index}`;
+      const first = selectStructuralMixRecipe(settings, seed);
+      const second = selectStructuralMixRecipe(settings, seed);
+      expect(first).toEqual(second);
+      expect(first.length).toBeGreaterThanOrEqual(2);
+      expect(first.length).toBeLessThanOrEqual(3);
+      expect(new Set(first.map((step) => step.algorithm)).size).toBe(first.length);
+      expect(first[0]!.role).toBe('motion');
+      expect(first.map((step) => step.strength)).toEqual(
+        first.length === 3 ? [0.62, 0.38, 0.22] : [0.68, 0.42],
+      );
+      observedSizes.add(first.length);
+    }
+    expect(observedSizes).toEqual(new Set([2, 3]));
+  });
+
+  it('can select every primary brush and structural effect from the complete meta pool', () => {
+    const settings = { ...defaultAlgorithmSettings };
+    const selected = new Set<string>();
+    const selectedWithoutCloneSource = new Set<string>();
+    for (let index = 0; index < 640; index += 1) {
+      for (const step of selectStructuralMixRecipe(settings, `complete-pool-${index}`, {
+        hasCloneSource: true,
+      })) {
+        selected.add(step.algorithm);
+      }
+      for (const step of selectStructuralMixRecipe(settings, `no-clone-${index}`)) {
+        selectedWithoutCloneSource.add(step.algorithm);
+      }
+    }
+    expect(selected).toEqual(new Set(settings.structuralMixPool));
+    expect(selectedWithoutCloneSource.has('clone-corruption-brush')).toBe(false);
+  });
+
+  it('keeps the complete mixed result inside the real curved stroke mask', () => {
+    const width = 96;
+    const height = 80;
+    const pixels = sourceImage(width, height);
+    const before = pixels.slice();
+    const mask = new Float32Array(width * height);
+    for (let x = 14; x < 82; x += 1) {
+      const progress = (x - 14) / 67;
+      const centerY = Math.round(22 + progress * 30 + Math.sin(progress * Math.PI * 2) * 9);
+      for (let y = centerY - 5; y <= centerY + 5; y += 1) mask[y * width + x] = 1;
+    }
+    algorithms['structural-mixed'].apply({
+      pixels,
+      originalPixels: pixels.slice(),
+      width,
+      height,
+      mask,
+      bounds: { x: 14, y: 8, width: 68, height: 58 },
+      writeBounds: { x: 0, y: 0, width, height },
+      strength: 1,
+      pressure: 1,
+      seed: 'organic-curved-stroke',
+      movement: { x: 42, y: 18 },
+      settings: { ...defaultAlgorithmSettings, structuralDensity: 1 },
+    });
+    let changedInside = 0;
+    let changedOutside = 0;
+    for (let pixel = 0; pixel < mask.length; pixel += 1) {
+      const offset = pixel * 4;
+      const changed =
+        before[offset] !== pixels[offset] ||
+        before[offset + 1] !== pixels[offset + 1] ||
+        before[offset + 2] !== pixels[offset + 2];
+      if (!changed) continue;
+      if (mask[pixel]! > 0) changedInside += 1;
+      else changedOutside += 1;
+    }
+    expect(changedInside).toBeGreaterThan(0);
+    expect(changedOutside).toBe(0);
   });
 });

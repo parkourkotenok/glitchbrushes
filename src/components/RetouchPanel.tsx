@@ -1,6 +1,4 @@
-import { Brush, Droplets, Eraser, Focus, RefreshCcw, WandSparkles } from 'lucide-react';
-import { RetouchPreviewStage } from './RetouchPreviewStage';
-import type { EffectPreviewSource } from './EffectPreviewStage';
+import { Brush, Droplets, Eraser, Focus, Hand, RefreshCcw, WandSparkles } from 'lucide-react';
 import { SliderField } from './SliderField';
 import { PanelSection, Toggle } from './ui/controls';
 import { EffectIcon } from '../icons/effects';
@@ -10,8 +8,6 @@ import type { RetouchSettings, RetouchTool } from '../retouch/types';
 interface RetouchPanelProps {
   tool: RetouchTool;
   onToolChange: (tool: RetouchTool) => void;
-  previewSource: EffectPreviewSource;
-  restorePreviewSource: EffectPreviewSource;
   brush: BrushSettings;
   onUpdateBrush: <K extends keyof BrushSettings>(key: K, value: BrushSettings[K]) => void;
   retouchSettings: RetouchSettings;
@@ -21,8 +17,6 @@ interface RetouchPanelProps {
 export function RetouchPanel({
   tool,
   onToolChange,
-  previewSource,
-  restorePreviewSource,
   brush,
   onUpdateBrush,
   retouchSettings,
@@ -35,45 +29,48 @@ export function RetouchPanel({
         <strong>
           {tool === 'smudge'
             ? 'Smudge'
-            : tool === 'blur'
-              ? 'Blur'
-              : tool === 'sharpen'
-                ? 'Sharpen'
-                : tool === 'restore'
-                  ? 'Restore'
-                  : 'Eraser'}
+            : tool === 'finger'
+              ? 'Finger'
+              : tool === 'blur'
+                ? 'Blur'
+                : tool === 'sharpen'
+                  ? 'Sharpen'
+                  : tool === 'restore'
+                    ? 'Restore'
+                    : 'Eraser'}
         </strong>
         <p>
           {tool === 'smudge'
             ? 'Drag sampled color and recognizable structure along the stroke.'
-            : tool === 'blur'
-              ? 'Soften a local dirty rectangle without processing the whole document.'
-              : tool === 'sharpen'
-                ? 'Increase local edge contrast with threshold and noise protection.'
-                : tool === 'restore'
-                  ? 'Blend back pixels from Original, the lower layer, or the previous History state.'
-                  : 'Erase only the selected glitch layer to transparency. Original is immutable.'}
+            : tool === 'finger'
+              ? 'Push live pixels under the brush for a continuous Photoshop-style drag.'
+              : tool === 'blur'
+                ? 'Soften a local dirty rectangle without processing the whole document.'
+                : tool === 'sharpen'
+                  ? 'Increase local edge contrast with threshold and noise protection.'
+                  : tool === 'restore'
+                    ? 'Blend back pixels from Original, the lower layer, or the previous History state.'
+                    : 'Erase only the selected glitch layer to transparency. Original is immutable.'}
         </p>
       </header>
       <div className="retouch-tool-switcher" aria-label="Retouch tools">
-        {(['smudge', 'blur', 'sharpen', 'restore', 'eraser'] as RetouchTool[]).map((item) => (
-          <button
-            key={item}
-            className={tool === item ? 'active' : ''}
-            onClick={() => onToolChange(item)}
-          >
-            <EffectIcon id={item === 'restore' ? 'restore' : item} size={15} />
-            {item[0]!.toUpperCase() + item.slice(1)}
-          </button>
-        ))}
+        {(['smudge', 'finger', 'blur', 'sharpen', 'restore', 'eraser'] as RetouchTool[]).map(
+          (item) => (
+            <button
+              key={item}
+              className={tool === item ? 'active' : ''}
+              onClick={() => onToolChange(item)}
+            >
+              {item === 'finger' ? (
+                <Hand size={15} />
+              ) : (
+                <EffectIcon id={item === 'restore' ? 'restore' : item} size={15} />
+              )}
+              {item[0]!.toUpperCase() + item.slice(1)}
+            </button>
+          ),
+        )}
       </div>
-      <RetouchPreviewStage
-        tool={tool}
-        source={previewSource}
-        restoreSource={restorePreviewSource}
-        brush={brush}
-        settings={retouchSettings}
-      />
       <PanelSection title="Brush shape" icon={<Brush size={15} />}>
         <SliderField
           label="Size"
@@ -91,25 +88,30 @@ export function RetouchPanel({
           step={0.01}
           onChange={(value) => onUpdateBrush('strength', value)}
         />
-        <SliderField
-          label="Hardness"
-          value={brush.hardness}
-          min={0}
-          max={1}
-          step={0.01}
-          onChange={(value) => onUpdateBrush('hardness', value)}
-        />
-        <SliderField
-          label="Spacing"
-          value={brush.spacing}
-          min={2}
-          max={100}
-          suffix="%"
-          onChange={(value) => onUpdateBrush('spacing', value)}
-        />
+        <div className="interface-advanced-only">
+          <SliderField
+            label="Hardness"
+            value={brush.hardness}
+            min={0}
+            max={1}
+            step={0.01}
+            onChange={(value) => onUpdateBrush('hardness', value)}
+          />
+          <SliderField
+            label="Spacing"
+            value={brush.spacing}
+            min={2}
+            max={100}
+            suffix="%"
+            onChange={(value) => onUpdateBrush('spacing', value)}
+          />
+        </div>
       </PanelSection>
-      {tool === 'smudge' && (
-        <PanelSection title="Smudge transport" icon={<Droplets size={15} />}>
+      {(tool === 'smudge' || tool === 'finger') && (
+        <PanelSection
+          title={tool === 'finger' ? 'Finger paint' : 'Smudge transport'}
+          icon={tool === 'finger' ? <Hand size={15} /> : <Droplets size={15} />}
+        >
           <SliderField
             label="Pickup"
             value={retouchSettings.smudgePickup}
@@ -130,7 +132,7 @@ export function RetouchPanel({
               onRetouchSettingsChange((current) => ({ ...current, smudgeWetness: value }))
             }
           />
-          <div className="switch-row">
+          <div className="switch-row interface-advanced-only">
             <Toggle
               label="Sample Merged Layers"
               checked={retouchSettings.sampleMergedLayers}
@@ -164,33 +166,38 @@ export function RetouchPanel({
               onRetouchSettingsChange((current) => ({ ...current, blurRadius: value }))
             }
           />
-          <SliderField
-            label="Iterations"
-            value={retouchSettings.blurIterations}
-            min={1}
-            max={4}
-            step={1}
-            onChange={(value) =>
-              onRetouchSettingsChange((current) => ({ ...current, blurIterations: value }))
-            }
-          />
-          <SliderField
-            label="Edge Protection"
-            value={retouchSettings.blurEdgeProtection}
-            min={0}
-            max={1}
-            step={0.01}
-            onChange={(value) =>
-              onRetouchSettingsChange((current) => ({ ...current, blurEdgeProtection: value }))
-            }
-          />
-          <Toggle
-            label="Sample Merged Layers"
-            checked={retouchSettings.sampleMergedLayers}
-            onChange={(value) =>
-              onRetouchSettingsChange((current) => ({ ...current, sampleMergedLayers: value }))
-            }
-          />
+          <div className="interface-advanced-only">
+            <SliderField
+              label="Iterations"
+              value={retouchSettings.blurIterations}
+              min={1}
+              max={4}
+              step={1}
+              onChange={(value) =>
+                onRetouchSettingsChange((current) => ({ ...current, blurIterations: value }))
+              }
+            />
+            <SliderField
+              label="Edge Protection"
+              value={retouchSettings.blurEdgeProtection}
+              min={0}
+              max={1}
+              step={0.01}
+              onChange={(value) =>
+                onRetouchSettingsChange((current) => ({
+                  ...current,
+                  blurEdgeProtection: value,
+                }))
+              }
+            />
+            <Toggle
+              label="Sample Merged Layers"
+              checked={retouchSettings.sampleMergedLayers}
+              onChange={(value) =>
+                onRetouchSettingsChange((current) => ({ ...current, sampleMergedLayers: value }))
+              }
+            />
+          </div>
         </PanelSection>
       )}
       {tool === 'sharpen' && (
@@ -206,36 +213,38 @@ export function RetouchPanel({
               onRetouchSettingsChange((current) => ({ ...current, sharpenRadius: value }))
             }
           />
-          <SliderField
-            label="Threshold"
-            value={retouchSettings.sharpenThreshold}
-            min={0}
-            max={64}
-            step={1}
-            onChange={(value) =>
-              onRetouchSettingsChange((current) => ({ ...current, sharpenThreshold: value }))
-            }
-          />
-          <SliderField
-            label="Protect Noise"
-            value={retouchSettings.sharpenProtectNoise}
-            min={0}
-            max={1}
-            step={0.01}
-            onChange={(value) =>
-              onRetouchSettingsChange((current) => ({
-                ...current,
-                sharpenProtectNoise: value,
-              }))
-            }
-          />
-          <Toggle
-            label="Sample Merged Layers"
-            checked={retouchSettings.sampleMergedLayers}
-            onChange={(value) =>
-              onRetouchSettingsChange((current) => ({ ...current, sampleMergedLayers: value }))
-            }
-          />
+          <div className="interface-advanced-only">
+            <SliderField
+              label="Threshold"
+              value={retouchSettings.sharpenThreshold}
+              min={0}
+              max={64}
+              step={1}
+              onChange={(value) =>
+                onRetouchSettingsChange((current) => ({ ...current, sharpenThreshold: value }))
+              }
+            />
+            <SliderField
+              label="Protect Noise"
+              value={retouchSettings.sharpenProtectNoise}
+              min={0}
+              max={1}
+              step={0.01}
+              onChange={(value) =>
+                onRetouchSettingsChange((current) => ({
+                  ...current,
+                  sharpenProtectNoise: value,
+                }))
+              }
+            />
+            <Toggle
+              label="Sample Merged Layers"
+              checked={retouchSettings.sampleMergedLayers}
+              onChange={(value) =>
+                onRetouchSettingsChange((current) => ({ ...current, sampleMergedLayers: value }))
+              }
+            />
+          </div>
         </PanelSection>
       )}
       {tool === 'restore' && (
@@ -267,7 +276,7 @@ export function RetouchPanel({
           </span>
         </div>
       )}
-      <p className="fine-print">
+      <p className="fine-print interface-advanced-only">
         Every completed retouch stroke creates exactly one History action. The processing mask is
         hidden unless Show processing mask is enabled.
       </p>

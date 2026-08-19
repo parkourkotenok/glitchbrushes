@@ -56,6 +56,8 @@ interface StampVariant extends PreparedTip {
 interface RenderOptions {
   shouldCancel?: () => boolean;
   onProgress?: (progress: Omit<ImageBrushProgress, 'jobId'>) => void;
+  collectPreviewVariants?: boolean;
+  maxPreviewVariants?: number;
 }
 
 interface RenderTimings {
@@ -424,13 +426,26 @@ export function compositeRgbaPixel(
   source: readonly [number, number, number, number],
   mode: StampBlendMode,
 ): void {
-  const sourceAlpha = clamp(source[3] / 255, 0, 1);
+  compositeRgbaValues(target, targetOffset, source[0], source[1], source[2], source[3], mode);
+}
+
+function compositeRgbaValues(
+  target: Uint8ClampedArray,
+  targetOffset: number,
+  sourceRed: number,
+  sourceGreen: number,
+  sourceBlue: number,
+  sourceAlphaByte: number,
+  mode: StampBlendMode,
+): void {
+  const sourceAlpha = clamp(sourceAlphaByte / 255, 0, 1);
   if (sourceAlpha <= 0) return;
   const backdropAlpha = target[targetOffset + 3]! / 255;
   const outputAlpha = sourceAlpha + backdropAlpha * (1 - sourceAlpha);
   for (let channel = 0; channel < 3; channel += 1) {
     const backdrop = target[targetOffset + channel]! / 255;
-    const sourceColor = source[channel]! / 255;
+    const sourceColor =
+      (channel === 0 ? sourceRed : channel === 1 ? sourceGreen : sourceBlue) / 255;
     const blended = blendChannel(backdrop, sourceColor, mode);
     const premultiplied =
       sourceAlpha * (1 - backdropAlpha) * sourceColor +
@@ -1004,42 +1019,46 @@ function placeVariant(
   if (clipped.width <= 0 || clipped.height <= 0) return clipped;
   const cosine = Math.cos(-rotation);
   const sine = Math.sin(-rotation);
+  const localXStep = cosine / scaleX;
+  const localYStep = sine / scaleY;
+  const softnessPixels =
+    edgeSoftness > 0
+      ? Math.max(0.5, Math.min(variant.width, variant.height) * edgeSoftness * 0.18)
+      : 0;
   for (let y = clipped.y; y < clipped.y + clipped.height; y += 1) {
+    const startDx = clipped.x + 0.5 - position.x;
+    const dy = y + 0.5 - position.y;
+    let localX = (startDx * cosine - dy * sine) / scaleX + anchor.x * variant.width;
+    let localY = (startDx * sine + dy * cosine) / scaleY + anchor.y * variant.height;
     for (let x = clipped.x; x < clipped.x + clipped.width; x += 1) {
-      const dx = x + 0.5 - position.x;
-      const dy = y + 0.5 - position.y;
-      const localX = (dx * cosine - dy * sine) / scaleX + anchor.x * variant.width;
-      const localY = (dx * sine + dy * cosine) / scaleY + anchor.y * variant.height;
-      if (localX < 0 || localY < 0 || localX >= variant.width || localY >= variant.height) continue;
-      const sourceX = clamp(Math.floor(localX), 0, variant.width - 1);
-      const sourceY = clamp(Math.floor(localY), 0, variant.height - 1);
-      const sourceOffset = (sourceY * variant.width + sourceX) * 4;
-      let alpha = (variant.pixels[sourceOffset + 3]! / 255) * opacity;
-      if (edgeSoftness > 0) {
-        const edgeDistance = Math.min(
-          localX,
-          localY,
-          variant.width - localX,
-          variant.height - localY,
-        );
-        const softnessPixels = Math.max(
-          0.5,
-          Math.min(variant.width, variant.height) * edgeSoftness * 0.18,
-        );
-        alpha *= clamp(edgeDistance / softnessPixels, 0, 1);
+      if (localX >= 0 && localY >= 0 && localX < variant.width && localY < variant.height) {
+        const sourceX = clamp(Math.floor(localX), 0, variant.width - 1);
+        const sourceY = clamp(Math.floor(localY), 0, variant.height - 1);
+        const sourceOffset = (sourceY * variant.width + sourceX) * 4;
+        let alpha = (variant.pixels[sourceOffset + 3]! / 255) * opacity;
+        if (edgeSoftness > 0) {
+          const edgeDistance = Math.min(
+            localX,
+            localY,
+            variant.width - localX,
+            variant.height - localY,
+          );
+          alpha *= clamp(edgeDistance / softnessPixels, 0, 1);
+        }
+        if (alpha > 0) {
+          compositeRgbaValues(
+            layer,
+            ((y - layerOrigin.y) * layerWidth + (x - layerOrigin.x)) * 4,
+            variant.pixels[sourceOffset]!,
+            variant.pixels[sourceOffset + 1]!,
+            variant.pixels[sourceOffset + 2]!,
+            Math.round(alpha * 255),
+            blendMode,
+          );
+        }
       }
-      if (alpha <= 0) continue;
-      compositeRgbaPixel(
-        layer,
-        ((y - layerOrigin.y) * layerWidth + (x - layerOrigin.x)) * 4,
-        [
-          variant.pixels[sourceOffset]!,
-          variant.pixels[sourceOffset + 1]!,
-          variant.pixels[sourceOffset + 2]!,
-          Math.round(alpha * 255),
-        ],
-        blendMode,
-      );
+      localX += localXStep;
+      localY += localYStep;
     }
   }
   return clipped;
@@ -1064,10 +1083,13 @@ function compositeLocalLayer(
   mode: StampBlendMode,
 ): void {
   for (let offset = 0; offset < targetRegion.length; offset += 4) {
-    compositeRgbaPixel(
+    compositeRgbaValues(
       targetRegion,
       offset,
-      [layer[offset]!, layer[offset + 1]!, layer[offset + 2]!, layer[offset + 3]!],
+      layer[offset]!,
+      layer[offset + 1]!,
+      layer[offset + 2]!,
+      layer[offset + 3]!,
       mode,
     );
   }
@@ -1111,6 +1133,8 @@ export function processImageBrushStroke(
   const cleanCache = new Map<string, PreparedTip>();
   const fixedCache = new Map<string, PreparedTip>();
   const perStampCache = new Map<string, PreparedTip[]>();
+  const previewVariants: PreparedTip[] = [];
+  const previewVariantBuffers = new Set<ArrayBuffer>();
   let previous: PreparedTip | null = null;
   const copies = Math.max(1, Math.round(request.settings.stampsPerStep));
   const totalPlacements = Math.min(
@@ -1303,6 +1327,14 @@ export function processImageBrushStroke(
       perStampCache,
       timings,
     );
+    if (
+      options.collectPreviewVariants &&
+      !previewVariantBuffers.has(variant.pixels.buffer) &&
+      previewVariants.length < Math.max(1, options.maxPreviewVariants ?? 8)
+    ) {
+      previewVariantBuffers.add(variant.pixels.buffer);
+      previewVariants.push(variant);
+    }
     if (request.settings.mutationMode === 'evolving') {
       previous = variant;
     }
@@ -1381,6 +1413,14 @@ export function processImageBrushStroke(
       `${request.seed}:${request.strokeId}:post`,
       { direction: request.stamps.at(-1)?.direction ?? { x: 1, y: 0 } },
     );
+    if (
+      options.collectPreviewVariants &&
+      !previewVariantBuffers.has(processed.pixels.buffer) &&
+      previewVariants.length < Math.max(1, options.maxPreviewVariants ?? 8)
+    ) {
+      previewVariantBuffers.add(processed.pixels.buffer);
+      previewVariants.push(processed);
+    }
     timings.fxProcessingMs += clockNow() - fxStarted;
     layer.set(processed.pixels.subarray(0, layer.length));
   }
@@ -1427,5 +1467,12 @@ export function processImageBrushStroke(
       ? request.evolutionOffset + renderedStamps
       : 0,
     metrics,
+    previewVariants: options.collectPreviewVariants
+      ? previewVariants.map((variant) => ({
+          pixels: variant.pixels.slice(),
+          width: variant.width,
+          height: variant.height,
+        }))
+      : undefined,
   };
 }

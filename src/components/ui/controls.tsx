@@ -10,13 +10,15 @@ export function PanelSection({
   title,
   icon,
   children,
+  className,
 }: {
   title: string;
   icon: ReactNode;
   children: ReactNode;
+  className?: string;
 }) {
   return (
-    <section className="panel-section">
+    <section className={`panel-section ${className ?? ''}`.trim()}>
       <header>
         <span>
           {icon}

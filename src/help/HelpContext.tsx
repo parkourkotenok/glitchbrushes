@@ -275,7 +275,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
               autoFocus
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search datamosh, retouch, alpha, spacing, file corruption…"
+              placeholder="Search datamosh, retouch, alpha, spacing…"
             />
           </label>
           <div className="help-results">

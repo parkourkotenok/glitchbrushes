@@ -8,6 +8,7 @@ import type {
 } from '../types';
 import { clamp } from '../utils/geometry';
 import { createSeededRandom } from '../utils/prng';
+import { advancedBrushAlgorithms } from './advancedBrush';
 import {
   averageRegion,
   extractRegion,
@@ -84,7 +85,7 @@ const sliceDisplacement: GlitchAlgorithm = {
               width: thickness,
               height: bounds.height,
             };
-      touched += forEachPixel(rectangle, context, (x, y) => {
+      touched += forEachPixel(rectangle, context, (x, y, maskInfluence) => {
         const sourceX = orientation === 'horizontal' ? x - offset : x;
         const sourceY = orientation === 'vertical' ? y - offset : y;
         writeBlendedPixel(
@@ -93,7 +94,7 @@ const sliceDisplacement: GlitchAlgorithm = {
           x,
           y,
           sourcePixel(snapshot, sourceX, sourceY, settings.sliceEdgeMode),
-          amount,
+          amount * maskInfluence,
         );
       });
     }
@@ -143,7 +144,7 @@ const macroblockShift: GlitchAlgorithm = {
         ? { x: destination.x + dx, y: destination.y + dy }
         : { x: destination.x - dx, y: destination.y - dy };
 
-      touched += forEachPixel(destination, context, (x, y) => {
+      touched += forEachPixel(destination, context, (x, y, maskInfluence) => {
         const localX = (x - destination.x) / stretch;
         const localY = y - destination.y;
         writeBlendedPixel(
@@ -152,7 +153,7 @@ const macroblockShift: GlitchAlgorithm = {
           x,
           y,
           sourcePixel(snapshot, sourceOrigin.x + localX, sourceOrigin.y + localY, 'clamp'),
-          amount,
+          amount * maskInfluence,
         );
       });
 
@@ -167,7 +168,7 @@ const macroblockShift: GlitchAlgorithm = {
           x: destination.x + Math.round(dx * 0.72),
           y: destination.y + Math.round(dy * 0.72),
         };
-        touched += forEachPixel(duplicate, context, (x, y) => {
+        touched += forEachPixel(duplicate, context, (x, y, maskInfluence) => {
           writeBlendedPixel(
             pixels,
             width,
@@ -178,14 +179,14 @@ const macroblockShift: GlitchAlgorithm = {
               destination.x + (x - duplicate.x),
               destination.y + (y - duplicate.y),
             ),
-            amount * 0.88,
+            amount * 0.88 * maskInfluence,
           );
         });
       }
 
       if (roll > 1 - settings.macroblockSwapChance) {
         const swapTarget = { ...destination, x: destination.x + dx, y: destination.y + dy };
-        touched += forEachPixel(swapTarget, context, (x, y) => {
+        touched += forEachPixel(swapTarget, context, (x, y, maskInfluence) => {
           writeBlendedPixel(
             pixels,
             width,
@@ -196,7 +197,7 @@ const macroblockShift: GlitchAlgorithm = {
               destination.x + (x - swapTarget.x),
               destination.y + (y - swapTarget.y),
             ),
-            amount,
+            amount * maskInfluence,
           );
         });
       }
@@ -269,7 +270,7 @@ const datamoshSmear: GlitchAlgorithm = {
           y: sourceRect.y + direction.y * distance + perpendicular.y * jitter,
         };
         const decay = Math.pow(1 - progress * settings.datamoshDecay, 1.35);
-        touched += forEachPixel(destination, context, (x, y) => {
+        touched += forEachPixel(destination, context, (x, y, maskInfluence) => {
           const sourceX = sourceRect.x + (x - destination.x);
           const sourceY = sourceRect.y + (y - destination.y);
           const chromaShift = settings.datamoshChroma * (0.25 + progress);
@@ -298,7 +299,7 @@ const datamoshSmear: GlitchAlgorithm = {
               );
             }
           }
-          writeBlendedPixel(pixels, width, x, y, rgba, amount * decay);
+          writeBlendedPixel(pixels, width, x, y, rgba, amount * decay * maskInfluence);
         });
       }
     }
@@ -342,14 +343,14 @@ const packetLoss: GlitchAlgorithm = {
       });
       const dx = signedOffset(random, 2, settings.packetRepeatRadius);
       const dy = random.int(-Math.round(blockSize / 2), Math.round(blockSize / 2));
-      touched += forEachPixel(rectangle, context, (x, y) => {
+      touched += forEachPixel(rectangle, context, (x, y, maskInfluence) => {
         const rowTear =
           (y - rectangle.y) % Math.max(2, Math.round(blockSize / 4)) <
           Math.round(settings.packetEdgeTear * 3)
             ? dx * 0.4
             : 0;
         const rgba = flat ? fill : sourcePixel(snapshot, x + dx + rowTear, y + dy, 'clamp');
-        writeBlendedPixel(pixels, width, x, y, rgba, amount);
+        writeBlendedPixel(pixels, width, x, y, rgba, amount * maskInfluence);
       });
     }
     return result(context, touched);
@@ -473,7 +474,7 @@ const rgbChunkSplit: GlitchAlgorithm = {
       const offset = settings.rgbRandomOffset
         ? signedOffset(random, 4, settings.rgbChunkOffset)
         : settings.rgbChunkOffset;
-      touched += forEachPixel(rectangle, context, (x, y) => {
+      touched += forEachPixel(rectangle, context, (x, y, maskInfluence) => {
         const edgeX = Math.min(x - rectangle.x, rectangle.x + rectangle.width - 1 - x);
         const edgeY = Math.min(y - rectangle.y, rectangle.y + rectangle.height - 1 - y);
         const softness = Math.max(1, settings.rgbEdgeSoftness);
@@ -489,7 +490,7 @@ const rgbChunkSplit: GlitchAlgorithm = {
             sampleRegion(snapshot, x + offset, y, 2),
             sampleRegion(snapshot, x, y, 3),
           ],
-          amount * edgeBlend,
+          amount * edgeBlend * maskInfluence,
         );
       });
     }
@@ -529,7 +530,7 @@ const compressionBlockDamage: GlitchAlgorithm = {
         const average = averageRegion(snapshot, { ...rectangle, x: x + dx, y: y + dy });
         const levels = Math.max(2, Math.round(18 - settings.compressionQuantization * 16));
         const step = 255 / (levels - 1);
-        touched += forEachPixel(rectangle, context, (pixelX, pixelY) => {
+        touched += forEachPixel(rectangle, context, (pixelX, pixelY, maskInfluence) => {
           const displacedRgba = sourcePixel(snapshot, pixelX + dx, pixelY + dy);
           const localRgba = sourcePixel(snapshot, pixelX, pixelY);
           const sourceRgba = roll < settings.compressionReplication ? displacedRgba : localRgba;
@@ -574,7 +575,7 @@ const compressionBlockDamage: GlitchAlgorithm = {
               rgba[channel] = clamp(rgba[channel]! + ringing, 0, 255);
             }
           }
-          writeBlendedPixel(pixels, width, pixelX, pixelY, rgba, amount);
+          writeBlendedPixel(pixels, width, pixelX, pixelY, rgba, amount * maskInfluence);
         });
       }
     }
@@ -608,7 +609,7 @@ const scanlineTearPro: GlitchAlgorithm = {
       };
       const dropout = random.next() < settings.tearDropout;
       const duplicate = random.next() < settings.tearDuplication;
-      touched += forEachPixel(rectangle, context, (x, y) => {
+      touched += forEachPixel(rectangle, context, (x, y, maskInfluence) => {
         const sourceY = duplicate ? rectangle.y - 1 : y;
         const sourceX = x - shift;
         const colorOffset = settings.tearColorSplit;
@@ -625,7 +626,7 @@ const scanlineTearPro: GlitchAlgorithm = {
               sampleRegion(snapshot, sourceX + colorOffset, sourceY, 2),
               sampleRegion(snapshot, sourceX, sourceY, 3),
             ];
-        writeBlendedPixel(pixels, width, x, y, rgba, amount);
+        writeBlendedPixel(pixels, width, x, y, rgba, amount * maskInfluence);
       });
     }
     return result(context, touched);
@@ -668,12 +669,16 @@ const tileScramble: GlitchAlgorithm = {
           : shuffled[index]!;
       const drop = random.next() < settings.tileDrop;
       const flat = drop ? averageRegion(snapshot, { ...source, width: tile, height: tile }) : null;
-      touched += forEachPixel({ ...destination, width: tile, height: tile }, context, (x, y) => {
-        const rgba =
-          flat ??
-          sourcePixel(snapshot, source.x + (x - destination.x), source.y + (y - destination.y));
-        writeBlendedPixel(pixels, width, x, y, rgba, amount);
-      });
+      touched += forEachPixel(
+        { ...destination, width: tile, height: tile },
+        context,
+        (x, y, maskInfluence) => {
+          const rgba =
+            flat ??
+            sourcePixel(snapshot, source.x + (x - destination.x), source.y + (y - destination.y));
+          writeBlendedPixel(pixels, width, x, y, rgba, amount * maskInfluence);
+        },
+      );
     });
     return result(context, touched);
   },
@@ -788,7 +793,7 @@ const rowColumnRepeat: GlitchAlgorithm = {
               width: settings.repeatLength,
               height: bounds.height,
             };
-      touched += forEachPixel(rectangle, context, (x, y) => {
+      touched += forEachPixel(rectangle, context, (x, y, maskInfluence) => {
         const sourceX = orientation === 'vertical' ? point.x : x;
         const sourceY = orientation === 'horizontal' ? point.y : y;
         writeBlendedPixel(
@@ -797,7 +802,7 @@ const rowColumnRepeat: GlitchAlgorithm = {
           x,
           y,
           sourcePixel(snapshot, sourceX, sourceY),
-          amount * fade,
+          amount * fade * maskInfluence,
         );
       });
     }
@@ -815,33 +820,207 @@ const structuralBase = [
   rowColumnRepeat,
 ] as const;
 
+const mixedEffectBase = [...structuralBase, ...advancedBrushAlgorithms] as const;
+
+type StructuralMixAlgorithmId = (typeof mixedEffectBase)[number]['id'];
+type StructuralMixRole = 'motion' | 'texture' | 'accent';
+
+const structuralMixRoles: ReadonlyArray<{
+  role: StructuralMixRole;
+  algorithms: readonly StructuralMixAlgorithmId[];
+}> = [
+  {
+    role: 'motion',
+    algorithms: [
+      'slice-displacement',
+      'datamosh-smear',
+      'row-column-repeat',
+      'displacement-brush',
+      'flow-mosh-brush',
+    ],
+  },
+  {
+    role: 'texture',
+    algorithms: ['block-corruption', 'codec-block-damage', 'pixel-sort-brush', 'feedback-brush'],
+  },
+  {
+    role: 'accent',
+    algorithms: [
+      'rgb-chunk-split',
+      'scanline-tear-pro',
+      'line-freeze-brush',
+      'clone-corruption-brush',
+    ],
+  },
+];
+
+export interface StructuralMixRecipeStep {
+  algorithm: StructuralMixAlgorithmId;
+  role: StructuralMixRole;
+  strength: number;
+}
+
+export function selectStructuralMixRecipe(
+  settings: GlitchContext['settings'],
+  seed: string,
+  options: { hasCloneSource?: boolean } = {},
+): StructuralMixRecipeStep[] {
+  const random = createSeededRandom(`${seed}:organic-structural-recipe`);
+  const allIds = mixedEffectBase
+    .map((algorithm) => algorithm.id)
+    .filter((id) => id !== 'clone-corruption-brush' || options.hasCloneSource);
+  const configured = allIds.filter((id) => settings.structuralMixPool?.includes(id));
+  const available = configured.length >= 2 ? configured : allIds;
+  const minimum = clamp(settings.structuralMixMinEffects ?? settings.structuralMixCount, 2, 3);
+  const maximum = clamp(
+    settings.structuralMixMaxEffects ?? settings.structuralMixCount,
+    minimum,
+    Math.min(3, available.length),
+  );
+  const targetCount = random.int(minimum, maximum);
+  const selected: Array<{ algorithm: StructuralMixAlgorithmId; role: StructuralMixRole }> = [];
+  const used = new Set<StructuralMixAlgorithmId>();
+
+  const selectFromRole = (roleIndex: number) => {
+    const definition = structuralMixRoles[roleIndex]!;
+    const candidates = definition.algorithms.filter(
+      (id) => available.includes(id) && !used.has(id),
+    );
+    if (!candidates.length) return false;
+    const algorithm = random.pick(candidates);
+    selected.push({ algorithm, role: definition.role });
+    used.add(algorithm);
+    return true;
+  };
+
+  const motionRole = structuralMixRoles.findIndex((definition) => definition.role === 'motion');
+  if (motionRole >= 0) selectFromRole(motionRole);
+  const remainingRoles = structuralMixRoles
+    .map((_, index) => index)
+    .filter((index) => index !== motionRole);
+  while (remainingRoles.length && selected.length < targetCount) {
+    const candidateIndex = random.int(0, remainingRoles.length - 1);
+    const roleIndex = remainingRoles.splice(candidateIndex, 1)[0]!;
+    selectFromRole(roleIndex);
+  }
+  while (selected.length < targetCount) {
+    const candidates = available.filter((id) => !used.has(id));
+    if (!candidates.length) break;
+    const algorithm = random.pick(candidates);
+    const role = structuralMixRoles.find((definition) =>
+      definition.algorithms.includes(algorithm),
+    )!.role;
+    selected.push({ algorithm, role });
+    used.add(algorithm);
+  }
+
+  const roleOrder: StructuralMixRole[] = ['motion', 'texture', 'accent'];
+  selected.sort((a, b) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role));
+  const strengths = selected.length === 3 ? [0.62, 0.38, 0.22] : [0.68, 0.42];
+  return selected.map((step, index) => ({ ...step, strength: strengths[index]! }));
+}
+
+function settingsForStructuralMixStep(
+  algorithm: StructuralMixAlgorithmId,
+  context: GlitchContext,
+  seed: string,
+): GlitchContext['settings'] {
+  const random = createSeededRandom(`${seed}:lightweight-mode`);
+  const lightweight = {
+    ...context.settings,
+    structuralIntensity: Math.min(1.1, context.settings.structuralIntensity),
+    structuralDensity: Math.min(0.82, context.settings.structuralDensity),
+  };
+  if (
+    algorithm === 'block-corruption' &&
+    context.settings.blockCorruptionMode === 'mixed-packet-loss'
+  ) {
+    return {
+      ...lightweight,
+      blockCorruptionMode: random.pick([
+        'shift',
+        'repeat',
+        'neighbor-inherit',
+        'swap',
+        'stretch',
+      ] as const),
+    };
+  }
+  if (
+    algorithm === 'codec-block-damage' &&
+    (context.settings.codecBlockDamageMode === 'mixed-codec-failure' ||
+      context.settings.codecBlockDamageMode === 'recompressed')
+  ) {
+    return {
+      ...lightweight,
+      codecBlockDamageMode: random.pick([
+        'compression-loss',
+        'tile-scramble',
+        'coefficient-dropout',
+        'block-repeat',
+      ] as const),
+    };
+  }
+  if (algorithm === 'feedback-brush') {
+    return {
+      ...lightweight,
+      feedbackBrushEchoCount: Math.min(3, context.settings.feedbackBrushEchoCount),
+    };
+  }
+  if (algorithm === 'displacement-brush') {
+    return {
+      ...lightweight,
+      displacementBrushIterations: 1,
+      displacementBrushOctaves: Math.min(2, context.settings.displacementBrushOctaves),
+    };
+  }
+  if (algorithm === 'flow-mosh-brush') {
+    return {
+      ...lightweight,
+      flowBrushIterations: Math.min(2, context.settings.flowBrushIterations),
+      flowBrushPropagation: Math.min(120, context.settings.flowBrushPropagation),
+    };
+  }
+  if (algorithm === 'clone-corruption-brush') {
+    return {
+      ...lightweight,
+      cloneBrushRepetition: Math.min(2, context.settings.cloneBrushRepetition),
+    };
+  }
+  if (algorithm === 'line-freeze-brush') {
+    return {
+      ...lightweight,
+      lineBrushRepeatCount: Math.min(5, context.settings.lineBrushRepeatCount),
+    };
+  }
+  if (algorithm === 'pixel-sort-brush') {
+    return {
+      ...lightweight,
+      sortBrushLength: Math.min(180, context.settings.sortBrushLength),
+      sortBrushIntervalMax: Math.min(180, context.settings.sortBrushIntervalMax),
+    };
+  }
+  return lightweight;
+}
+
 const structuralMixed: GlitchAlgorithm = {
   id: 'structural-mixed',
   name: 'Mixed Structural Glitch',
   family: 'mixed',
   apply(context) {
-    const random = createSeededRandom(context.seed);
-    const configuredPool = context.settings.structuralMixPool ?? [];
-    const pool = structuralBase.filter((algorithm) => configuredPool.includes(algorithm.id));
-    const available = pool.length ? pool : structuralBase;
-    const minimum = clamp(
-      context.settings.structuralMixMinEffects ?? context.settings.structuralMixCount,
-      1,
-      5,
-    );
-    const maximum = clamp(
-      context.settings.structuralMixMaxEffects ?? context.settings.structuralMixCount,
-      minimum,
-      Math.min(5, available.length),
-    );
-    const count = random.int(minimum, maximum);
+    const recipe = selectStructuralMixRecipe(context.settings, context.seed, {
+      hasCloneSource: Boolean(context.cloneSource),
+    });
     let touched = 0;
-    for (let index = 0; index < count; index += 1) {
-      const algorithm = random.pick(available);
+    for (let index = 0; index < recipe.length; index += 1) {
+      const step = recipe[index]!;
+      const algorithm = mixedEffectBase.find((candidate) => candidate.id === step.algorithm)!;
+      const stepSeed = `${context.seed}:organic:${step.role}:${index}:${algorithm.id}`;
       touched += algorithm.apply({
         ...context,
-        seed: `${context.seed}:structural:${index}:${algorithm.id}`,
-        strength: clamp(context.strength * 0.88, 0.1, 1),
+        seed: stepSeed,
+        strength: clamp(context.strength * step.strength, 0.05, 1),
+        settings: settingsForStructuralMixStep(algorithm.id, context, stepSeed),
       }).touchedPixels;
     }
     return result(context, touched);

@@ -1,11 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { resolveControlHelp } from './help/registry';
 import { resolveEditorShortcut } from './utils/shortcuts';
 import appSource from './App.tsx?raw';
 import algorithmControlsSource from './components/AlgorithmControls.tsx?raw';
-import fileCorruptionSource from './components/FileCorruptionPanel.tsx?raw';
-import rawMutationModuleSource from './raw/mutateBytes.ts?raw';
-import rawWorkerSource from './workers/rawMutation.worker.ts?raw';
+import canvasWorkspaceSource from './components/CanvasWorkspace.tsx?raw';
+import effectPanelSource from './components/EffectPanel.tsx?raw';
+import effectPreviewSource from './components/EffectPreviewStage.tsx?raw';
+import imageBrushEssentialSource from './components/ImageBrushEssentialControls.tsx?raw';
+import interfaceModeSource from './components/InterfaceModeSwitch.tsx?raw';
+import imageBrushPanelSource from './components/ImageBrushPanel.tsx?raw';
+import landingSource from './components/LandingScreen.tsx?raw';
+import layersDockSource from './components/LayersDock.tsx?raw';
+import imageBrushDecodeSource from './imageBrush/decode.ts?raw';
+import imageBrushStorageSource from './imageBrush/libraryStorage.ts?raw';
+import retouchPanelSource from './components/RetouchPanel.tsx?raw';
+import statusBarSource from './components/StatusBar.tsx?raw';
+import topBarSource from './components/TopBar.tsx?raw';
 
 describe('production editor cleanup', () => {
   it('does not import, route or render the HEX editor in the production App', () => {
@@ -16,58 +25,103 @@ describe('production editor cleanup', () => {
     expect(appSource).not.toContain('Inspect pixel in HEX editor');
   });
 
-  it('renders the complete factual FILE CORRUPTION explanation and control names', () => {
-    const source = `${appSource}\n${fileCorruptionSource}`;
-    expect(source).toContain('Experimental corruption of the encoded image file.');
-    expect(source).toContain('This is not a local brush effect.');
-    expect(source).toContain('Use EFFECT, MOSH LAB or IMAGE BRUSH for controlled local editing.');
-    for (const label of [
-      'Protected Prefix',
-      'Mutation Count',
-      'Mutation Range',
-      'XOR Amount',
-      'Retry Limit',
-      'DECODE STATUS',
-      'What happens internally',
-    ]) {
-      expect(source).toContain(label);
-    }
+  it('does not expose the removed File Corruption panel or canvas badge', () => {
+    expect(appSource).not.toContain('FileCorruptionPanel');
+    expect(appSource).not.toContain("activePanel === 'raw'");
+    expect(canvasWorkspaceSource).not.toContain('SHIFT + CLICK · SELECT PIXEL TARGET');
   });
 
-  it('passes every FILE CORRUPTION control into the encoded-byte Worker', () => {
-    // The worker delegates to the shared mutation kernel; the kernel must
-    // receive every File Corruption control and the worker must use it.
-    expect(rawWorkerSource).toContain('mutateBytes');
-    for (const field of [
-      'safeStart',
-      'mutationCount',
-      'rangeStart',
-      'rangeEnd',
-      'xorAmount',
-      'seed',
-    ]) {
-      expect(rawMutationModuleSource).toContain(field);
-    }
-    expect(rawWorkerSource).not.toContain('intensity');
+  it('keeps the Parkour Kotenok entrance minimal and focused on one tool', () => {
+    expect(landingSource).toContain('PARKOUR KOTENOK');
+    expect(landingSource).toContain('GLITCH BRUSHES');
+    expect(landingSource).not.toContain('/assets/parkour-kotenok-road.jpg');
+    expect(landingSource.match(/<button/g)).toHaveLength(1);
+    expect(landingSource).not.toContain('COMING SOON');
   });
 
-  it('provides factual help for every FILE CORRUPTION slider', () => {
-    expect(resolveControlHelp('file-corruption.protected-prefix').description).toContain('64');
-    expect(resolveControlHelp('file-corruption.mutation-count').description).toContain(
-      'distinct changed byte positions',
+  it('uses the supplied road photograph as the editor demo document', () => {
+    expect(appSource).toContain("fetch('/assets/parkour-kotenok-road.jpg')");
+    expect(appSource).toContain("new File([blob], 'parkour-kotenok-road.jpg'");
+  });
+
+  it('offers progressive disclosure through Simple and Advanced controls', () => {
+    expect(appSource).toContain('data-interface-mode={interfaceMode}');
+    expect(interfaceModeSource).toContain('Simple');
+    expect(interfaceModeSource).toContain('Advanced');
+    expect(interfaceModeSource).toContain('aria-pressed');
+  });
+
+  it('keeps layers in a dedicated bottom dock for every editor panel', () => {
+    expect(appSource).toContain('<LayersDock');
+    expect(layersDockSource).toContain('aria-label="Layers"');
+    expect(layersDockSource).toContain('aria-label="Layer blend mode"');
+    expect(layersDockSource).toContain('aria-label="Layer opacity"');
+    expect(layersDockSource).toContain('aria-label="Add layer"');
+    expect(layersDockSource).toContain('aria-label="Delete layer"');
+    expect(layersDockSource).toContain('<LayerThumbnail');
+  });
+
+  it('exposes upright and path-following orientation beside Simple spacing', () => {
+    expect(imageBrushEssentialSource).toContain('Upright column');
+    expect(imageBrushEssentialSource).toContain('Follow stroke');
+    expect(imageBrushEssentialSource).toContain('label="Spacing"');
+    expect(imageBrushPanelSource.indexOf('<ImageBrushEssentialControls')).toBeLessThan(
+      imageBrushPanelSource.indexOf('<strong>STYLE</strong>'),
     );
-    expect(resolveControlHelp('file-corruption.xor-amount').short).toContain('exact 8-bit value');
-    expect(resolveControlHelp('file-corruption.retry-limit').description).toContain(
-      'unchanged pre-operation bytes',
+    expect(imageBrushPanelSource).toContain('applyImageBrushStyleKeepingEssentials');
+  });
+
+  it('uses pre-rendered landscape effect previews that never read the open document', () => {
+    expect(effectPreviewSource).toContain('/assets/effect-previews/original.webp');
+    expect(effectPreviewSource).toContain('PRE-RENDERED DEMO');
+    expect(effectPreviewSource).not.toContain('new Worker');
+    expect(appSource).not.toContain('effectPreviewSource');
+  });
+
+  it('ships one astronaut brush demo, one randomize action and persistent custom brushes', () => {
+    expect(imageBrushDecodeSource).toContain('/assets/image-brush-astronaut.png');
+    expect(imageBrushPanelSource.match(/Randomize style/g)).toHaveLength(1);
+    expect(imageBrushPanelSource).not.toContain('New Variation');
+    expect(imageBrushPanelSource).not.toContain('Demo images');
+    expect(imageBrushStorageSource).toContain('indexedDB.open(databaseName, 1)');
+    expect(appSource).toContain('saveImageBrushLibrary(customAssets)');
+  });
+
+  it('renders Image Brush preview over the immutable source instead of prior brush strokes', () => {
+    expect(appSource).toContain('const imageBrushPreviewSource = docRef.current.original');
+    expect(appSource).not.toContain(
+      'resizeRgba(docRef.current.pixels, docRef.current.width, docRef.current.height, 320)',
     );
+    expect(appSource).not.toContain('strokeNonce: imageBrushStrokeNonce');
   });
 
   it('maps Retouch shortcuts from physical codes so Cyrillic layout does not change them', () => {
     expect(resolveEditorShortcut({ code: 'KeyS' })).toBe('smudge');
+    expect(resolveEditorShortcut({ code: 'KeyR' })).toBe('finger');
     expect(resolveEditorShortcut({ code: 'KeyU' })).toBe('blur-retouch');
     expect(resolveEditorShortcut({ code: 'KeyJ' })).toBe('sharpen');
     expect(resolveEditorShortcut({ code: 'KeyE' })).toBe('restore');
     expect(resolveEditorShortcut({ code: 'KeyX' })).toBe('eraser');
+  });
+
+  it('does not mount the expensive Retouch tool preview', () => {
+    expect(retouchPanelSource).not.toContain('RetouchPreviewStage');
+    expect(retouchPanelSource).not.toContain('REAL TOOL PREVIEW');
+  });
+
+  it('keeps the legacy canvas mode switch and default pixel marker out of the toolbar', () => {
+    expect(canvasWorkspaceSource).not.toContain("['continuous', 'stroke', 'preview']");
+    expect(canvasWorkspaceSource).not.toContain('pixel-highlight');
+  });
+
+  it('keeps multi-megabyte document pixel buffers out of ordinary React UI props', () => {
+    expect(appSource).toContain('doc={documentMeta}');
+    expect(appSource).toContain('documentWidth={doc.width}');
+    expect(appSource).not.toContain('original={doc.original}');
+    expect(topBarSource).not.toContain('EditorDocument');
+    expect(canvasWorkspaceSource).not.toContain('EditorDocument');
+    expect(statusBarSource).not.toContain('EditorDocument');
+    expect(effectPanelSource).not.toContain('Uint8ClampedArray');
   });
 
   it('exposes six explicit Clone Corruption modes and factual source alignment', () => {

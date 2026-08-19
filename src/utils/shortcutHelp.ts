@@ -2,7 +2,7 @@
 export const shortcuts: Array<[string, string]> = [
   ['B', 'Glitch brush'],
   ['H', 'Hand / pan tool'],
-  ['S / U / J', 'Smudge / Blur / Sharpen (physical keys, Cyrillic-safe)'],
+  ['S / R / U / J', 'Smudge / Finger / Blur / Sharpen (physical keys, Cyrillic-safe)'],
   ['E / X', 'Restore / Eraser (physical keys, Cyrillic-safe)'],
   ['G', 'Random seeded glitch stamp'],
   ['[ / ]', 'Decrease / increase brush size'],

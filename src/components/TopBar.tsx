@@ -11,10 +11,14 @@ import {
   ScanLine,
   Undo2,
 } from 'lucide-react';
-import type { EditorDocument } from '../types';
-
 interface TopBarProps {
-  doc: EditorDocument;
+  doc: {
+    fileName: string;
+    width: number;
+    height: number;
+    mimeType: string;
+    dirty: boolean;
+  };
   fileInputRef: RefObject<HTMLInputElement | null>;
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onLoadDemo: () => void;
@@ -31,6 +35,7 @@ interface TopBarProps {
   helpMode: boolean;
   helpPanelOpen: boolean;
   onToggleHelp: () => void;
+  onGoHome: () => void;
 }
 
 export function TopBar({
@@ -51,18 +56,24 @@ export function TopBar({
   helpMode,
   helpPanelOpen,
   onToggleHelp,
+  onGoHome,
 }: TopBarProps) {
   return (
     <header className="topbar">
-      <div className="brand">
+      <button
+        type="button"
+        className="brand"
+        onClick={onGoHome}
+        aria-label="Return to the Parkour Kotenok tool picker"
+      >
         <div className="brand-mark">
           <ScanLine size={18} />
         </div>
         <div>
-          <strong>HEX REDACTOR</strong>
-          <span>LOCAL GLITCH INSTRUMENT / RGBA</span>
+          <strong>GLITCH BRUSHES</strong>
+          <span>PARKOUR KOTENOK / LOCAL GLITCH INSTRUMENT</span>
         </div>
-      </div>
+      </button>
       <div className="topbar-file">
         <FileImage size={15} />
         <div>
@@ -81,20 +92,35 @@ export function TopBar({
           accept="image/png,image/jpeg,image/webp"
           onChange={onFileChange}
         />
-        <button onClick={() => fileInputRef.current?.click()}>
+        <button onClick={() => fileInputRef.current?.click()} aria-label="Open image">
           <FileUp size={15} /> Open
         </button>
-        <button onClick={onLoadDemo}>
+        <button onClick={onLoadDemo} aria-label="Load demo image">
           <ImageIcon size={15} /> Demo
         </button>
         <span className="toolbar-separator" />
-        <button disabled={!canUndo && !hasPendingPreview} onClick={onUndo} title="Undo — Ctrl+Z">
+        <button
+          disabled={!canUndo && !hasPendingPreview}
+          onClick={onUndo}
+          title="Undo — Ctrl+Z"
+          aria-label="Undo"
+        >
           <Undo2 size={15} />
         </button>
-        <button disabled={!canRedo} onClick={onRedo} title="Redo — Ctrl+Shift+Z / Ctrl+Y">
+        <button
+          disabled={!canRedo}
+          onClick={onRedo}
+          title="Redo — Ctrl+Shift+Z / Ctrl+Y"
+          aria-label="Redo"
+        >
           <Redo2 size={15} />
         </button>
-        <button className={historyOpen ? 'active' : ''} onClick={onToggleHistory} title="History">
+        <button
+          className={historyOpen ? 'active' : ''}
+          onClick={onToggleHistory}
+          title="History"
+          aria-label="Open history"
+        >
           <History size={15} />
         </button>
         <span className="toolbar-separator" />

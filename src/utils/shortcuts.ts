@@ -17,6 +17,7 @@ export type EditorShortcutAction =
   | 'hand'
   | 'restore'
   | 'smudge'
+  | 'finger'
   | 'blur-retouch'
   | 'sharpen'
   | 'eraser'
@@ -56,6 +57,7 @@ export function resolveEditorShortcut(
     KeyH: 'hand',
     KeyE: 'restore',
     KeyS: 'smudge',
+    KeyR: 'finger',
     KeyU: 'blur-retouch',
     KeyJ: 'sharpen',
     KeyX: 'eraser',

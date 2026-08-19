@@ -1,6 +1,16 @@
-# Decomposition & Quality Refactor — Report
+# Decomposition & Quality Refactor — Historical Report
 
-**Дата:** 2026-08-01 · **Статус:** этапы A и B выполнены + валидация · **Валидация:** `typecheck` ✓ · `tests` 161/161 ✓ · `build` ✓ · `bun test`/`bunx vitest run` ✓ · Firefox headless BiDi smoke 13/13 ✓
+> Этот файл фиксирует архитектурный этап 2026-08-01. Имена удалённых компонентов и числа проверок ниже являются историческими фактами, а не описанием текущего интерфейса. Актуальный продукт и команды описаны в `README.md`, текущая хронология — в `AGENT_WORKLOG.md`.
+
+**Дата:** 2026-08-01 · **Статус на момент отчёта:** этапы A и B выполнены + валидация · **Тогдашняя валидация:** `typecheck` ✓ · `tests` 161/161 ✓ · `build` ✓ · `bun test`/`bunx vitest run` ✓ · Firefox headless BiDi smoke 13/13 ✓
+
+## Follow-up — 2026-08-19
+
+- Презентационные компоненты и feature hooks сохранены; новые крупные UI-блоки также вынесены в `LandingScreen`, `LayersDock`, `InterfaceModeSwitch` и `ImageBrushEssentialControls`.
+- File Corruption и raw mutation модули, описанные ниже, впоследствии удалены из production по продуктовому решению пользователя.
+- Динамический Effect Preview Worker заменён заранее сгенерированными статичными preview assets; Image Brush Preview остаётся отдельным Worker pipeline.
+- Sparse layer stack больше не является упрощением: пользователь может выбирать Original и любой рабочий слой, а операции со слоями проходят через общую history/composition модель.
+- Следующие проверки относятся уже к текущему интегрированному набору и записываются в `AGENT_WORKLOG.md`; приведённые ниже 161 тест не следует считать актуальным счётчиком.
 
 ## Этап A завершён — JSX вынесен в презентационные компоненты
 

@@ -36,11 +36,10 @@ export function useLayerStack(docRef: { readonly current: EditorDocument }) {
       const current = docRef.current;
       const beforeStack = restoreLayerStack(beforeSnapshot);
       const beforeComposite = composeLayerStack(beforeStack, current.original);
-      const targetComposite = current.pixels.slice();
       const changed = writeCompositeResultToActiveLayer(
         layerStackRef.current,
         beforeComposite,
-        targetComposite,
+        current.pixels,
         bounds,
       );
       current.pixels.set(composeLayerStack(layerStackRef.current, current.original));

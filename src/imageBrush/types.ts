@@ -163,7 +163,7 @@ export interface ImageBrushAsset {
   height: number;
   pixels: Uint8ClampedArray;
   trimBounds: Rectangle;
-  embeddedDataUrl: string;
+  embeddedDataUrl?: string;
   defaultSize: number;
   anchor: StampAnchor;
   customAnchor: Point;
@@ -268,6 +268,11 @@ export interface ImageBrushProcessResult {
   affectedPixels: number;
   nextEvolutionOffset: number;
   metrics: ImageBrushPerformanceMetrics;
+  previewVariants?: Array<{
+    pixels: Uint8ClampedArray;
+    width: number;
+    height: number;
+  }>;
 }
 
 export interface ImageBrushProgress {
@@ -336,7 +341,16 @@ export interface ImageBrushPreviewResult {
     pixels: Uint8ClampedArray;
     width: number;
     height: number;
+    contentWidth: number;
+    contentHeight: number;
   }>;
+  stroke: {
+    pixels: Uint8ClampedArray;
+    width: number;
+    height: number;
+    stampCount: number;
+    processingMs: number;
+  };
   diagnostics: ImageBrushPreviewDiagnostics;
 }
 
@@ -348,9 +362,16 @@ export interface ImageBrushPreviewRequest {
   pixels: ArrayBuffer;
   width: number;
   height: number;
+  backgroundPixels: ArrayBuffer;
+  backgroundWidth: number;
+  backgroundHeight: number;
+  documentWidth: number;
+  documentHeight: number;
   rack: ImageBrushFxItem[];
   settings: ImageBrushSettings;
   seed: string;
+  strokeId: string;
+  evolutionOffset: number;
 }
 
 export const defaultImageBrushSettings: ImageBrushSettings = {

@@ -32,8 +32,6 @@ export function createDemoDocument(): EditorDocument {
     pixels,
     fileName: 'signal-study-demo.png',
     mimeType: 'image/png',
-    rawOriginal: null,
-    rawMutated: null,
     dirty: false,
   };
 }

@@ -17,7 +17,8 @@ export const algorithmDescriptions: Record<AlgorithmId, string> = {
   'tile-scramble':
     'Permutes a local grid of image tiles while optionally repeating or dropping cells.',
   'row-column-repeat': 'Freezes and repeats complete rows or columns like a stalled image buffer.',
-  'structural-mixed': 'Combines several block, line, displacement, and datamosh stamps per click.',
+  'structural-mixed':
+    'Organically layers two or three compatible effects from the complete brush and structural catalog.',
   'pixel-sort-brush':
     'Sorts coherent pixel intervals directly under the stroke by luminance, hue, saturation, or RGB sum.',
   'feedback-brush':

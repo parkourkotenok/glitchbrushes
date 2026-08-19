@@ -1,4 +1,3 @@
-import type { EditorDocument } from '../types';
 import { formatBytes, pixelToByteOffset } from '../utils/geometry';
 import type { MoshProgress } from '../mosh/types';
 
@@ -8,7 +7,7 @@ interface StatusBarProps {
   moshProcessing: boolean;
   moshProgress: MoshProgress | null;
   cursorInfo: { x: number; y: number; inside: boolean };
-  doc: EditorDocument;
+  documentWidth: number;
   zoom: number;
   undoCount: number;
   redoCount: number;
@@ -22,7 +21,7 @@ export function StatusBar({
   moshProcessing,
   moshProgress,
   cursorInfo,
-  doc,
+  documentWidth,
   zoom,
   undoCount,
   redoCount,
@@ -31,7 +30,7 @@ export function StatusBar({
 }: StatusBarProps) {
   return (
     <footer className="statusbar">
-      <div className="status-message">
+      <div className="status-message" aria-live="polite">
         <span className={`status-light ${isAnyProcessing ? 'busy' : ''}`} />
         {isAnyProcessing
           ? moshProcessing && moshProgress
@@ -50,7 +49,7 @@ export function StatusBar({
           BYTE{' '}
           <strong>
             {cursorInfo.inside
-              ? `0x${pixelToByteOffset(cursorInfo.x, cursorInfo.y, doc.width)
+              ? `0x${pixelToByteOffset(cursorInfo.x, cursorInfo.y, documentWidth)
                   .toString(16)
                   .toUpperCase()
                   .padStart(8, '0')}`

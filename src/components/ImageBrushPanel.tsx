@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState, type DragEvent, type PointerEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type PointerEvent,
+  type ReactNode,
+} from 'react';
 import {
   Clipboard,
   Copy,
@@ -10,12 +18,10 @@ import {
   RefreshCcw,
   Save,
   Shuffle,
-  Sparkles,
   Trash2,
   X,
   Zap,
 } from 'lucide-react';
-import { decodeImageBrushFile } from '../imageBrush/assets';
 import { imageBrushFxLevelAmount, imageBrushFxStageCopy } from '../imageBrush/performance';
 import {
   builtInImageBrushPresets,
@@ -25,6 +31,7 @@ import {
 } from '../imageBrush/presets';
 import {
   applyImageBrushGlitchAmount,
+  applyImageBrushStyleKeepingEssentials,
   describeCurrentImageBrush,
   imageBrushGlitchLevels,
 } from '../imageBrush/simple';
@@ -45,12 +52,18 @@ import { helpSlug } from '../help/registry';
 import type { ControlHelpOption } from '../help/types';
 import { EffectIcon } from '../icons/effects';
 import { HelpButton } from './HelpButton';
+import { ImageBrushEssentialControls } from './ImageBrushEssentialControls';
 import { SliderField } from './SliderField';
 import {
   effectiveImageBrushStages,
   imageBrushStageLabel,
   supportsImageBrushStages,
 } from '../effects/sharedRegistry';
+import { decodeImageBrushFilesOffThread } from '../imageBrush/decode';
+import {
+  imageBrushLivePreviewMagnification,
+  imageBrushLivePreviewStampCount,
+} from '../imageBrush/livePreview';
 
 interface ProcessedBrushPreview {
   pixels: Uint8ClampedArray;
@@ -63,6 +76,13 @@ interface ProcessedBrushPreview {
     width: number;
     height: number;
   }>;
+  stroke: {
+    pixels: Uint8ClampedArray;
+    width: number;
+    height: number;
+    stampCount: number;
+    processingMs: number;
+  };
 }
 
 interface ImageBrushPanelProps {
@@ -80,7 +100,6 @@ interface ImageBrushPanelProps {
   onAddAssets(assets: ImageBrushAsset[]): void;
   onRemoveAsset(id: string): void;
   onClearLibrary(): void;
-  onRemoveDemoAssets(): void;
   onActiveAssetChange(id: string | null): void;
   onSettingsChange(settings: ImageBrushSettings): void;
   onRackChange(rack: ImageBrushFxItem[]): void;
@@ -90,9 +109,7 @@ interface ImageBrushPanelProps {
   randomizeNonce: number;
   randomizeLockSeed: boolean;
   onRandomizeLockSeedChange(locked: boolean): void;
-  onNewVariation(): void;
   onOptimizeAsset(maximumDimension: number | null): void;
-  onRestoreDemos(): void;
   onDownloadProcessed(): void;
   onCopyProcessed(): void;
   onTestStamp(): void;
@@ -176,159 +193,35 @@ function drawPreview(
   );
 }
 
-const controlExampleDescriptions: Record<
-  string,
-  { copy: string; low: string; high: string; cost: string }
-> = {
-  Size: {
-    copy: 'Low size places small copies. High size makes each copy occupy more of the trail.',
-    low: 'SMALL',
-    high: 'LARGE',
-    cost: 'Larger stamps increase pixel work.',
-  },
-  Spacing: {
-    copy: 'Low spacing overlaps consecutive copies. High spacing creates visible gaps.',
-    low: 'OVERLAP',
-    high: 'GAPS',
-    cost: 'Low spacing creates more stamps.',
-  },
-  Opacity: {
-    copy: 'Low opacity keeps the document visible through each copy. High opacity makes copies solid.',
-    low: 'FAINT',
-    high: 'SOLID',
-    cost: 'No meaningful processing impact.',
-  },
-  'Glitch Amount': {
-    copy: 'Low damage keeps the uploaded image readable. High damage uses the real processed variants.',
-    low: 'LOW DAMAGE',
-    high: 'HIGH DAMAGE',
-    cost: 'Stronger multi-FX recipes cost more.',
-  },
-  Variation: {
-    copy: 'Low variation repeats one result. High variation cycles different real corrupted variants.',
-    low: 'REPEATED',
-    high: 'VARIED',
-    cost: 'More variants use more cache memory.',
-  },
-  'Mutation step': {
-    copy: 'Low values change slowly between copies. High values move through the corrupted variants quickly.',
-    low: 'SLOW',
-    high: 'FAST',
-    cost: 'Fast evolution may generate more variants.',
-  },
-  'Decay speed': {
-    copy: 'Controls how quickly consecutive stamps travel from the start damage to maximum corruption.',
-    low: 'SLOW',
-    high: 'FAST',
-    cost: 'Higher values do not add stamps.',
-  },
-  'Previous stamp carry': {
-    copy: 'Low carry lets each mutation recover. High carry keeps more structure from the previous corrupted stamp.',
-    low: 'RECOVER',
-    high: 'CARRY',
-    cost: 'Evolving chains require sequential processing.',
-  },
-};
-
-function stampSourceCanvas(
-  pixels: Uint8ClampedArray,
-  width: number,
-  height: number,
-): HTMLCanvasElement {
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  canvas.getContext('2d')?.putImageData(new ImageData(pixels, width, height), 0, 0);
-  return canvas;
-}
-
-function ImageBrushControlExample({
-  asset,
-  preview,
-  control,
-}: {
-  asset: ImageBrushAsset | null;
-  preview: ProcessedBrushPreview | null;
-  control: string;
-}) {
-  const lowRef = useRef<HTMLCanvasElement>(null);
-  const highRef = useRef<HTMLCanvasElement>(null);
-  const copy = controlExampleDescriptions[control] ?? {
-    copy: `The left example keeps ${control.toLowerCase()} low; the right example shows a high-value result using the current stamp image.`,
-    low: 'LOW',
-    high: 'HIGH',
-    cost: 'Processing impact depends on the selected FX stack.',
-  };
-
-  useEffect(() => {
-    if (!asset) return;
-    const clean = stampSourceCanvas(asset.pixels, asset.width, asset.height);
-    const variants = preview?.variants?.length
-      ? preview.variants.map((variant) =>
-          stampSourceCanvas(variant.pixels, variant.width, variant.height),
-        )
-      : [clean];
-    const paint = (canvas: HTMLCanvasElement | null, high: boolean) => {
-      const context = canvas?.getContext('2d');
-      if (!canvas || !context) return;
-      context.clearRect(0, 0, canvas.width, canvas.height);
-      const count = 8;
-      const size = control === 'Size' ? (high ? 54 : 24) : 38;
-      const step = control === 'Spacing' ? (high ? 26 : 9) : 16;
-      const totalWidth = size + step * (count - 1);
-      const startX = (canvas.width - totalWidth) / 2;
-      for (let index = 0; index < count; index += 1) {
-        const source =
-          high &&
-          [
-            'Variation',
-            'Mutation step',
-            'Decay speed',
-            'Glitch Amount',
-            'Previous stamp carry',
-          ].includes(control)
-            ? variants[index % variants.length]!
-            : high && preview?.pixels
-              ? variants[index % variants.length]!
-              : clean;
-        context.globalAlpha = control === 'Opacity' ? (high ? 1 : 0.2) : 0.9;
-        const y =
-          (canvas.height - size) / 2 +
-          Math.sin(index * 0.9) * (high && control === 'Variation' ? 8 : 2);
-        context.drawImage(source, startX + index * step, y, size, size);
-      }
-      context.globalAlpha = 1;
-    };
-    paint(lowRef.current, false);
-    paint(highRef.current, true);
-  }, [asset, control, preview]);
-
-  return (
-    <section className="image-brush-control-example" data-control-example={control}>
-      <header>
-        <strong>WHAT THIS CONTROL CHANGES</strong>
-        <span>{control}</span>
-      </header>
-      <div>
-        <figure>
-          <canvas ref={lowRef} width={180} height={82} />
-          <figcaption>{copy.low}</figcaption>
-        </figure>
-        <figure>
-          <canvas ref={highRef} width={180} height={82} />
-          <figcaption>{copy.high}</figcaption>
-        </figure>
-      </div>
-      <p>{copy.copy}</p>
-      <small>{copy.cost}</small>
-    </section>
-  );
-}
-
 function BrushThumbnail({ asset }: { asset: ImageBrushAsset }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => drawPreview(ref.current, asset.pixels, asset.width, asset.height), [asset]);
   return <canvas ref={ref} width={40} height={40} aria-label={`${asset.name} thumbnail`} />;
+}
+
+function LazyAdvancedDetails({
+  summary,
+  className = '',
+  initiallyMounted,
+  children,
+}: {
+  summary: string;
+  className?: string;
+  initiallyMounted: boolean;
+  children: ReactNode;
+}) {
+  const [mounted, setMounted] = useState(initiallyMounted);
+  return (
+    <details
+      className={`image-brush-advanced-group ${className}`.trim()}
+      onToggle={(event) => {
+        setMounted(event.currentTarget.open);
+      }}
+    >
+      <summary>{summary}</summary>
+      {mounted ? children : null}
+    </details>
+  );
 }
 
 function Toggle({
@@ -447,6 +340,7 @@ function mutationSummary(settings: ImageBrushSettings): [string, string] {
 }
 
 export function ImageBrushPanel({
+  initialInterfaceLevel,
   library,
   activeAssetId,
   settings,
@@ -460,7 +354,6 @@ export function ImageBrushPanel({
   onAddAssets,
   onRemoveAsset,
   onClearLibrary,
-  onRemoveDemoAssets,
   onActiveAssetChange,
   onSettingsChange,
   onRackChange,
@@ -470,9 +363,7 @@ export function ImageBrushPanel({
   randomizeNonce,
   randomizeLockSeed,
   onRandomizeLockSeedChange,
-  onNewVariation,
   onOptimizeAsset,
-  onRestoreDemos,
   onDownloadProcessed,
   onCopyProcessed,
   onTestStamp,
@@ -482,13 +373,13 @@ export function ImageBrushPanel({
 }: ImageBrushPanelProps) {
   const active = library.find((asset) => asset.id === activeAssetId) ?? null;
   const previewRef = useRef<HTMLCanvasElement>(null);
+  const liveStrokePreviewRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const presetInputRef = useRef<HTMLInputElement>(null);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [addEffect, setAddEffect] = useState<ImageBrushFxId>('slice');
   const [contextAssetId, setContextAssetId] = useState<string | null>(null);
   const [optimizationSize, setOptimizationSize] = useState('auto');
-  const [controlExample, setControlExample] = useState('Spacing');
   const [userPresets, setUserPresets] = useState<ImageBrushPreset[]>(() => loadImageBrushPresets());
   const allPresets = [...builtInImageBrushPresets, ...userPresets];
   const selectedPreset = allPresets.find((preset) => preset.id === activePresetId);
@@ -523,31 +414,45 @@ export function ImageBrushPanel({
         );
 
   useEffect(() => {
-    drawPreview(
-      previewRef.current,
-      processedPreview?.pixels ?? active?.pixels,
-      processedPreview?.width ?? active?.width ?? 1,
-      processedPreview?.height ?? active?.height ?? 1,
-    );
-  }, [active, processedPreview]);
+    drawPreview(previewRef.current, active?.pixels, active?.width ?? 1, active?.height ?? 1);
+  }, [active]);
 
-  const addFiles = async (files: File[]) => {
-    const accepted = files.filter((file) =>
-      ['image/png', 'image/jpeg', 'image/webp'].includes(file.type),
+  useEffect(() => {
+    drawPreview(
+      liveStrokePreviewRef.current,
+      processedPreview?.stroke.pixels,
+      processedPreview?.stroke.width ?? 1,
+      processedPreview?.stroke.height ?? 1,
     );
-    if (!accepted.length) {
-      onNotice('Image Brush accepts PNG, JPEG and WebP images.');
-      return;
-    }
-    try {
-      const decoded: ImageBrushAsset[] = [];
-      for (const file of accepted) decoded.push(await decodeImageBrushFile(file, settings));
-      onAddAssets(decoded);
-      onNotice(`${decoded.length} brush image${decoded.length === 1 ? '' : 's'} decoded locally.`);
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : 'Brush image decoding failed.');
-    }
-  };
+  }, [processedPreview]);
+
+  const addFiles = useCallback(
+    async (files: File[]) => {
+      const accepted = files.filter((file) =>
+        ['image/png', 'image/jpeg', 'image/webp'].includes(file.type),
+      );
+      if (!accepted.length) {
+        onNotice('Image Brush accepts PNG, JPEG and WebP images.');
+        return;
+      }
+      try {
+        onNotice(
+          `Preparing ${accepted.length} brush image${accepted.length === 1 ? '' : 's'} off the UI thread…`,
+        );
+        const decoded = await decodeImageBrushFilesOffThread(accepted, {
+          trimTransparent: settings.trimTransparent,
+          trimThreshold: settings.trimThreshold,
+        });
+        onAddAssets(decoded);
+        onNotice(
+          `${decoded.length} brush image${decoded.length === 1 ? '' : 's'} prepared locally at a responsive working resolution.`,
+        );
+      } catch (error) {
+        onNotice(error instanceof Error ? error.message : 'Brush image decoding failed.');
+      }
+    },
+    [onAddAssets, onNotice, settings.trimThreshold, settings.trimTransparent],
+  );
 
   useEffect(() => {
     const paste = (event: ClipboardEvent) => {
@@ -558,7 +463,7 @@ export function ImageBrushPanel({
     };
     window.addEventListener('paste', paste);
     return () => window.removeEventListener('paste', paste);
-  });
+  }, [addFiles]);
 
   useEffect(() => {
     if (!contextAssetId) return;
@@ -613,10 +518,19 @@ export function ImageBrushPanel({
   };
 
   const applyPreset = (preset: ImageBrushPreset) => {
-    onSettingsChange({ ...preset.settings, customAnchor: { ...preset.settings.customAnchor } });
-    onRackChange(preset.rack.map((item) => ({ ...item })));
+    const styled = applyImageBrushStyleKeepingEssentials(
+      settings,
+      {
+        ...preset.settings,
+        customAnchor: { ...preset.settings.customAnchor },
+      },
+      preset.rack,
+      preset.id,
+    );
+    onSettingsChange(styled.settings);
+    onRackChange(styled.rack);
     onPresetChange(preset.id);
-    onNotice(`${preset.name} loaded without replacing the selected brush image.`);
+    onNotice(`${preset.name} loaded. Essential size, spacing, opacity and orientation were kept.`);
   };
 
   const saveCurrentPreset = () => {
@@ -743,18 +657,6 @@ export function ImageBrushPanel({
   return (
     <section
       className={`image-brush-lab image-brush-compact ${draggingFiles ? 'dragging-files' : ''}`}
-      onPointerOver={(event) => {
-        const input = (event.target as HTMLElement).closest<HTMLInputElement>(
-          'input[type="range"]',
-        );
-        if (input?.getAttribute('aria-label')) setControlExample(input.getAttribute('aria-label')!);
-      }}
-      onFocusCapture={(event) => {
-        const input = (event.target as HTMLElement).closest<HTMLInputElement>(
-          'input[type="range"]',
-        );
-        if (input?.getAttribute('aria-label')) setControlExample(input.getAttribute('aria-label')!);
-      }}
       onDragEnter={(event) => {
         if (!event.dataTransfer.types.includes('Files')) return;
         event.preventDefault();
@@ -927,6 +829,7 @@ export function ImageBrushPanel({
                 key={asset.id}
                 className={asset.id === activeAssetId ? 'active' : ''}
                 onContextMenu={(event) => {
+                  if (asset.demo) return;
                   event.preventDefault();
                   setContextAssetId(asset.id);
                 }}
@@ -940,15 +843,17 @@ export function ImageBrushPanel({
                   <BrushThumbnail asset={asset} />
                   <span>{asset.name}</span>
                 </button>
-                <button
-                  className="image-brush-library-remove"
-                  aria-label={`Remove ${asset.name}`}
-                  data-tooltip={`Remove “${asset.name}” from this project library.`}
-                  onClick={() => onRemoveAsset(asset.id)}
-                >
-                  <X size={11} />
-                </button>
-                {contextAssetId === asset.id && (
+                {!asset.demo && (
+                  <button
+                    className="image-brush-library-remove"
+                    aria-label={`Remove ${asset.name}`}
+                    data-tooltip={`Remove “${asset.name}” from this project library.`}
+                    onClick={() => onRemoveAsset(asset.id)}
+                  >
+                    <X size={11} />
+                  </button>
+                )}
+                {!asset.demo && contextAssetId === asset.id && (
                   <div className="image-brush-library-context" role="menu">
                     <button
                       role="menuitem"
@@ -966,25 +871,37 @@ export function ImageBrushPanel({
             ))}
           </div>
         ) : (
-          <div className="image-brush-empty">
-            Library is empty. Add an image or explicitly load demos.
-          </div>
+          <div className="image-brush-empty">Preparing the astronaut demo image…</div>
         )}
         <div className="image-brush-library-actions">
           <button onClick={() => fileInputRef.current?.click()}>
             <Plus size={12} /> Add image
           </button>
-          <button onClick={onRestoreDemos}>
-            <Sparkles size={12} /> Demo images
-          </button>
-          <button disabled={!library.some((asset) => asset.demo)} onClick={onRemoveDemoAssets}>
-            Remove demos
-          </button>
-          <button disabled={!library.length} onClick={onClearLibrary}>
+          <button disabled={!library.some((asset) => !asset.demo)} onClick={onClearLibrary}>
             <Trash2 size={12} /> Clear library
           </button>
         </div>
       </section>
+
+      <ImageBrushEssentialControls
+        settings={settings}
+        glitchIndex={glitchIndex}
+        onUpdate={update}
+        onOrientationChange={(rotationMode) => {
+          onSettingsChange({
+            ...settings,
+            angle: 0,
+            rotationMode,
+            followDirection: rotationMode === 'follow',
+            randomRotation: 0,
+            rotationJitter: 0,
+            flipXChance: 0,
+            flipYChance: 0,
+          });
+          onPresetChange('custom');
+        }}
+        onGlitchAmountChange={setGlitchAmount}
+      />
 
       <section className="image-brush-compact-section">
         <header>
@@ -1034,20 +951,17 @@ export function ImageBrushPanel({
         </label>
         <button
           className="image-brush-randomize-main"
-          data-tooltip="Creates a new recipe. With Lock Seed off, every click increments the variation nonce."
+          data-tooltip="Creates a new style variation. Lock Recipe repeats the current seeded recipe."
           onClick={() => onRandomize('everything')}
         >
           <Shuffle size={12} /> Randomize style
         </button>
         <div className="image-brush-randomize-controls">
           <Toggle
-            label="Lock Seed"
+            label="Lock Recipe"
             checked={randomizeLockSeed}
             onChange={onRandomizeLockSeedChange}
           />
-          <button onClick={onNewVariation}>
-            <Sparkles size={12} /> New Variation
-          </button>
         </div>
         <p className="image-brush-recipe-summary">
           {settings.mutationMode.replaceAll('-', ' ')} · {enabledFx.length} FX ·{' '}
@@ -1058,76 +972,40 @@ export function ImageBrushPanel({
         </p>
       </section>
 
-      <section
-        className="image-brush-compact-section image-brush-essential"
-        data-testid="image-brush-essential"
-      >
+      <section className="image-brush-compact-section image-brush-live-preview">
         <header>
-          <strong>ESSENTIAL CONTROLS</strong>
-          <span>Always available</span>
+          <strong>LIVE STROKE PREVIEW</strong>
+          <span>
+            {processedPreview
+              ? `${processedPreview.quality} · ${processedPreview.stroke.stampCount} stamps · ${imageBrushLivePreviewMagnification}×`
+              : active
+                ? 'UPDATING'
+                : 'IMAGE NEEDED'}
+          </span>
         </header>
-        <SliderField
-          helpId="control.size"
-          label="Size"
-          value={settings.size}
-          min={2}
-          max={600}
-          suffix=" px"
-          defaultValue={96}
-          onChange={(value) => update('size', value)}
-        />
-        <SliderField
-          helpId="control.spacing"
-          label="Spacing"
-          value={settings.spacing}
-          min={settings.spacingUnit === 'percent' ? 2 : 1}
-          max={settings.spacingUnit === 'percent' ? 300 : 600}
-          suffix={settings.spacingUnit === 'percent' ? '%' : ' px'}
-          defaultValue={48}
-          onChange={(value) => update('spacing', value)}
-        />
-        <SliderField
-          helpId="control.opacity"
-          label="Opacity"
-          value={settings.opacity}
-          min={0.01}
-          max={1}
-          step={0.01}
-          defaultValue={1}
-          onChange={(value) => update('opacity', value)}
-        />
-        <SliderField
-          helpId="image-brush.glitch-amount"
-          label="Glitch Amount"
-          value={glitchIndex}
-          min={0}
-          max={imageBrushGlitchLevels.length - 1}
-          step={1}
-          displayValue={
-            settings.glitchAmount === 'custom'
-              ? 'Custom'
-              : (imageBrushGlitchLevels[glitchIndex]?.label ?? 'Clean')
-          }
-          defaultValue={0}
-          onChange={setGlitchAmount}
-        />
-        <SliderField
-          helpId="control.variation"
-          label="Variation"
-          value={settings.effectVariation}
-          min={0}
-          max={1}
-          step={0.01}
-          defaultValue={0.35}
-          onChange={(value) => update('effectVariation', value)}
-        />
+        <div className="image-brush-live-preview-stage brush-checker">
+          <canvas
+            ref={liveStrokePreviewRef}
+            width={480}
+            height={168}
+            aria-label="Live Image Brush stroke preview"
+          />
+          {!active && <span>Add or select an image to preview the complete brush stroke.</span>}
+        </div>
+        <p>
+          One bounded preview shows the current image, spacing, opacity, layout, mutation, Stamp FX,
+          alpha and blend settings together. It uses {imageBrushLivePreviewStampCount} enlarged
+          stamps with opened-up spacing ({imageBrushLivePreviewMagnification}×) for readability; the
+          canvas uses the exact Size and spacing. It renders off the main thread.
+        </p>
+        {processedPreview && (
+          <small>
+            {processedPreview.stroke.processingMs.toFixed(1)} ms ·{' '}
+            {processedPreview.diagnostics.cacheVariants} cached variant
+            {processedPreview.diagnostics.cacheVariants === 1 ? '' : 's'}
+          </small>
+        )}
       </section>
-
-      <ImageBrushControlExample
-        asset={active}
-        preview={processedPreview}
-        control={controlExample}
-      />
 
       <section className="image-brush-compact-section image-brush-mutation-main">
         <header>
@@ -1194,8 +1072,11 @@ export function ImageBrushPanel({
                 .join(' · ')
             : 'No Stamp FX. Clean Repeat keeps the uploaded image unchanged.'}
         </p>
-        <details className="image-brush-advanced-group image-brush-fx-editor">
-          <summary>Edit effect stack</summary>
+        <LazyAdvancedDetails
+          summary="Edit effect stack"
+          className="image-brush-fx-editor"
+          initiallyMounted={initialInterfaceLevel === 'advanced'}
+        >
           <div className="image-brush-add-fx">
             <label className="image-brush-select">
               <span>
@@ -1357,13 +1238,15 @@ export function ImageBrushPanel({
               <div className="image-brush-empty">Add an effect to build a Stamp FX stack.</div>
             )}
           </div>
-        </details>
+        </LazyAdvancedDetails>
       </section>
 
       <div className="image-brush-advanced-label">ADVANCED</div>
 
-      <details className="image-brush-advanced-group">
-        <summary>Stamp Layout</summary>
+      <LazyAdvancedDetails
+        summary="Stamp Layout"
+        initiallyMounted={initialInterfaceLevel === 'advanced'}
+      >
         <SelectField
           label="Brush mode"
           value={settings.mode}
@@ -1556,10 +1439,12 @@ export function ImageBrushPanel({
             onChange={(value) => update('showOutline', value)}
           />
         </div>
-      </details>
+      </LazyAdvancedDetails>
 
-      <details className="image-brush-advanced-group">
-        <summary>Mutation</summary>
+      <LazyAdvancedDetails
+        summary="Mutation"
+        initiallyMounted={initialInterfaceLevel === 'advanced'}
+      >
         <SelectField
           helpId="image-brush.fx-stage"
           label="Processing stage"
@@ -2003,10 +1888,12 @@ export function ImageBrushPanel({
             <Clipboard size={12} />
           </button>
         </div>
-      </details>
+      </LazyAdvancedDetails>
 
-      <details className="image-brush-advanced-group">
-        <summary>Whole Trail FX</summary>
+      <LazyAdvancedDetails
+        summary="Whole Trail FX"
+        initiallyMounted={initialInterfaceLevel === 'advanced'}
+      >
         <p className="image-brush-inline-note">
           Whole Trail and Tip + Trail process one connected local stroke region after placement.
         </p>
@@ -2031,10 +1918,12 @@ export function ImageBrushPanel({
           defaultValue={0.24}
           onChange={(value) => update('structuralDrift', value)}
         />
-      </details>
+      </LazyAdvancedDetails>
 
-      <details className="image-brush-advanced-group">
-        <summary>Alpha and Blending</summary>
+      <LazyAdvancedDetails
+        summary="Alpha and Blending"
+        initiallyMounted={initialInterfaceLevel === 'advanced'}
+      >
         <SelectField
           label="Alpha mode"
           value={settings.alphaMode}
@@ -2097,10 +1986,12 @@ export function ImageBrushPanel({
             onChange={(value) => update('trimThreshold', value)}
           />
         )}
-      </details>
+      </LazyAdvancedDetails>
 
-      <details className="image-brush-advanced-group">
-        <summary>Pressure</summary>
+      <LazyAdvancedDetails
+        summary="Pressure"
+        initiallyMounted={initialInterfaceLevel === 'advanced'}
+      >
         <div className="image-brush-toggle-grid">
           <Toggle
             label="Pressure → size"
@@ -2140,10 +2031,12 @@ export function ImageBrushPanel({
             onChange={(value) => update('minPressureOpacity', value)}
           />
         )}
-      </details>
+      </LazyAdvancedDetails>
 
-      <details className="image-brush-advanced-group">
-        <summary>Performance</summary>
+      <LazyAdvancedDetails
+        summary="Performance"
+        initiallyMounted={initialInterfaceLevel === 'advanced'}
+      >
         <SelectField
           helpId="control.rendering-quality"
           label="Rendering quality"
@@ -2234,10 +2127,12 @@ export function ImageBrushPanel({
             <dd>{performance.fullDocumentCopies}</dd>
           </dl>
         )}
-      </details>
+      </LazyAdvancedDetails>
 
-      <details className="image-brush-advanced-group">
-        <summary>Library and Project</summary>
+      <LazyAdvancedDetails
+        summary="Library and Project"
+        initiallyMounted={initialInterfaceLevel === 'advanced'}
+      >
         <div className="image-brush-library-project-actions">
           <button disabled={!active} onClick={() => active && duplicateAsset(active)}>
             <Copy size={12} /> Duplicate image
@@ -2289,7 +2184,7 @@ export function ImageBrushPanel({
             <Zap size={11} /> Randomize Everything
           </button>
         </div>
-      </details>
+      </LazyAdvancedDetails>
 
       <footer className="image-brush-reset">
         <button

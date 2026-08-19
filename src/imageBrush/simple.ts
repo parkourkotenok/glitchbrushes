@@ -94,6 +94,29 @@ export const imageBrushGlitchLevels: ReadonlyArray<{
   { id: 'extreme', label: 'Extreme' },
 ];
 
+export function preserveImageBrushEssentialControls(
+  current: ImageBrushSettings,
+  styled: ImageBrushSettings,
+): ImageBrushSettings {
+  return {
+    ...styled,
+    size: current.size,
+    spacing: current.spacing,
+    spacingUnit: current.spacingUnit,
+    opacity: current.opacity,
+    flow: current.flow,
+    glitchAmount: current.glitchAmount,
+    effectVariation: current.effectVariation,
+    angle: current.angle,
+    rotationMode: current.rotationMode,
+    followDirection: current.followDirection,
+    randomRotation: current.randomRotation,
+    rotationJitter: current.rotationJitter,
+    flipXChance: current.flipXChance,
+    flipYChance: current.flipYChance,
+  };
+}
+
 const levelIndex: Record<Exclude<ImageBrushGlitchAmount, 'custom'>, number> = {
   clean: 0,
   subtle: 1,
@@ -175,6 +198,31 @@ export function applyImageBrushGlitchAmount(
       maxLiveFxIterations: Math.min(5, Math.max(1, 1 + index)),
     },
     rack: nextRack,
+  };
+}
+
+export function applyImageBrushStyleKeepingEssentials(
+  current: ImageBrushSettings,
+  styledSettings: ImageBrushSettings,
+  styledRack: ImageBrushFxItem[],
+  styleId: string,
+): { settings: ImageBrushSettings; rack: ImageBrushFxItem[] } {
+  const preserved = preserveImageBrushEssentialControls(current, styledSettings);
+  if (current.glitchAmount === 'custom') {
+    return { settings: preserved, rack: styledRack.map((item) => ({ ...item })) };
+  }
+  const leveled = applyImageBrushGlitchAmount(
+    preserved,
+    styledRack.map((item) => ({ ...item })),
+    current.glitchAmount,
+    styleId,
+  );
+  return {
+    settings: {
+      ...leveled.settings,
+      effectVariation: current.effectVariation,
+    },
+    rack: leveled.rack,
   };
 }
 

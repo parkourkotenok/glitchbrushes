@@ -1486,6 +1486,12 @@ export function AlgorithmControls({
       ['scanline-tear-pro', 'Scanline Tear'],
       ['codec-block-damage', 'Codec Block Damage'],
       ['row-column-repeat', 'Row / Column Repeat'],
+      ['pixel-sort-brush', 'Pixel Sort'],
+      ['feedback-brush', 'Feedback'],
+      ['displacement-brush', 'Displacement'],
+      ['flow-mosh-brush', 'Flow Mosh'],
+      ['clone-corruption-brush', 'Clone Corruption'],
+      ['line-freeze-brush', 'Line Freeze'],
     ];
     return (
       <>
@@ -1504,8 +1510,8 @@ export function AlgorithmControls({
         <SliderField
           label="Minimum effects"
           value={settings.structuralMixMinEffects}
-          min={1}
-          max={5}
+          min={2}
+          max={3}
           onChange={(value) => {
             update('structuralMixMinEffects', value);
             if (value > settings.structuralMixMaxEffects) update('structuralMixMaxEffects', value);
@@ -1514,8 +1520,8 @@ export function AlgorithmControls({
         <SliderField
           label="Maximum effects"
           value={settings.structuralMixMaxEffects}
-          min={1}
-          max={5}
+          min={2}
+          max={3}
           onChange={(value) => {
             update('structuralMixMaxEffects', value);
             if (value < settings.structuralMixMinEffects) update('structuralMixMinEffects', value);
@@ -1540,19 +1546,21 @@ export function AlgorithmControls({
                 const next = checked
                   ? [...new Set([...settings.structuralMixPool, id])]
                   : settings.structuralMixPool.filter((item) => item !== id);
-                if (next.length) update('structuralMixPool', next);
+                if (next.length >= 2) update('structuralMixPool', next);
               }}
             />
           ))}
         </div>
         <p className="meta-effect-summary">
-          <strong>META EFFECT</strong> Uses {settings.structuralMixMinEffects}–
-          {settings.structuralMixMaxEffects} effects per stamp from{' '}
+          <strong>ORGANIC MIX</strong> Uses {settings.structuralMixMinEffects}–
+          {settings.structuralMixMaxEffects} unique effects per stroke from{' '}
           {poolOptions
             .filter(([id]) => settings.structuralMixPool.includes(id))
             .map(([, label]) => label)
             .join(', ')}
           .
+          {settings.structuralMixPool.includes('clone-corruption-brush') &&
+            ' Clone joins only when a source region is already selected.'}
         </p>
       </>
     );

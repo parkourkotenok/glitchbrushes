@@ -7,7 +7,7 @@ import { RangeControl } from './components/SliderField';
 import { HelpProvider } from './help/HelpContext';
 import { helpRegistry, resolveControlHelp } from './help/registry';
 import {
-  createDemoBrushAssets,
+  createImageBrushAsset,
   removeImageBrushAsset,
   removeImageBrushAssets,
 } from './imageBrush/assets';
@@ -15,12 +15,28 @@ import { imageBrushFxStageCopy } from './imageBrush/performance';
 import { builtInImageBrushPresets } from './imageBrush/presets';
 import { defaultImageBrushSettings, type ImageBrushFxItem } from './imageBrush/types';
 
+function createTestBrushAssets(count: number) {
+  return Array.from({ length: count }, (_, index) =>
+    createImageBrushAsset(
+      `Test ${index}`,
+      `test-${index}.png`,
+      'image/png',
+      new Uint8ClampedArray([index, 80, 160, 255]),
+      1,
+      1,
+      false,
+      0,
+      { id: `test-brush-${index}`, demo: true },
+    ),
+  );
+}
+
 function renderImageBrush(
   level: 'simple' | 'advanced',
   settings = defaultImageBrushSettings,
   rack: ImageBrushFxItem[] = [],
 ) {
-  const library = createDemoBrushAssets().slice(0, 2);
+  const library = createTestBrushAssets(2);
   return renderToStaticMarkup(
     createElement(
       HelpProvider,
@@ -40,7 +56,6 @@ function renderImageBrush(
         onAddAssets() {},
         onRemoveAsset() {},
         onClearLibrary() {},
-        onRemoveDemoAssets() {},
         onActiveAssetChange() {},
         onSettingsChange() {},
         onRackChange() {},
@@ -50,9 +65,7 @@ function renderImageBrush(
         randomizeNonce: 0,
         randomizeLockSeed: false,
         onRandomizeLockSeedChange() {},
-        onNewVariation() {},
         onOptimizeAsset() {},
-        onRestoreDemos() {},
         onDownloadProcessed() {},
         onCopyProcessed() {},
         onTestStamp() {},
@@ -199,12 +212,18 @@ describe('contextual help', () => {
     const simple = renderImageBrush('simple');
     expect(simple).toContain('data-testid="image-brush-essential"');
     expect(simple).toContain('CURRENT BRUSH');
-    expect(simple).toContain('Maximum generated stamps');
+    expect(simple).not.toContain('Maximum generated stamps');
     expect(simple).not.toContain('image-brush-style-cards');
     expect(simple).not.toContain('image-brush-interface-level');
-    expect(simple.match(/<canvas/g) ?? []).toHaveLength(5);
+    expect(simple).toContain('LIVE STROKE PREVIEW');
+    expect(simple).toContain('Spacing');
+    expect(simple).toContain('Upright column');
+    expect(simple).toContain('Follow stroke');
+    expect(simple).toContain('aria-label="Live Image Brush stroke preview"');
+    expect(simple).not.toContain('WHAT THIS CONTROL CHANGES');
+    expect(simple.match(/<canvas/g) ?? []).toHaveLength(4);
     const advanced = renderImageBrush('advanced');
-    expect(advanced).toBe(simple);
+    expect(advanced).not.toBe(simple);
     expect(advanced).toContain('Maximum generated stamps');
     expect(advanced).toContain('Stamp Layout');
     expect(advanced).toContain('<summary>Mutation</summary>');
@@ -237,7 +256,7 @@ describe('contextual help', () => {
 
 describe('Image Brush library lifecycle', () => {
   it('selects the next asset, then the previous asset, when the active asset is removed', () => {
-    const assets = createDemoBrushAssets().slice(0, 3);
+    const assets = createTestBrushAssets(3);
     const fromMiddle = removeImageBrushAsset(assets, assets[1]!.id, assets[1]!.id);
     expect(fromMiddle.library.map((asset) => asset.id)).toEqual([assets[0]!.id, assets[2]!.id]);
     expect(fromMiddle.activeAssetId).toBe(assets[2]!.id);
@@ -249,7 +268,7 @@ describe('Image Brush library lifecycle', () => {
   });
 
   it('removes demos without reviving removed assets and preserves a non-demo selection', () => {
-    const demos = createDemoBrushAssets().slice(0, 2);
+    const demos = createTestBrushAssets(2);
     const uploaded = { ...demos[0]!, id: 'uploaded-brush', demo: false };
     const removal = removeImageBrushAssets([demos[0]!, uploaded, demos[1]!], uploaded.id, (asset) =>
       Boolean(asset.demo),

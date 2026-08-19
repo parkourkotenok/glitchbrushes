@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { PatchHistory, createPatch } from './history/PatchHistory';
 import {
-  createDemoBrushAssets,
   createImageBrushAsset,
   decodeEmbeddedRgbaDataUrl,
   disposeBrushResource,
@@ -11,6 +10,22 @@ import {
   serializeImageBrushProject,
   transparentBounds,
 } from './imageBrush/assets';
+
+function createTestBrushAssets(count: number) {
+  return Array.from({ length: count }, (_, index) =>
+    createImageBrushAsset(
+      `Test ${index}`,
+      `test-${index}.png`,
+      'image/png',
+      new Uint8ClampedArray([index, 80, 160, 255]),
+      1,
+      1,
+      false,
+      0,
+      { id: `test-brush-${index}` },
+    ),
+  );
+}
 import { cropRgbaRegion, estimateImageBrushReadBounds } from './imageBrush/bounds';
 import { shouldPostImageBrushProgress } from './imageBrush/progress';
 import {
@@ -32,8 +47,23 @@ import {
   builtInImageBrushPresets,
   randomizeImageBrush,
 } from './imageBrush/presets';
-import { imageBrushFxCacheKey } from './imageBrush/performance';
-import { applyImageBrushGlitchAmount, describeCurrentImageBrush } from './imageBrush/simple';
+import {
+  imageBrushFxCacheKey,
+  imageBrushLiveStampBudget,
+  takeImageBrushLiveBatch,
+} from './imageBrush/performance';
+import {
+  createImageBrushLivePreviewBackground,
+  createImageBrushLivePreviewLayout,
+  imageBrushLivePreviewMagnification,
+  imageBrushLivePreviewStampCount,
+} from './imageBrush/livePreview';
+import {
+  applyImageBrushGlitchAmount,
+  applyImageBrushStyleKeepingEssentials,
+  describeCurrentImageBrush,
+  preserveImageBrushEssentialControls,
+} from './imageBrush/simple';
 import {
   defaultImageBrushSettings,
   imageBrushFxDefinitions,
@@ -156,6 +186,36 @@ describe('Image Brush assets and path placement', () => {
     expect(asset.originalPixels).toEqual(pixels);
   });
 
+  it('creates a bounded working stamp without eagerly base64-encoding the original', () => {
+    const pixels = new Uint8ClampedArray(1200 * 600 * 4).fill(255);
+    const asset = createImageBrushAsset(
+      'bounded',
+      'bounded.png',
+      'image/png',
+      pixels,
+      1200,
+      600,
+      false,
+      2,
+      { maximumDimension: 512, reuseOriginalPixels: true },
+    );
+    expect([asset.width, asset.height]).toEqual([512, 256]);
+    expect(asset.originalPixels).toBe(pixels);
+    expect(asset.embeddedDataUrl).toBeUndefined();
+    const serialized = serializeImageBrushProject({
+      settings: defaultImageBrushSettings,
+      seed: 'bounded',
+      activePresetId: 'clean-repeat',
+      activeAssetId: asset.id,
+      evolutionOffset: 0,
+      rack: [],
+      library: [asset],
+    });
+    expect(serialized.library[0]!.embeddedDataUrl).toMatch(
+      /^data:application\/x-hex-redactor-rgba/,
+    );
+  });
+
   it('round-trips an embedded transparent RGBA brush', () => {
     const pixels = new Uint8ClampedArray([255, 0, 0, 0, 0, 255, 0, 128]);
     const decoded = decodeEmbeddedRgbaDataUrl(embeddedRgbaDataUrl(pixels, 2, 1));
@@ -179,8 +239,17 @@ describe('Image Brush assets and path placement', () => {
   });
 
   it('uses tangent rotation and custom anchors', () => {
-    expect(rotationForStamp('follow', 0, { x: 0, y: 1 }, 0, 0, 0, 0)).toBeCloseTo(90);
+    expect(rotationForStamp('follow', 0, { x: 1, y: 0 }, 0, 0, 0, 0)).toBeCloseTo(
+      rotationForStamp('follow', 0, { x: -1, y: 0 }, 0, 0, 0, 0),
+    );
+    expect(rotationForStamp('follow', 0, { x: 0, y: 1 }, 0, 0, 0, 0)).toBeCloseTo(
+      rotationForStamp('follow', 0, { x: 0, y: -1 }, 0, 0, 0, 0),
+    );
     expect(rotationForStamp('perpendicular', 0, { x: 1, y: 0 }, 0, 0, 0, 0)).toBeCloseTo(90);
+    expect(rotationForStamp('perpendicular', 0, { x: -1, y: 0 }, 0, 0, 0, 0)).toBeCloseTo(90);
+    expect(rotationForStamp('perpendicular', 0, { x: 0, y: 1 }, 0, 0, 0, 0)).toBeCloseTo(
+      rotationForStamp('perpendicular', 0, { x: 0, y: -1 }, 0, 0, 0, 0),
+    );
     expect(anchorPoint('custom', { x: 1.4, y: -0.2 })).toEqual({ x: 1, y: 0 });
     expect(anchorPoint('bottom', { x: 0, y: 0 })).toEqual({ x: 0.5, y: 1 });
   });
@@ -190,6 +259,71 @@ describe('Image Brush processing', () => {
   const rack: ImageBrushFxItem[] = [
     { id: 'rgb', effectId: 'rgb-split', enabled: true, amount: 0.5, mix: 1 },
   ];
+
+  it('builds a bounded live preview stroke that responds to layout controls', () => {
+    const compact = createImageBrushLivePreviewLayout(
+      { ...defaultImageBrushSettings, size: 96, spacing: 30 },
+      'full',
+      1120,
+      720,
+    );
+    const sparse = createImageBrushLivePreviewLayout(
+      { ...defaultImageBrushSettings, size: 180, spacing: 130 },
+      'full',
+      1120,
+      720,
+    );
+    const draft = createImageBrushLivePreviewLayout(defaultImageBrushSettings, 'draft', 1120, 720);
+    expect([compact.width, compact.height]).toEqual([480, 168]);
+    expect([draft.width, draft.height]).toEqual([240, 84]);
+    expect(compact.stamps).toHaveLength(imageBrushLivePreviewStampCount);
+    expect(sparse.stamps).toHaveLength(imageBrushLivePreviewStampCount);
+    expect(compact.settings.size).toBeCloseTo(
+      96 * Math.max(480 / 1120, 168 / 720) * imageBrushLivePreviewMagnification,
+    );
+    expect(draft.settings.size).toBeCloseTo(compact.settings.size / 2);
+    expect(new Set(compact.stamps.map((stamp) => stamp.position.y))).toHaveLength(1);
+    expect(compact.stamps.every((stamp) => stamp.pressure === 1)).toBe(true);
+    expect(compact.stamps[1]!.position.x - compact.stamps[0]!.position.x).toBeCloseTo(
+      compact.settings.spacing,
+    );
+    expect(compact.settings.spacing).toBeGreaterThan(compact.settings.size * 0.75);
+    expect(draft.settings.maxCachedVariants).toBeLessThanOrEqual(2);
+    expect(compact.settings.maxCachedVariants).toBeLessThanOrEqual(4);
+    expect(compact.settings.renderingQuality).toBe('balanced');
+    expect(compact.settings.pressureSize).toBe(false);
+    const background = createImageBrushLivePreviewBackground(12, 6);
+    expect(background.byteLength).toBe(12 * 6 * 4);
+    expect(background[3]).toBe(255);
+    expect(background.at(-1)).toBe(255);
+  });
+
+  it('collects bounded variants from the same render used for the preview stroke', () => {
+    const result = processImageBrushStroke(strokeRequest('progressive', rack), {
+      collectPreviewVariants: true,
+      maxPreviewVariants: 2,
+    });
+    expect(result.previewVariants?.length).toBeGreaterThan(0);
+    expect(result.previewVariants?.length).toBeLessThanOrEqual(2);
+    expect(result.metrics.renderedStamps).toBe(result.stampCount);
+  });
+
+  it('budgets live feedback by actual draw copies instead of path points', () => {
+    expect(imageBrushLiveStampBudget(24, 1, 'balanced')).toBe(6);
+    expect(imageBrushLiveStampBudget(24, 4, 'balanced')).toBe(1);
+    expect(imageBrushLiveStampBudget(24, 4, 'realtime')).toBe(1);
+    expect(imageBrushLiveStampBudget(2, 1, 'high')).toBe(2);
+  });
+
+  it('samples and clears an overloaded live-only queue without changing the full stroke', () => {
+    const pending = Array.from({ length: 100 }, (_, index) => index);
+    expect(takeImageBrushLiveBatch(pending, 4)).toEqual([0, 33, 66, 99]);
+    expect(pending).toEqual([]);
+
+    const shortQueue = [0, 1, 2, 3, 4];
+    expect(takeImageBrushLiveBatch(shortQueue, 2)).toEqual([0, 1]);
+    expect(shortQueue).toEqual([2, 3, 4]);
+  });
 
   it('throttles Worker progress to meaningful percentage and time intervals', () => {
     let lastPercent = -1;
@@ -665,6 +799,56 @@ describe('Image Brush presets, project and history contracts', () => {
     );
   });
 
+  it('changes glitch style without replacing the user essential brush controls', () => {
+    const current = {
+      ...defaultImageBrushSettings,
+      size: 173,
+      spacing: 41,
+      spacingUnit: 'pixels' as const,
+      opacity: 0.64,
+      glitchAmount: 'strong' as const,
+      effectVariation: 0.17,
+      rotationMode: 'fixed' as const,
+      followDirection: false,
+      rotationJitter: 0,
+    };
+    const styled = preserveImageBrushEssentialControls(
+      current,
+      builtInImageBrushPresets.find((preset) => preset.id === 'scatter-fragments')!.settings,
+    );
+    expect(styled).toMatchObject({
+      size: 173,
+      spacing: 41,
+      spacingUnit: 'pixels',
+      opacity: 0.64,
+      glitchAmount: 'strong',
+      effectVariation: 0.17,
+      rotationMode: 'fixed',
+      followDirection: false,
+      rotationJitter: 0,
+    });
+    expect(styled.mutationMode).toBe('per-stamp');
+
+    const preset = builtInImageBrushPresets.find(
+      (candidate) => candidate.id === 'scatter-fragments',
+    )!;
+    const applied = applyImageBrushStyleKeepingEssentials(
+      current,
+      preset.settings,
+      preset.rack,
+      preset.id,
+    );
+    expect(applied.settings).toMatchObject({
+      size: 173,
+      spacing: 41,
+      opacity: 0.64,
+      glitchAmount: 'strong',
+      effectVariation: 0.17,
+      rotationMode: 'fixed',
+    });
+    expect(applied.rack.every((item) => item.enabled)).toBe(true);
+  });
+
   it('seeded randomizers never replace or delete the image', () => {
     const first = randomizeImageBrush(defaultImageBrushSettings, [], 'same', 'everything');
     const second = randomizeImageBrush(defaultImageBrushSettings, [], 'same', 'everything');
@@ -710,7 +894,7 @@ describe('Image Brush presets, project and history contracts', () => {
   });
 
   it('restores embedded library assets through project export/import', () => {
-    const library = createDemoBrushAssets().slice(0, 2);
+    const library = createTestBrushAssets(2);
     const serialized = serializeImageBrushProject({
       settings: defaultImageBrushSettings,
       seed: 'project',

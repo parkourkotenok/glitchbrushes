@@ -51,8 +51,10 @@ import { imageBrushStageLabel, sharedEffectForMosh } from '../effects/sharedRegi
 import { SliderField } from './SliderField';
 import { HelpButton } from './HelpButton';
 import { helpSlug } from '../help/registry';
+import type { InterfaceMode } from './InterfaceModeSwitch';
 
 interface MoshLabProps {
+  interfaceMode: InterfaceMode;
   rack: MoshEffectCard[];
   seed: string;
   previewEnabled: boolean;
@@ -729,7 +731,7 @@ function SettingsControls({
           onChange={(value) => update('neighborInheritance', value)}
         />
         <p className="mosh-mini-note">
-          Decoded-image visual simulation — not real file corruption.
+          Decoded-image visual simulation — the source file stays untouched.
         </p>
       </>
     );
@@ -893,6 +895,7 @@ function SettingsControls({
 }
 
 export function MoshLab({
+  interfaceMode,
   rack,
   seed,
   previewEnabled,
@@ -1115,6 +1118,11 @@ export function MoshLab({
         <EffectIcon id="motion-field" size={25} />
       </div>
 
+      <p className="mosh-simple-hint interface-simple-only">
+        Build a rack, enable Preview, then Apply. Switch to Advanced for seeds, effect parameters,
+        targets & presets.
+      </p>
+
       <div className="mosh-rack-toolbar">
         <div className="mosh-add-wrap">
           <button className="primary" onClick={() => setAddOpen((value) => !value)}>
@@ -1165,12 +1173,14 @@ export function MoshLab({
         <button disabled={!processing && !hasPreview} onClick={onCancel}>
           <X size={14} /> {previewStale ? 'Cancel Preview' : 'Cancel'}
         </button>
-        <button onClick={onRemoveAppliedResult}>
-          <Trash2 size={13} /> Remove Applied Result
-        </button>
-        <button onClick={onReset}>
-          <RefreshCcw size={14} /> Reset Rack
-        </button>
+        <span className="interface-advanced-actions">
+          <button onClick={onRemoveAppliedResult}>
+            <Trash2 size={13} /> Remove Applied Result
+          </button>
+          <button onClick={onReset}>
+            <RefreshCcw size={14} /> Reset Rack
+          </button>
+        </span>
       </div>
 
       {previewStale && (
@@ -1181,51 +1191,53 @@ export function MoshLab({
         </div>
       )}
 
-      <div className="mosh-seed-row">
-        <label>
-          <span>SEED</span>
-          <input value={seed} onChange={(event) => onSeedChange(event.target.value)} />
-        </label>
-        <label>
-          <span>MODE</span>
-          <select
-            value={globalRandomizeMode}
-            onChange={(event) => setGlobalRandomizeMode(event.target.value as MoshRandomizeMode)}
-          >
-            <option value="balanced">Balanced</option>
-            <option value="wild">Wild</option>
-          </select>
-        </label>
-        <label className="mosh-random-lock">
-          <span>LOCK SEED</span>
-          <input
-            type="checkbox"
-            checked={randomizeSeedLocked}
-            onChange={(event) => {
-              lockedRandomizationRef.current = null;
-              setRandomizeSeedLocked(event.target.checked);
-            }}
-          />
-        </label>
-        <div className="mosh-randomize-actions">
-          <button onClick={() => randomizeGlobal('parameters')}>
-            <Dices size={12} /> Randomize Parameters
-          </button>
-          <button onClick={() => randomizeGlobal('effects')}>
-            <Dices size={12} /> Randomize Effects
-          </button>
-          <button disabled={rack.length < 2} onClick={() => randomizeGlobal('shuffle-order')}>
-            <Dices size={12} /> Shuffle Order
-          </button>
-          <button onClick={() => randomizeGlobal('everything')}>
-            <Dices size={12} /> Randomize Everything
-          </button>
-          <button className="primary" onClick={() => randomizeGlobal(lastRandomizeScope)}>
-            <RefreshCcw size={12} /> New Result
-          </button>
+      {interfaceMode === 'advanced' && (
+        <div className="mosh-seed-row">
+          <label>
+            <span>SEED</span>
+            <input value={seed} onChange={(event) => onSeedChange(event.target.value)} />
+          </label>
+          <label>
+            <span>MODE</span>
+            <select
+              value={globalRandomizeMode}
+              onChange={(event) => setGlobalRandomizeMode(event.target.value as MoshRandomizeMode)}
+            >
+              <option value="balanced">Balanced</option>
+              <option value="wild">Wild</option>
+            </select>
+          </label>
+          <label className="mosh-random-lock">
+            <span>LOCK SEED</span>
+            <input
+              type="checkbox"
+              checked={randomizeSeedLocked}
+              onChange={(event) => {
+                lockedRandomizationRef.current = null;
+                setRandomizeSeedLocked(event.target.checked);
+              }}
+            />
+          </label>
+          <div className="mosh-randomize-actions">
+            <button onClick={() => randomizeGlobal('parameters')}>
+              <Dices size={12} /> Randomize Parameters
+            </button>
+            <button onClick={() => randomizeGlobal('effects')}>
+              <Dices size={12} /> Randomize Effects
+            </button>
+            <button disabled={rack.length < 2} onClick={() => randomizeGlobal('shuffle-order')}>
+              <Dices size={12} /> Shuffle Order
+            </button>
+            <button onClick={() => randomizeGlobal('everything')}>
+              <Dices size={12} /> Randomize Everything
+            </button>
+            <button className="primary" onClick={() => randomizeGlobal(lastRandomizeScope)}>
+              <RefreshCcw size={12} /> New Result
+            </button>
+          </div>
+          <output className="mosh-randomize-summary">{randomizeSummary}</output>
         </div>
-        <output className="mosh-randomize-summary">{randomizeSummary}</output>
-      </div>
+      )}
 
       {processing && progress && (
         <div className="mosh-progress">
@@ -1338,19 +1350,24 @@ export function MoshLab({
                   />
                   <i />
                 </label>
-                <button
-                  className="icon-button"
-                  onClick={() =>
-                    updateCard(card.instanceId, (current) => ({
-                      ...current,
-                      expanded: !current.expanded,
-                    }))
-                  }
-                >
-                  {card.expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                </button>
+                {interfaceMode === 'advanced' && (
+                  <button
+                    className="icon-button"
+                    aria-label={
+                      card.expanded ? `Collapse ${definition.name}` : `Expand ${definition.name}`
+                    }
+                    onClick={() =>
+                      updateCard(card.instanceId, (current) => ({
+                        ...current,
+                        expanded: !current.expanded,
+                      }))
+                    }
+                  >
+                    {card.expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </button>
+                )}
               </header>
-              {card.expanded && (
+              {interfaceMode === 'advanced' && card.expanded && (
                 <div className="mosh-card-body" onPointerDown={(event) => event.stopPropagation()}>
                   <SliderField
                     helpId={card.effectId === 'motion-field' ? 'motion-field.mix' : undefined}

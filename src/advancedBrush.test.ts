@@ -94,6 +94,49 @@ function changedPixels(before: Uint8ClampedArray, after: Uint8ClampedArray): num
   return count;
 }
 
+function curvedStrokeContext(settings: Partial<AlgorithmSettings> = {}): GlitchContext {
+  const context = advancedContext({
+    sortBrushIntervalMin: 2,
+    sortBrushIntervalMax: 48,
+    sortBrushLength: 48,
+    sortBrushEdgeSoftness: 0,
+    feedbackBrushBlendMode: 'screen',
+    feedbackBrushBrightnessDecay: 0.82,
+    feedbackBrushPersistence: 1,
+    displacementBrushSource: 'waves',
+    displacementBrushStrengthX: 42,
+    displacementBrushStrengthY: 36,
+    displacementBrushIterations: 1,
+    flowBrushPropagation: 28,
+    flowBrushIterations: 1,
+    flowBrushDecay: 0,
+    flowBrushVectorPersistence: 1,
+    cloneBrushMode: 'clean',
+    cloneBrushAlignment: 'non-aligned',
+    cloneBrushTileFragmentation: 0,
+    cloneBrushRepetition: 1,
+    cloneBrushDecay: 1,
+    cloneBrushBlend: 1,
+    lineBrushOrientation: 'horizontal',
+    lineBrushSource: 'leading',
+    lineBrushDropout: 0,
+    lineBrushJitter: 0,
+    ...settings,
+  });
+  context.mask.fill(0);
+  context.bounds = { x: 12, y: 10, width: 48, height: 44 };
+  context.writeBounds = { x: 4, y: 4, width: 64, height: 56 };
+  for (let x = 12; x < 60; x += 1) {
+    const progress = (x - 12) / 47;
+    const centerY = Math.round(18 + progress * 26 + Math.sin(progress * Math.PI * 2) * 7);
+    for (let y = centerY - 4; y <= centerY + 4; y += 1) {
+      context.mask[y * context.width + x] = 1;
+    }
+  }
+  context.cloneSource = { x: 2, y: 2, width: 14, height: 14 };
+  return context;
+}
+
 describe('advanced brush catalog', () => {
   it('registers six direct-paint algorithms with six distinct icons', () => {
     const iconIds = advancedBrushIds.map((id) => algorithmIconIds[id]);
@@ -233,6 +276,24 @@ describe('advanced brush image signatures', () => {
     expect(hash(withMemory.pixels)).not.toBe(hash(withoutMemory.pixels));
   });
 
+  it('Feedback transforms the full mask even across flat pixels', () => {
+    const context = advancedContext({
+      feedbackBrushBlendMode: 'screen',
+      feedbackBrushBrightnessDecay: 1,
+      feedbackBrushRgbDelay: 0,
+    });
+    for (let offset = 0; offset < context.pixels.length; offset += 4) {
+      context.pixels[offset] = 180;
+      context.pixels[offset + 1] = 180;
+      context.pixels[offset + 2] = 180;
+      context.pixels[offset + 3] = 255;
+    }
+    context.originalPixels = context.pixels.slice();
+    const before = context.pixels.slice();
+    algorithms['feedback-brush'].apply(context);
+    expect(changedPixels(before, context.pixels)).toBeGreaterThan(500);
+  });
+
   it('Displacement performs coordinate warping', () => {
     const context = advancedContext({
       displacementBrushSource: 'vortex',
@@ -350,6 +411,26 @@ describe('advanced brush image signatures', () => {
     expect(rowHashes.size).toBeLessThan(20);
   });
 
+  it('Line Freeze transforms its source line instead of leaving an unchanged center trail', () => {
+    const context = advancedContext({
+      lineBrushOrientation: 'horizontal',
+      lineBrushSource: 'center',
+      lineBrushRepeatCount: 1,
+      lineBrushStretch: 1,
+      lineBrushJitter: 0,
+      lineBrushRgbSplit: 0,
+      lineBrushDropout: 0,
+      lineBrushThickness: 1,
+      lineBrushSpill: 0,
+    });
+    const x = context.bounds.x + Math.floor(context.bounds.width / 2);
+    const y = context.bounds.y + Math.floor(context.bounds.height / 2);
+    const offset = (y * context.width + x) * 4;
+    const before = context.pixels.slice(offset, offset + 3);
+    algorithms['line-freeze-brush'].apply(context);
+    expect(context.pixels.slice(offset, offset + 3)).not.toEqual(before);
+  });
+
   it('all six effects have distinct visual signatures for the same gesture', () => {
     const signatures = advancedBrushIds.map((id) => {
       const context = advancedContext();
@@ -360,6 +441,26 @@ describe('advanced brush image signatures', () => {
       return hash(context.pixels);
     });
     expect(new Set(signatures).size).toBe(advancedBrushIds.length);
+  });
+
+  it.each(advancedBrushIds)('%s never changes pixels outside the painted stroke mask', (id) => {
+    const context = curvedStrokeContext();
+    const before = context.pixels.slice();
+    algorithms[id].apply(context);
+    let changedInside = 0;
+    let changedOutside = 0;
+    for (let pixel = 0; pixel < context.mask.length; pixel += 1) {
+      const offset = pixel * 4;
+      const changed =
+        before[offset] !== context.pixels[offset] ||
+        before[offset + 1] !== context.pixels[offset + 1] ||
+        before[offset + 2] !== context.pixels[offset + 2];
+      if (!changed) continue;
+      if (context.mask[pixel]! > 0) changedInside += 1;
+      else changedOutside += 1;
+    }
+    expect(changedInside).toBeGreaterThan(0);
+    expect(changedOutside).toBe(0);
   });
 });
 

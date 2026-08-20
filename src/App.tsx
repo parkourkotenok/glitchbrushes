@@ -68,6 +68,7 @@ import { useNotice } from './hooks/useNotice';
 import { finalizePatches, rowPatchesBefore } from './layers/patches';
 import {
   activeLayer,
+  canUseVisibleCompositeAsLayerSource,
   addImageLayer,
   composeActiveLayerPixels,
   composeImageLayers,
@@ -155,6 +156,7 @@ import type {
   BytePatch,
   HistoryAction,
   LayerBlendMode,
+  LayerSourceMode,
   LayerStackSnapshot,
   Point,
   Preset,
@@ -163,6 +165,7 @@ import type {
   Tool,
 } from './types';
 import { clamp, formatBytes, pixelToByteOffset, unionRect } from './utils/geometry';
+import { recordPerformanceMeasure } from './utils/performance';
 import { createSeed, createSeededRandom } from './utils/prng';
 import { isTypingTarget, resolveEditorShortcut } from './utils/shortcuts';
 import { algorithmDescriptions } from './effects/descriptions';
@@ -905,8 +908,25 @@ function GlitchBrushesEditor({
   }, []);
 
   const processingSourcePixels = useCallback(
-    (layerId: string, allLayers: boolean): Uint8ClampedArray =>
-      allLayers ? docRef.current.pixels : composeLayerPixels(layerStackRef.current, layerId),
+    (layerId: string, sourceMode: LayerSourceMode): Uint8ClampedArray => {
+      if (sourceMode === 'all-layers' || sourceMode === 'selected-document') {
+        return docRef.current.pixels;
+      }
+      const startedAt = performance.now();
+      const pixels = composeLayerPixels(layerStackRef.current, layerId);
+      recordPerformanceMeasure('glitchbrushes:compose-layer-pixels', startedAt);
+      return pixels;
+    },
+    [],
+  );
+
+  const resolveLayerSourceMode = useCallback(
+    (layerId: string, allLayers: boolean): LayerSourceMode => {
+      if (allLayers) return 'all-layers';
+      return canUseVisibleCompositeAsLayerSource(layerStackRef.current, layerId)
+        ? 'selected-document'
+        : 'selected-layer';
+    },
     [],
   );
 
@@ -915,9 +935,10 @@ function GlitchBrushesEditor({
       sourceBefore: Uint8ClampedArray,
       processed: Uint8ClampedArray,
       bounds: Rectangle,
-    ): Uint8ClampedArray => {
+      destination: Uint8ClampedArray,
+    ): void => {
+      const startedAt = performance.now();
       const current = docRef.current;
-      const visible = current.pixels.slice();
       const left = Math.max(0, Math.floor(bounds.x));
       const top = Math.max(0, Math.floor(bounds.y));
       const right = Math.min(current.width, Math.ceil(bounds.x + bounds.width));
@@ -950,10 +971,13 @@ function GlitchBrushesEditor({
             }
             x += 1;
           }
-          visible.set(processed.subarray(spanStart, rowStart + (x - left) * 4), spanStart);
+          destination.set(
+            processed.subarray(spanStart, rowStart + (x - left) * 4),
+            spanStart,
+          );
         }
       }
-      return visible;
+      recordPerformanceMeasure('glitchbrushes:merge-single-layer-result', startedAt);
     },
     [],
   );
@@ -1243,10 +1267,13 @@ function GlitchBrushesEditor({
         type: 'module',
       });
       const current = docRef.current;
-      const capturedSampleAllLayers = sampleAllLayersRef.current;
+      const capturedSourceMode = resolveLayerSourceMode(
+        layerStackRef.current.activeLayerId,
+        sampleAllLayersRef.current,
+      );
       const sourceBefore = processingSourcePixels(
         layerStackRef.current.activeLayerId,
-        capturedSampleAllLayers,
+        capturedSourceMode,
       );
       const source = sourceBefore.slice();
       const selectionMask = new Uint8Array(current.width * current.height);
@@ -1302,14 +1329,18 @@ function GlitchBrushesEditor({
         setMoshProcessing(false);
         setMoshProgress(null);
         const processed = new Uint8ClampedArray(result.pixels);
-        const output = capturedSampleAllLayers
-          ? processed
-          : mergeSingleLayerResult(sourceBefore, processed, {
-              x: 0,
-              y: 0,
-              width: current.width,
-              height: current.height,
-            });
+        let output = processed;
+        if (capturedSourceMode === 'selected-layer') {
+          const destination =
+            mode === 'preview' ? new Uint8ClampedArray(current.pixels) : current.pixels;
+          mergeSingleLayerResult(sourceBefore, processed, {
+            x: 0,
+            y: 0,
+            width: current.width,
+            height: current.height,
+          }, destination);
+          output = destination;
+        }
         if (mode === 'preview') {
           moshPreviewBufferRef.current = output;
           moshPreviewSignatureRef.current = moshSignature;
@@ -1355,6 +1386,7 @@ function GlitchBrushesEditor({
       moshSignature,
       selectedPixels,
       processingSourcePixels,
+      resolveLayerSourceMode,
       updateWorkingCanvas,
     ],
   );
@@ -1938,9 +1970,10 @@ function GlitchBrushesEditor({
           setNotice('Image Brush local result size did not match its affected bounds.');
           return;
         }
-        const sourceResult = stroke.sampleAllLayers
-          ? null
-          : cropRgbaRegion(sourcePixels, current.width, result.bounds);
+        const sourceResult =
+          stroke.sourceMode === 'selected-layer'
+            ? cropRgbaRegion(sourcePixels, current.width, result.bounds)
+            : null;
         for (let row = 0; row < result.bounds.height; row += 1) {
           const rowSource = row * result.bounds.width * 4;
           const rowDestination =
@@ -2037,7 +2070,7 @@ function GlitchBrushesEditor({
         current.width,
         current.height,
       );
-      const sourcePixels = processingSourcePixels(stroke.sourceLayerId, stroke.sampleAllLayers);
+      const sourcePixels = processingSourcePixels(stroke.sourceLayerId, stroke.sourceMode);
       const documentPixels = cropRgbaRegion(sourcePixels, current.width, sourceBounds).buffer;
       const workerAssets = requiredAssets.map((asset) => ({
         id: asset.id,
@@ -2300,7 +2333,7 @@ function GlitchBrushesEditor({
       const capturedBrush = { ...brushRef.current };
       const capturedBounds = { ...stroke.bounds };
       const capturedMovement = { ...stroke.movement };
-      const sourcePixels = processingSourcePixels(stroke.sourceLayerId, stroke.sampleAllLayers);
+      const sourcePixels = processingSourcePixels(stroke.sourceLayerId, stroke.sourceMode);
       const capturedCloneSource = cloneSource ? { ...cloneSource } : undefined;
       const capturedFeedbackMemory =
         capturedAlgorithm === 'feedback-brush' && feedbackMemoryRef.current
@@ -2374,11 +2407,11 @@ function GlitchBrushesEditor({
           setNotice('Brush Worker result size did not match the current document.');
           return;
         }
-        current.pixels.set(
-          stroke.sampleAllLayers
-            ? output
-            : mergeSingleLayerResult(sourcePixels, output, result.writeBounds),
-        );
+        if (stroke.sourceMode === 'selected-layer') {
+          mergeSingleLayerResult(sourcePixels, output, result.writeBounds, current.pixels);
+        } else {
+          current.pixels.set(output);
+        }
         const committed = commitCurrentBufferToActiveLayer(
           capturedLayerBefore,
           result.writeBounds,
@@ -2541,7 +2574,7 @@ function GlitchBrushesEditor({
       const capturedBounds = { ...stroke.bounds };
       const capturedSettings = { ...retouchSettingsRef.current };
       const capturedBrush = { ...brushRef.current };
-      const processingPixels = processingSourcePixels(stroke.sourceLayerId, stroke.sampleAllLayers);
+      const processingPixels = processingSourcePixels(stroke.sourceLayerId, stroke.sourceMode);
       let sourcePixels: Uint8ClampedArray | undefined;
       const samplePixels =
         !capturedSettings.sampleMergedLayers && capturedTool !== 'restore'
@@ -2632,11 +2665,11 @@ function GlitchBrushesEditor({
         setBrushProcessing(false);
         setBrushProgress(null);
         const output = new Uint8ClampedArray(result.pixels);
-        current.pixels.set(
-          stroke.sampleAllLayers
-            ? output
-            : mergeSingleLayerResult(processingPixels, output, result.writeBounds),
-        );
+        if (stroke.sourceMode === 'selected-layer') {
+          mergeSingleLayerResult(processingPixels, output, result.writeBounds, current.pixels);
+        } else {
+          current.pixels.set(output);
+        }
         const committed = commitCurrentBufferToActiveLayer(
           capturedLayerBefore,
           result.writeBounds,
@@ -2979,6 +3012,7 @@ function GlitchBrushesEditor({
       setNotice('The active layer is locked. Unlock it or select another layer before painting.');
       return;
     }
+    const pointerDownStartedAt = performance.now();
     if (activePanel === 'image-brush' && tool === 'brush') {
       const active = imageBrushLibraryRef.current.find(
         (asset) => asset.id === activeImageBrushIdRef.current,
@@ -3016,7 +3050,10 @@ function GlitchBrushesEditor({
         reactRenderStart: imageBrushRenderCountRef.current,
         layerBefore: snapshotLayerStack(layerStackRef.current),
         sourceLayerId: layerStackRef.current.activeLayerId,
-        sampleAllLayers: sampleAllLayersRef.current,
+        sourceMode: resolveLayerSourceMode(
+          layerStackRef.current.activeLayerId,
+          sampleAllLayersRef.current,
+        ),
       };
       imageBrushStrokeRef.current = imageStroke;
       const feedbackStarted = performance.now();
@@ -3027,6 +3064,7 @@ function GlitchBrushesEditor({
         imageStroke.firstFeedbackAt - feedbackStarted,
       );
       event.currentTarget.setPointerCapture(event.pointerId);
+      recordPerformanceMeasure('glitchbrushes:pointerdown', pointerDownStartedAt);
       return;
     }
     if (brushJobGateRef.current.currentJobId) cancelBrushJob();
@@ -3055,6 +3093,8 @@ function GlitchBrushesEditor({
     if (moshPreviewBufferRef.current || moshJobGateRef.current.currentJobId) cancelMosh();
     if (pendingPreview) cancelPreview();
     clearOverlay();
+    const sourceLayerId = layerStackRef.current.activeLayerId;
+    const sourceMode = resolveLayerSourceMode(sourceLayerId, sampleAllLayersRef.current);
     strokeRef.current = {
       pointerId: event.pointerId,
       last: point,
@@ -3066,17 +3106,19 @@ function GlitchBrushesEditor({
       movement: { x: 0, y: 0 },
       path: [{ x: point.x, y: point.y, pressure: pressureFor(event) }],
       layerBefore: isRetouchTool(tool) ? null : snapshotLayerStack(layerStackRef.current),
-      sourceLayerId: layerStackRef.current.activeLayerId,
-      sampleAllLayers: sampleAllLayersRef.current,
-      editPixels: sampleAllLayersRef.current
-        ? null
-        : composeLayerPixels(layerStackRef.current, layerStackRef.current.activeLayerId),
+      sourceLayerId,
+      sourceMode,
+      editPixels:
+        sourceMode === 'selected-layer'
+          ? processingSourcePixels(sourceLayerId, sourceMode)
+          : null,
       pendingRetouchSamples: [],
       retouchRaf: null,
       retouchEnded: false,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
     stampAt(point, pressureFor(event), { x: 0, y: 0 });
+    recordPerformanceMeasure('glitchbrushes:pointerdown', pointerDownStartedAt);
   };
 
   const scheduleCursorInfo = (point: Point) => {
@@ -3319,6 +3361,7 @@ function GlitchBrushesEditor({
   };
 
   const endPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const pointerUpStartedAt = performance.now();
     if (imageBrushStrokeRef.current?.pointerId === event.pointerId) {
       const stroke = imageBrushStrokeRef.current;
       stroke.pointerUpAt = performance.now();
@@ -3339,6 +3382,7 @@ function GlitchBrushesEditor({
           `Image Brush reached the visible ${imageBrushSettingsRef.current.maxGeneratedStamps.toLocaleString()}-stamp safety limit. Increase Maximum generated stamps to preserve a longer section.`,
         );
       }
+      recordPerformanceMeasure('glitchbrushes:pointerup', pointerUpStartedAt);
       return;
     }
     if (regionDragRef.current?.pointerId === event.pointerId) {
@@ -3355,6 +3399,7 @@ function GlitchBrushesEditor({
       setMoshDraftRegion(null);
       setMoshRegionTool(null);
       setNotice(`${regionDrag.mode === 'source' ? 'Source' : 'Destination'} MOSH region defined.`);
+      recordPerformanceMeasure('glitchbrushes:pointerup', pointerUpStartedAt);
       return;
     }
     if (panDragRef.current?.pointerId === event.pointerId) panDragRef.current = null;
@@ -3373,6 +3418,7 @@ function GlitchBrushesEditor({
         commitStroke();
       }
     }
+    recordPerformanceMeasure('glitchbrushes:pointerup', pointerUpStartedAt);
   };
 
   const wheelCanvas = (event: ReactWheelEvent<HTMLDivElement>) => {
@@ -4181,6 +4227,8 @@ function GlitchBrushesEditor({
     const current = docRef.current;
     const random = createSeededRandom(`${seed}:random:${historyVersion}`);
     const point = { x: random.int(0, current.width - 1), y: random.int(0, current.height - 1) };
+    const sourceLayerId = layerStackRef.current.activeLayerId;
+    const sourceMode = resolveLayerSourceMode(sourceLayerId, sampleAllLayersRef.current);
     strokeRef.current = {
       pointerId: -1,
       last: point,
@@ -4192,11 +4240,12 @@ function GlitchBrushesEditor({
       movement: { x: 0, y: 0 },
       path: [{ x: point.x, y: point.y, pressure: 1 }],
       layerBefore: snapshotLayerStack(layerStackRef.current),
-      sourceLayerId: layerStackRef.current.activeLayerId,
-      sampleAllLayers: sampleAllLayersRef.current,
-      editPixels: sampleAllLayersRef.current
-        ? null
-        : composeLayerPixels(layerStackRef.current, layerStackRef.current.activeLayerId),
+      sourceLayerId,
+      sourceMode,
+      editPixels:
+        sourceMode === 'selected-layer'
+          ? processingSourcePixels(sourceLayerId, sourceMode)
+          : null,
       pendingRetouchSamples: [],
       retouchRaf: null,
       retouchEnded: false,

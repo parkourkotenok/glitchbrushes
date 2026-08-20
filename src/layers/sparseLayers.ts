@@ -7,6 +7,7 @@ import type {
   SparseLayerSnapshot,
   SparseLayerTileSnapshot,
 } from '../types';
+import { recordPerformanceMeasure } from '../utils/performance';
 
 export const LAYER_TILE_SIZE = 256;
 
@@ -130,6 +131,33 @@ export function addImageLayer(
 
 export function activeLayer(stack: LayerStack): SparseLayer {
   return stack.layers.find((layer) => layer.id === stack.activeLayerId) ?? stack.layers[0]!;
+}
+
+/**
+ * The visible document is a byte-equivalent processing source for the selected layer only
+ * in this deliberately strict common case. Hidden layers do not matter; any rendered
+ * companion layer, partial raster, transparency, opacity or blend mode disables the path.
+ */
+export function canUseVisibleCompositeAsLayerSource(
+  stack: LayerStack,
+  layerId: string,
+): boolean {
+  const rendered = stack.layers.filter(
+    (layer) => layer.visible && (!stack.soloLayerId || stack.soloLayerId === layer.id),
+  );
+  if (rendered.length !== 1 || rendered[0]?.id !== layerId) return false;
+  const layer = rendered[0];
+  const raster = layer.raster;
+  return (
+    layer.opacity === 1 &&
+    layer.blendMode === 'source-over' &&
+    raster !== null &&
+    raster.opaque &&
+    raster.x === 0 &&
+    raster.y === 0 &&
+    raster.width === stack.width &&
+    raster.height === stack.height
+  );
 }
 
 export function snapshotLayerStack(stack: LayerStack): LayerStackSnapshot {
@@ -335,28 +363,124 @@ export function composeLayerStack(
   stack: LayerStack,
   background: Uint8ClampedArray,
 ): Uint8ClampedArray {
+  const startedAt = performance.now();
   if (background.length !== stack.width * stack.height * 4) {
     throw new Error('Background dimensions do not match the layer stack.');
   }
-  const output = background.slice();
-  compositeLayersInto(stack, output, stack.layers);
+  const baseIndex = opaqueFullCanvasBaseRasterIndex(stack, stack.layers);
+  // An opaque, normal full-canvas raster hides the background and every lower layer. It is
+  // safe to use it as the output base, then only composite that layer's effect tiles and
+  // the layers above it.
+  const output =
+    baseIndex >= 0 ? stack.layers[baseIndex]!.raster!.pixels.slice() : background.slice();
+  compositeLayersInto(stack, output, stack.layers, undefined, baseIndex, baseIndex >= 0);
+  recordPerformanceMeasure('glitchbrushes:compose-layer-stack', startedAt);
   return output;
+}
+
+interface CompositeBounds {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+function normalizeCompositeBounds(stack: LayerStack, bounds?: Rectangle): CompositeBounds | null {
+  const left = Math.max(0, Math.floor(bounds?.x ?? 0));
+  const top = Math.max(0, Math.floor(bounds?.y ?? 0));
+  const right = Math.min(stack.width, Math.ceil(bounds ? bounds.x + bounds.width : stack.width));
+  const bottom = Math.min(
+    stack.height,
+    Math.ceil(bounds ? bounds.y + bounds.height : stack.height),
+  );
+  return right > left && bottom > top ? { left, top, right, bottom } : null;
+}
+
+function layerIsRendered(stack: LayerStack, layer: SparseLayer): boolean {
+  return layer.visible && (!stack.soloLayerId || stack.soloLayerId === layer.id);
+}
+
+function opaqueFullCanvasBaseRasterIndex(stack: LayerStack, layers: SparseLayer[]): number {
+  let baseIndex = -1;
+  for (let index = 0; index < layers.length; index += 1) {
+    const layer = layers[index]!;
+    const raster = layer.raster;
+    if (
+      layerIsRendered(stack, layer) &&
+      raster?.opaque &&
+      raster.x === 0 &&
+      raster.y === 0 &&
+      raster.width === stack.width &&
+      raster.height === stack.height &&
+      layer.opacity === 1 &&
+      layer.blendMode === 'source-over'
+    ) {
+      baseIndex = index;
+    }
+  }
+  return baseIndex;
+}
+
+function copyRegion(
+  source: Uint8ClampedArray,
+  output: Uint8ClampedArray,
+  width: number,
+  bounds: CompositeBounds,
+): void {
+  const rowLength = (bounds.right - bounds.left) * 4;
+  for (let y = bounds.top; y < bounds.bottom; y += 1) {
+    const offset = (y * width + bounds.left) * 4;
+    output.set(source.subarray(offset, offset + rowLength), offset);
+  }
+}
+
+/**
+ * Recompose only `bounds` into an existing full-size output buffer. Pixels outside the
+ * clipped bounds are untouched. This is intentionally not wired into the UI yet so callers
+ * can adopt regional commits independently of the current full-document history contract.
+ */
+export function composeLayerStackRegionInto(
+  stack: LayerStack,
+  background: Uint8ClampedArray,
+  output: Uint8ClampedArray,
+  bounds: Rectangle,
+): void {
+  const startedAt = performance.now();
+  const expectedLength = stack.width * stack.height * 4;
+  if (background.length !== expectedLength || output.length !== expectedLength) {
+    throw new Error('Composition buffers do not match the layer stack.');
+  }
+  const region = normalizeCompositeBounds(stack, bounds);
+  if (!region) {
+    recordPerformanceMeasure('glitchbrushes:compose-layer-stack-region', startedAt);
+    return;
+  }
+  const baseIndex = opaqueFullCanvasBaseRasterIndex(stack, stack.layers);
+  copyRegion(
+    baseIndex >= 0 ? stack.layers[baseIndex]!.raster!.pixels : background,
+    output,
+    stack.width,
+    region,
+  );
+  compositeLayersInto(stack, output, stack.layers, region, baseIndex, baseIndex >= 0);
+  recordPerformanceMeasure('glitchbrushes:compose-layer-stack-region', startedAt);
 }
 
 function compositeRasterInto(
   stack: LayerStack,
   output: Uint8ClampedArray,
   layer: SparseLayer,
+  bounds?: CompositeBounds,
 ): void {
   const raster = layer.raster;
   if (!raster) return;
-  const left = Math.max(0, raster.x);
-  const top = Math.max(0, raster.y);
-  const right = Math.min(stack.width, raster.x + raster.width);
-  const bottom = Math.min(stack.height, raster.y + raster.height);
+  const left = Math.max(0, raster.x, bounds?.left ?? 0);
+  const top = Math.max(0, raster.y, bounds?.top ?? 0);
+  const right = Math.min(stack.width, raster.x + raster.width, bounds?.right ?? stack.width);
+  const bottom = Math.min(stack.height, raster.y + raster.height, bounds?.bottom ?? stack.height);
   if (right <= left || bottom <= top) return;
 
-  const canCopyRows = raster.opaque && layer.opacity >= 0.999 && layer.blendMode === 'source-over';
+  const canCopyRows = raster.opaque && layer.opacity === 1 && layer.blendMode === 'source-over';
   for (let y = top; y < bottom; y += 1) {
     const sourceY = y - raster.y;
     const sourceX = left - raster.x;
@@ -388,36 +512,46 @@ function compositeLayerInto(
   stack: LayerStack,
   output: Uint8ClampedArray,
   layer: SparseLayer,
+  bounds?: CompositeBounds,
+  skipRaster = false,
 ): void {
-  compositeRasterInto(stack, output, layer);
-  const canCopyOpaquePixels = layer.opacity >= 0.999 && layer.blendMode === 'source-over';
+  if (!skipRaster) compositeRasterInto(stack, output, layer, bounds);
+  const canCopyOpaquePixels = layer.opacity === 1 && layer.blendMode === 'source-over';
   for (const tile of layer.tiles.values()) {
-    const left = tile.tileX * LAYER_TILE_SIZE;
-    const top = tile.tileY * LAYER_TILE_SIZE;
-    for (let localY = 0; localY < tile.height; localY += 1) {
-      const sourceRowStart = localY * tile.width * 4;
-      const destinationRowStart = ((top + localY) * stack.width + left) * 4;
+    const tileLeft = tile.tileX * LAYER_TILE_SIZE;
+    const tileTop = tile.tileY * LAYER_TILE_SIZE;
+    const left = Math.max(tileLeft, bounds?.left ?? 0);
+    const top = Math.max(tileTop, bounds?.top ?? 0);
+    const right = Math.min(tileLeft + tile.width, bounds?.right ?? stack.width);
+    const bottom = Math.min(tileTop + tile.height, bounds?.bottom ?? stack.height);
+    if (right <= left || bottom <= top) continue;
+    for (let y = top; y < bottom; y += 1) {
+      const localY = y - tileTop;
+      const localLeft = left - tileLeft;
+      const localRight = right - tileLeft;
+      const sourceRowStart = (localY * tile.width + localLeft) * 4;
+      const destinationRowStart = (y * stack.width + left) * 4;
       if (canCopyOpaquePixels) {
         let rowIsOpaque = true;
-        for (let localX = 0; localX < tile.width; localX += 1) {
-          if (tile.pixels[sourceRowStart + localX * 4 + 3] !== 255) {
+        for (let localX = localLeft; localX < localRight; localX += 1) {
+          if (tile.pixels[(localY * tile.width + localX) * 4 + 3] !== 255) {
             rowIsOpaque = false;
             break;
           }
         }
         if (rowIsOpaque) {
           output.set(
-            tile.pixels.subarray(sourceRowStart, sourceRowStart + tile.width * 4),
+            tile.pixels.subarray(sourceRowStart, sourceRowStart + (localRight - localLeft) * 4),
             destinationRowStart,
           );
           continue;
         }
       }
-      for (let localX = 0; localX < tile.width; localX += 1) {
-        const sourceOffset = sourceRowStart + localX * 4;
+      for (let localX = localLeft; localX < localRight; localX += 1) {
+        const sourceOffset = (localY * tile.width + localX) * 4;
         const sourceAlpha = tile.pixels[sourceOffset + 3]!;
         if (sourceAlpha === 0) continue;
-        const destinationOffset = destinationRowStart + localX * 4;
+        const destinationOffset = destinationRowStart + (localX - localLeft) * 4;
         // The common effect path writes opaque source-over pixels. Copying them directly
         // avoids the expensive floating-point blend calculation for every pixel.
         if (canCopyOpaquePixels && sourceAlpha === 255) {
@@ -444,10 +578,14 @@ function compositeLayersInto(
   stack: LayerStack,
   output: Uint8ClampedArray,
   layers: SparseLayer[],
+  bounds?: CompositeBounds,
+  baseIndex = -1,
+  skipBaseRaster = false,
 ): void {
-  for (const layer of layers) {
-    if (!layer.visible || (stack.soloLayerId && stack.soloLayerId !== layer.id)) continue;
-    compositeLayerInto(stack, output, layer);
+  for (let index = Math.max(0, baseIndex); index < layers.length; index += 1) {
+    const layer = layers[index]!;
+    if (!layerIsRendered(stack, layer)) continue;
+    compositeLayerInto(stack, output, layer, bounds, skipBaseRaster && index === baseIndex);
   }
 }
 
@@ -542,6 +680,61 @@ export function writeCompositeResultToActiveLayer(
   bounds: Rectangle,
   targetLayerId = stack.activeLayerId,
 ): number {
+  return writeCompositeBufferToLayer(
+    stack,
+    beforeComposite,
+    targetComposite,
+    bounds,
+    targetLayerId,
+    stack.width,
+    0,
+    0,
+  );
+}
+
+/**
+ * Write a compact RGBA result whose first pixel is the clipped top-left of `bounds`.
+ * `beforeComposite` remains the full visible document, while the target allocation is
+ * proportional only to the dirty rectangle.
+ */
+export function writeCompositeRegionToActiveLayer(
+  stack: LayerStack,
+  beforeComposite: Uint8ClampedArray,
+  targetRegion: Uint8ClampedArray,
+  bounds: Rectangle,
+  targetLayerId = stack.activeLayerId,
+): number {
+  const left = Math.max(0, Math.floor(bounds.x));
+  const top = Math.max(0, Math.floor(bounds.y));
+  const right = Math.min(stack.width, Math.ceil(bounds.x + bounds.width));
+  const bottom = Math.min(stack.height, Math.ceil(bounds.y + bounds.height));
+  const width = Math.max(0, right - left);
+  const height = Math.max(0, bottom - top);
+  if (targetRegion.length !== width * height * 4) {
+    throw new Error('Target region dimensions do not match its clipped bounds.');
+  }
+  return writeCompositeBufferToLayer(
+    stack,
+    beforeComposite,
+    targetRegion,
+    { x: left, y: top, width, height },
+    targetLayerId,
+    width,
+    left,
+    top,
+  );
+}
+
+function writeCompositeBufferToLayer(
+  stack: LayerStack,
+  beforeComposite: Uint8ClampedArray,
+  targetPixels: Uint8ClampedArray,
+  bounds: Rectangle,
+  targetLayerId: string,
+  targetStride: number,
+  targetOriginX: number,
+  targetOriginY: number,
+): number {
   const layer = stack.layers.find((candidate) => candidate.id === targetLayerId);
   if (!layer || layer.locked) return 0;
   const left = Math.max(0, Math.floor(bounds.x));
@@ -570,16 +763,18 @@ export function writeCompositeResultToActiveLayer(
       for (let y = Math.max(top, tileTop); y < tileBottom; y += 1) {
         let sourceOffset = (y * stack.width + Math.max(left, tileLeft)) * 4;
         for (let x = Math.max(left, tileLeft); x < tileRight; x += 1, sourceOffset += 4) {
+          const targetOffset =
+            ((y - targetOriginY) * targetStride + x - targetOriginX) * 4;
           if (
-            beforeComposite[sourceOffset] === targetComposite[sourceOffset] &&
-            beforeComposite[sourceOffset + 1] === targetComposite[sourceOffset + 1] &&
-            beforeComposite[sourceOffset + 2] === targetComposite[sourceOffset + 2] &&
-            beforeComposite[sourceOffset + 3] === targetComposite[sourceOffset + 3]
+            beforeComposite[sourceOffset] === targetPixels[targetOffset] &&
+            beforeComposite[sourceOffset + 1] === targetPixels[targetOffset + 1] &&
+            beforeComposite[sourceOffset + 2] === targetPixels[targetOffset + 2] &&
+            beforeComposite[sourceOffset + 3] === targetPixels[targetOffset + 3]
           )
             continue;
 
           changed += 1;
-          const alpha = targetComposite[sourceOffset + 3]!;
+          const alpha = targetPixels[targetOffset + 3]!;
           if (!tile) {
             if (alpha === 0) continue;
             tile = createTile(stack, tileX, tileY);
@@ -591,9 +786,9 @@ export function writeCompositeResultToActiveLayer(
           }
 
           const localOffset = ((y - tileTop) * tile.width + x - tileLeft) * 4;
-          tile.pixels[localOffset] = targetComposite[sourceOffset]!;
-          tile.pixels[localOffset + 1] = targetComposite[sourceOffset + 1]!;
-          tile.pixels[localOffset + 2] = targetComposite[sourceOffset + 2]!;
+          tile.pixels[localOffset] = targetPixels[targetOffset]!;
+          tile.pixels[localOffset + 1] = targetPixels[targetOffset + 1]!;
+          tile.pixels[localOffset + 2] = targetPixels[targetOffset + 2]!;
           tile.pixels[localOffset + 3] = alpha;
           mayBeEmpty ||= alpha === 0;
         }

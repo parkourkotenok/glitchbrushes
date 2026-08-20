@@ -2,12 +2,15 @@
 
 ## 2026-08-21 — Startup, Slice commit and Image Brush Style performance repair
 
+- Benjamin-Plus подключён проектно через `AGENTS.md` по официальной рекомендации JetBrains; новые агенты получают правила one-pass recon, keyhole reads и task-specific green checks автоматически.
 - Initial editor state is now a 1×1 transparent hand-off document over white instead of synchronously generating the obsolete 1120×720 signal-study image. The road demo still decodes asynchronously into the ordinary editable image layer.
 - Image Brush library/state hydration and astronaut decoding start only when the Image Brush panel is opened. Effect entry no longer competes with that work.
 - The closed Effect picker no longer preloads every static preview pair. Simple mode does not mount the hidden Advanced control tree; those controls are created only after switching to Advanced.
 - Slice/effect layer commit writes RGBA tile-by-tile, performs copy-on-write once per touched tile and uses opaque source-over row fast paths instead of allocating a typed-array view for every pixel.
 - Image Brush Style presets retain Size, Spacing, Orientation, Opacity and the visible Glitch Amount control without reapplying the previous Clean level over the preset recipe. Browser acceptance confirmed Glitched Repeat (`fixed`, 3 FX) and Progressive Decay (`progressive`, 2 FX).
-- Verification: TypeScript, 197/197 Vitest tests and production build pass; browser acceptance confirmed async road-demo entry, a committed Slice Displacement history action and live Style preset changes.
+- Single-layer processing now uses the existing visible document when the selected source is the only rendered full-canvas opaque Normal/100% image. Source mode is captured at pointerdown, and local Worker merges write spans in place instead of cloning and replacing the full visible document.
+- `composeLayerStackRegionInto` and compact-region tile commit remove full-canvas before/after composites for bounded strokes; full composition starts from an opaque full-canvas raster instead of first copying the hidden white background. Performance measures cover source compose, merge, full/regional composition, pointerdown/up and commit.
+- Verification: TypeScript, 200/200 Vitest tests and production build pass; browser acceptance confirmed async road-demo entry, a committed Slice Displacement history action and live Style preset changes.
 
 ## 2026-08-20 — Independent image layers and direct, copy-on-write editing
 

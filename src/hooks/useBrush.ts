@@ -6,6 +6,7 @@ import type {
   AlgorithmSettings,
   BrushSettings,
   BytePatch,
+  LayerSourceMode,
   LayerStackSnapshot,
   Point,
   Rectangle,
@@ -38,7 +39,7 @@ export interface StrokeState {
   path: Array<Point & { pressure: number }>;
   layerBefore: LayerStackSnapshot | null;
   sourceLayerId: string;
-  sampleAllLayers: boolean;
+  sourceMode: LayerSourceMode;
   /** Separate processing buffer is allocated only for explicit single-layer sampling. */
   editPixels: Uint8ClampedArray | null;
   pendingRetouchSamples: Array<{ point: Point; pressure: number }>;

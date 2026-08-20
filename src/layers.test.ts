@@ -5,7 +5,9 @@ import {
   addImageLayer,
   addLayer,
   clearActiveLayer,
+  canUseVisibleCompositeAsLayerSource,
   composeLayerStack,
+  composeLayerStackRegionInto,
   composeLayerPixels,
   createImageLayerStack,
   createLayerStack,
@@ -23,6 +25,7 @@ import {
   snapshotLayerStack,
   toggleSoloActiveLayer,
   writeCompositeResultToActiveLayer,
+  writeCompositeRegionToActiveLayer,
 } from './layers/sparseLayers';
 
 function opaque(width: number, height: number, rgba: [number, number, number, number]) {
@@ -152,6 +155,58 @@ describe('sparse tiled layer stack', () => {
     ]);
   });
 
+  it('uses the visible composite as a selected-layer source only for the safe opaque case', () => {
+    const stack = createImageLayerStack(4, 3, 'Photo', opaque(4, 3, [12, 24, 36, 255]));
+    const imageId = stack.activeLayerId;
+    expect(canUseVisibleCompositeAsLayerSource(stack, imageId)).toBe(true);
+
+    const hidden = addLayer(stack, 'Hidden');
+    hidden.visible = false;
+    stack.activeLayerId = imageId;
+    expect(canUseVisibleCompositeAsLayerSource(stack, imageId)).toBe(true);
+
+    hidden.visible = true;
+    expect(canUseVisibleCompositeAsLayerSource(stack, imageId)).toBe(false);
+    hidden.visible = false;
+    stack.layers[0]!.opacity = 0.5;
+    expect(canUseVisibleCompositeAsLayerSource(stack, imageId)).toBe(false);
+  });
+
+  it('commits a compact dirty-region target without a full target buffer', () => {
+    const width = 8;
+    const height = 6;
+    const background = opaque(width, height, [255, 255, 255, 255]);
+    const stack = createImageLayerStack(
+      width,
+      height,
+      'Photo',
+      opaque(width, height, [20, 30, 40, 255]),
+    );
+    const before = composeLayerStack(stack, background);
+    const bounds = { x: 3, y: 2, width: 2, height: 2 };
+    const targetRegion = new Uint8ClampedArray([
+      200, 10, 20, 255, 210, 20, 30, 255,
+      220, 30, 40, 255, 230, 40, 50, 255,
+    ]);
+    expect(targetRegion.byteLength).toBe(bounds.width * bounds.height * 4);
+    expect(
+      writeCompositeRegionToActiveLayer(
+        stack,
+        before,
+        targetRegion,
+        bounds,
+        stack.activeLayerId,
+      ),
+    ).toBe(4);
+    const result = composeLayerStack(stack, background);
+    for (let row = 0; row < bounds.height; row += 1) {
+      const start = ((bounds.y + row) * width + bounds.x) * 4;
+      expect(result.slice(start, start + bounds.width * 4)).toEqual(
+        targetRegion.slice(row * bounds.width * 4, (row + 1) * bounds.width * 4),
+      );
+    }
+  });
+
   it('shares history tiles until the first write and then copies only the touched tile', () => {
     const stack = createLayerStack(600, 400);
     const layer = activeLayer(stack);
@@ -216,6 +271,61 @@ describe('sparse tiled layer stack', () => {
     expect(composeLayerStack(stack, opaque(3, 1, [1, 2, 3, 255]))).toEqual(
       new Uint8ClampedArray([200, 10, 20, 255, 30, 210, 40, 255, 50, 60, 220, 255]),
     );
+  });
+
+  it('matches full composition when recomposing a region with an opaque raster base', () => {
+    const width = 6;
+    const height = 4;
+    const background = opaque(width, height, [5, 15, 25, 255]);
+    const stack = createImageLayerStack(
+      width,
+      height,
+      'Base',
+      opaque(width, height, [60, 90, 120, 255]),
+    );
+    setLayerPixel(stack, activeLayer(stack), 0, 0, [30, 40, 50, 160]);
+
+    const multiply = addLayer(stack, 'Multiply');
+    multiply.blendMode = 'multiply';
+    multiply.opacity = 0.7;
+    setLayerPixel(stack, multiply, 2, 1, [180, 70, 40, 220]);
+    setLayerPixel(stack, multiply, 4, 2, [40, 200, 90, 160]);
+
+    const image = addImageLayer(
+      stack,
+      'Difference raster',
+      opaque(3, 2, [90, 180, 30, 255]),
+      3,
+      2,
+      1,
+      1,
+    );
+    image.blendMode = 'difference';
+    image.opacity = 0.6;
+
+    const screen = addLayer(stack, 'Screen');
+    screen.blendMode = 'screen';
+    screen.opacity = 0.45;
+    setLayerPixel(stack, screen, 1, 2, [220, 30, 200, 180]);
+    setLayerPixel(stack, screen, 5, 3, [30, 220, 200, 255]);
+
+    const full = composeLayerStack(stack, background);
+    const wholeRegion = new Uint8ClampedArray(full.length);
+    composeLayerStackRegionInto(stack, background, wholeRegion, { x: 0, y: 0, width, height });
+    expect(wholeRegion).toEqual(full);
+
+    const partialRegion = new Uint8ClampedArray(full.length).fill(17);
+    const bounds = { x: 1, y: 1, width: 4, height: 2 };
+    composeLayerStackRegionInto(stack, background, partialRegion, bounds);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const offset = (y * width + x) * 4;
+        const inside = x >= 1 && x < 5 && y >= 1 && y < 3;
+        expect([...partialRegion.slice(offset, offset + 4)]).toEqual(
+          inside ? [...full.slice(offset, offset + 4)] : [17, 17, 17, 17],
+        );
+      }
+    }
   });
 
   it('reset keeps imported image layers but removes their direct effect tiles', () => {

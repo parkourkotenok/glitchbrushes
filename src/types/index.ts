@@ -379,6 +379,8 @@ export interface LayerInfo {
 
 export type LayerBlendMode = 'source-over' | 'multiply' | 'screen' | 'overlay' | 'difference';
 export type LayerKind = 'image' | 'glitch' | 'image-brush';
+/** Fixed at stroke start so a worker cannot change source semantics mid-stroke. */
+export type LayerSourceMode = 'all-layers' | 'selected-layer' | 'selected-document';
 
 export interface RasterLayerSnapshot {
   x: number;

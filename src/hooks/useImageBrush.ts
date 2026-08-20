@@ -11,7 +11,7 @@ import {
   type StampPathState,
   type StampPoint,
 } from '../imageBrush/types';
-import type { LayerStackSnapshot, Point } from '../types';
+import type { LayerSourceMode, LayerStackSnapshot, Point } from '../types';
 
 export interface ImageBrushStrokeState {
   pointerId: number;
@@ -33,7 +33,7 @@ export interface ImageBrushStrokeState {
   reactRenderStart: number;
   layerBefore: LayerStackSnapshot;
   sourceLayerId: string;
-  sampleAllLayers: boolean;
+  sourceMode: LayerSourceMode;
 }
 
 export interface ImageBrushGhostVariant {

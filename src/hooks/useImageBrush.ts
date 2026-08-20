@@ -32,6 +32,8 @@ export interface ImageBrushStrokeState {
   limitReached: boolean;
   reactRenderStart: number;
   layerBefore: LayerStackSnapshot;
+  sourceLayerId: string;
+  sampleAllLayers: boolean;
 }
 
 export interface ImageBrushGhostVariant {

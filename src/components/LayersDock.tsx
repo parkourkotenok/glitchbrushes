@@ -31,9 +31,11 @@ interface LayersDockProps {
   layerStack: LayerStack;
   layerVersion: number;
   currentLayer: { id: string; name: string; opacity: number; blendMode: LayerBlendMode };
-  originalSelected: boolean;
+  backgroundSelected: boolean;
+  sampleAllLayers: boolean;
   onFlattenLayers(): void;
-  onSelectOriginal(): void;
+  onSelectBackground(): void;
+  onSampleAllLayersChange(value: boolean): void;
   onSelectLayer(id: string, name: string): void;
   onRunLayerOperation(label: string, mutate: (stack: LayerStack) => boolean | void): void;
 }
@@ -58,22 +60,43 @@ function LayerThumbnail({
     const scale = Math.min((canvas.width - 4) / width, (canvas.height - 4) / height);
     const offsetX = (canvas.width - width * scale) / 2;
     const offsetY = (canvas.height - height * scale) / 2;
-    context.imageSmoothingEnabled = true;
-    for (const tile of layer.tiles.values()) {
-      const source = document.createElement('canvas');
-      source.width = tile.width;
-      source.height = tile.height;
-      source
-        .getContext('2d')
-        ?.putImageData(new ImageData(tile.pixels, tile.width, tile.height), 0, 0);
-      context.drawImage(
-        source,
-        offsetX + tile.tileX * LAYER_TILE_SIZE * scale,
-        offsetY + tile.tileY * LAYER_TILE_SIZE * scale,
-        tile.width * scale,
-        tile.height * scale,
-      );
+    const preview = context.createImageData(canvas.width, canvas.height);
+    for (let previewY = 0; previewY < canvas.height; previewY += 1) {
+      for (let previewX = 0; previewX < canvas.width; previewX += 1) {
+        const imageX = Math.floor((previewX - offsetX) / scale);
+        const imageY = Math.floor((previewY - offsetY) / scale);
+        if (imageX < 0 || imageY < 0 || imageX >= width || imageY >= height) continue;
+        let source: Uint8ClampedArray | null = null;
+        let sourceOffset = 0;
+        const raster = layer.raster;
+        if (
+          raster &&
+          imageX >= raster.x &&
+          imageY >= raster.y &&
+          imageX < raster.x + raster.width &&
+          imageY < raster.y + raster.height
+        ) {
+          source = raster.pixels;
+          sourceOffset = ((imageY - raster.y) * raster.width + imageX - raster.x) * 4;
+        }
+        const tileX = Math.floor(imageX / LAYER_TILE_SIZE);
+        const tileY = Math.floor(imageY / LAYER_TILE_SIZE);
+        const tile = layer.tiles.get(`${tileX}:${tileY}`);
+        if (tile) {
+          const localX = imageX - tileX * LAYER_TILE_SIZE;
+          const localY = imageY - tileY * LAYER_TILE_SIZE;
+          const tileOffset = (localY * tile.width + localX) * 4;
+          if (tile.pixels[tileOffset + 3]) {
+            source = tile.pixels;
+            sourceOffset = tileOffset;
+          }
+        }
+        if (!source) continue;
+        const destination = (previewY * canvas.width + previewX) * 4;
+        preview.data.set(source.subarray(sourceOffset, sourceOffset + 4), destination);
+      }
     }
+    context.putImageData(preview, 0, 0);
   }, [height, layer, version, width]);
   return <canvas ref={ref} width={34} height={28} aria-hidden="true" />;
 }
@@ -122,9 +145,11 @@ export function LayersDock({
   layerStack,
   layerVersion,
   currentLayer,
-  originalSelected,
+  backgroundSelected,
+  sampleAllLayers,
   onFlattenLayers,
-  onSelectOriginal,
+  onSelectBackground,
+  onSampleAllLayersChange,
   onSelectLayer,
   onRunLayerOperation,
 }: LayersDockProps) {
@@ -138,10 +163,19 @@ export function LayersDock({
       </header>
 
       <div className="layers-properties-bar">
+        <button
+          type="button"
+          className={`layers-sample-all ${sampleAllLayers ? 'active' : ''}`}
+          aria-pressed={sampleAllLayers}
+          title="Use the visible composite as the effect source"
+          onClick={() => onSampleAllLayersChange(!sampleAllLayers)}
+        >
+          All Layers
+        </button>
         <select
           aria-label="Layer blend mode"
           value={currentLayer.blendMode}
-          disabled={originalSelected}
+          disabled={backgroundSelected}
           onChange={(event) => {
             const blendMode = event.target.value as LayerBlendMode;
             onRunLayerOperation('Change layer blend mode', (stack) => {
@@ -158,7 +192,7 @@ export function LayersDock({
         <LayerOpacity
           layerId={currentLayer.id}
           value={currentLayer.opacity}
-          disabled={originalSelected}
+          disabled={backgroundSelected}
           onCommit={(opacity) =>
             onRunLayerOperation('Change layer opacity', (stack) => {
               activeLayer(stack).opacity = opacity;
@@ -170,7 +204,7 @@ export function LayersDock({
       <div className="layers-dock-scroll">
         <div className="layer-stack" data-layer-version={layerVersion}>
           {[...layerStack.layers].reverse().map((item) => {
-            const selected = !originalSelected && item.id === layerStack.activeLayerId;
+            const selected = !backgroundSelected && item.id === layerStack.activeLayerId;
             return (
               <div className={`layer-stack-row ${selected ? 'active' : ''}`} key={item.id}>
                 <button
@@ -201,7 +235,9 @@ export function LayersDock({
                   </span>
                   <span className="layer-row-copy">
                     <strong>{item.name}</strong>
-                    <small>{item.blendMode === 'source-over' ? 'Normal' : item.blendMode}</small>
+                    <small>
+                      Layer · {item.blendMode === 'source-over' ? 'Normal' : item.blendMode}
+                    </small>
                   </span>
                 </button>
                 <button
@@ -221,19 +257,19 @@ export function LayersDock({
               </div>
             );
           })}
-          <div className={`layer-stack-row original-layer ${originalSelected ? 'active' : ''}`}>
+          <div className={`layer-stack-row original-layer ${backgroundSelected ? 'active' : ''}`}>
             <span className="layer-visibility">
               <Eye size={14} />
             </span>
             <button
               className="layer-select-button"
-              aria-pressed={originalSelected}
-              onClick={onSelectOriginal}
+              aria-pressed={backgroundSelected}
+              onClick={onSelectBackground}
             >
               <span className="layer-thumbnail original-thumbnail" />
               <span className="layer-row-copy">
-                <strong>Original</strong>
-                <small>Background</small>
+                <strong>Background</strong>
+                <small>White canvas · locked</small>
               </span>
             </button>
             <span className="layer-lock-button">
@@ -248,8 +284,8 @@ export function LayersDock({
           aria-label="Add layer"
           title="Add layer"
           onClick={() =>
-            onRunLayerOperation('Add glitch layer', (stack) => {
-              const layer = addLayer(stack);
+            onRunLayerOperation('Add layer', (stack) => {
+              const layer = addLayer(stack, undefined, 'image');
               onSelectLayer(layer.id, layer.name);
             })
           }
@@ -259,7 +295,7 @@ export function LayersDock({
         <button
           aria-label="Duplicate layer"
           title="Duplicate layer"
-          disabled={originalSelected}
+          disabled={backgroundSelected}
           onClick={() =>
             onRunLayerOperation('Duplicate layer', (stack) => {
               duplicateActiveLayer(stack);
@@ -271,7 +307,7 @@ export function LayersDock({
         <button
           aria-label="Move layer up"
           title="Move layer up"
-          disabled={originalSelected}
+          disabled={backgroundSelected}
           onClick={() => onRunLayerOperation('Move layer up', (stack) => moveActiveLayer(stack, 1))}
         >
           <ChevronUp size={15} />
@@ -279,7 +315,7 @@ export function LayersDock({
         <button
           aria-label="Move layer down"
           title="Move layer down"
-          disabled={originalSelected}
+          disabled={backgroundSelected}
           onClick={() =>
             onRunLayerOperation('Move layer down', (stack) => moveActiveLayer(stack, -1))
           }
@@ -292,19 +328,19 @@ export function LayersDock({
           </summary>
           <div>
             <button
-              disabled={originalSelected}
+              disabled={backgroundSelected}
               onClick={() => onRunLayerOperation('Clear active layer', clearActiveLayer)}
             >
               Clear layer
             </button>
             <button
-              disabled={originalSelected}
+              disabled={backgroundSelected}
               onClick={() => onRunLayerOperation('Merge layer down', mergeActiveLayerDown)}
             >
               Merge down
             </button>
             <button
-              disabled={originalSelected}
+              disabled={backgroundSelected}
               onClick={() => onRunLayerOperation('Solo active layer', toggleSoloActiveLayer)}
             >
               {layerStack.soloLayerId ? 'Exit solo' : 'Solo layer'}
@@ -314,7 +350,7 @@ export function LayersDock({
         </details>
         <button
           className="layers-delete"
-          disabled={originalSelected || layerStack.layers.length <= 1}
+          disabled={backgroundSelected || layerStack.layers.length <= 1}
           aria-label="Delete layer"
           title="Delete layer"
           onClick={() => onRunLayerOperation('Delete active layer', deleteActiveLayer)}

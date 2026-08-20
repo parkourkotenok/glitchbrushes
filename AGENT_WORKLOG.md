@@ -1,5 +1,21 @@
 # Agent Worklog
 
+## 2026-08-21 — Startup, Slice commit and Image Brush Style performance repair
+
+- Initial editor state is now a 1×1 transparent hand-off document over white instead of synchronously generating the obsolete 1120×720 signal-study image. The road demo still decodes asynchronously into the ordinary editable image layer.
+- Image Brush library/state hydration and astronaut decoding start only when the Image Brush panel is opened. Effect entry no longer competes with that work.
+- The closed Effect picker no longer preloads every static preview pair. Simple mode does not mount the hidden Advanced control tree; those controls are created only after switching to Advanced.
+- Slice/effect layer commit writes RGBA tile-by-tile, performs copy-on-write once per touched tile and uses opaque source-over row fast paths instead of allocating a typed-array view for every pixel.
+- Image Brush Style presets retain Size, Spacing, Orientation, Opacity and the visible Glitch Amount control without reapplying the previous Clean level over the preset recipe. Browser acceptance confirmed Glitched Repeat (`fixed`, 3 FX) and Progressive Decay (`progressive`, 2 FX).
+- Verification: TypeScript, 197/197 Vitest tests and production build pass; browser acceptance confirmed async road-demo entry, a committed Slice Displacement history action and live Style preset changes.
+
+## 2026-08-20 — Independent image layers and direct, copy-on-write editing
+
+- `Add image`/drop добавляют фотографию отдельным скрываемым `Image`-слоем; белый `Background` остаётся закреплённым основанием.
+- Effect, MOSH, Retouch и Image Brush пишут прямо в выбранный `Image`-слой; автоматические `Glitch Layer`/`Image Brush Layer` больше не создаются. `All Layers` определяет только источник семплирования.
+- Импорт и fit выполняются в Worker. History snapshots разделяют неизменённые raster и tile buffers и используют copy-on-write только для затронутых тайлов. Пиксельные merge-пути копируют непрерывные диапазоны вместо миллионов 4-byte операций.
+- Project v3 сериализует raster и sparse слои с миграцией старых проектов. Проверено: 193 unit test, typecheck, production build, серия Effect и Image Brush мазков на одном и двух слоях, single/all-layers режимы; число слоёв не растёт, console errors: 0.
+
 ## Project Goal
 
 Поддерживать полностью локальный React + TypeScript + Vite редактор **Parkour Kotenok / Glitch Brushes** для художественного глитчинга PNG, JPEG и WebP. Текущее направление — понятный Simple/Advanced интерфейс, быстрые локальные кисти, полноценные слои, предсказуемые предпросмотры, восстанавливаемый оригинал, история и экспорт. HEX и File Corruption больше не входят в продукт.
@@ -467,7 +483,7 @@ Remaining measured limit: final 4000² Evolving processing is asynchronous and c
 - [fixed, verified 2026-07-27] IMAGE BRUSH `after` staging formerly risked pre-processing individual tips; after-only racks now stamp clean tips and process the isolated finished trail once.
 
 - Temporal mode, video import, истинный codec datamosh и WebM/GIF export не реализованы; текущий Motion Mosh — честная static-image псевдосимуляция.
-- Полноценный стек независимых raster-слоёв не реализован: доступен один reversible glitch-буфер над Original. Это зафиксированное упрощение, не скрытая заглушка.
+- Полноценный стек независимых raster-слоёв реализован 2026-08-20; результаты инструментов остаются sparse для экономии памяти и отзывчивости.
 - Raw File Glitch пока не привязан к координатам кисти; он выполняет глобальную seeded-мутацию после защищённого префикса.
 - Structural brush effects показывают результат после pointer-up Worker commit; live Continuous во время движения остаётся у лёгких pixel/micro effects.
 

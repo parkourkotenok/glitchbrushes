@@ -793,12 +793,29 @@ select {
 
 .layers-properties-bar {
   display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
+  grid-template-columns: 82px 88px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   padding: 5px 8px;
   border-bottom: 1px solid var(--line);
   background: #181817;
+}
+
+.layers-sample-all {
+  height: 27px;
+  border: 1px solid #4b4a45;
+  background: #10100f;
+  color: #a6a39a;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 8px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.layers-sample-all.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, #10100f);
+  color: var(--accent);
 }
 
 .layers-properties-bar select {

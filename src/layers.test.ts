@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   LAYER_TILE_SIZE,
   activeLayer,
+  addImageLayer,
   addLayer,
   clearActiveLayer,
   composeLayerStack,
+  composeLayerPixels,
+  createImageLayerStack,
   createLayerStack,
   deleteActiveLayer,
   deserializeLayerStack,
@@ -13,6 +16,8 @@ import {
   layerMemoryBytes,
   mergeActiveLayerDown,
   moveActiveLayer,
+  removeGeneratedLayers,
+  restoreLayerStack,
   serializeLayerStack,
   setLayerPixel,
   snapshotLayerStack,
@@ -106,5 +111,129 @@ describe('sparse tiled layer stack', () => {
     stack.soloLayerId = top.id;
     const restored = deserializeLayerStack(serializeLayerStack(stack));
     expect(snapshotLayerStack(restored)).toEqual(snapshotLayerStack(stack));
+  });
+
+  it('keeps imported photos as independent hideable raster layers over white', () => {
+    const white = opaque(4, 3, [255, 255, 255, 255]);
+    const firstPixels = opaque(4, 3, [30, 60, 90, 255]);
+    const stack = createImageLayerStack(4, 3, 'First photo', firstPixels);
+    const second = addImageLayer(stack, 'Second photo', opaque(2, 1, [220, 20, 40, 255]), 2, 1);
+
+    expect(stack.layers.map((layer) => layer.kind)).toEqual(['image', 'image']);
+    expect([...composeLayerStack(stack, white).slice((1 * 4 + 1) * 4, (1 * 4 + 2) * 4)]).toEqual([
+      220, 20, 40, 255,
+    ]);
+    second.visible = false;
+    expect([...composeLayerStack(stack, white).slice((1 * 4 + 1) * 4, (1 * 4 + 2) * 4)]).toEqual([
+      30, 60, 90, 255,
+    ]);
+    stack.layers[0]!.visible = false;
+    expect(composeLayerStack(stack, white)).toEqual(white);
+  });
+
+  it('isolates the selected source and commits effects without growing the layer stack', () => {
+    const stack = createImageLayerStack(2, 1, 'Photo', opaque(2, 1, [12, 24, 36, 255]));
+    const imageId = stack.activeLayerId;
+    expect(composeLayerPixels(stack, imageId)).toEqual(opaque(2, 1, [12, 24, 36, 255]));
+    const before = composeLayerStack(stack, opaque(2, 1, [255, 255, 255, 255]));
+    const target = before.slice();
+    target.set([220, 10, 30, 255], 0);
+    writeCompositeResultToActiveLayer(
+      stack,
+      before,
+      target,
+      { x: 0, y: 0, width: 1, height: 1 },
+      imageId,
+    );
+    expect(stack.layers).toHaveLength(1);
+    expect(stack.layers[0]!.kind).toBe('image');
+    expect([...composeLayerStack(stack, opaque(2, 1, [255, 255, 255, 255])).slice(0, 4)]).toEqual([
+      220, 10, 30, 255,
+    ]);
+  });
+
+  it('shares history tiles until the first write and then copies only the touched tile', () => {
+    const stack = createLayerStack(600, 400);
+    const layer = activeLayer(stack);
+    setLayerPixel(stack, layer, 5, 5, [10, 20, 30, 255]);
+    setLayerPixel(stack, layer, 300, 5, [40, 50, 60, 255]);
+    const snapshot = snapshotLayerStack(stack);
+    const firstBefore = snapshot.layers[0]!.tiles.find((tile) => tile.tileX === 0)!.pixels;
+    const secondBefore = snapshot.layers[0]!.tiles.find((tile) => tile.tileX === 1)!.pixels;
+    expect(layer.tiles.get('0:0')!.pixels).toBe(firstBefore);
+    expect(layer.tiles.get('1:0')!.pixels).toBe(secondBefore);
+
+    setLayerPixel(stack, layer, 5, 5, [90, 80, 70, 255]);
+    expect(layer.tiles.get('0:0')!.pixels).not.toBe(firstBefore);
+    expect(layer.tiles.get('1:0')!.pixels).toBe(secondBefore);
+    expect([...firstBefore.slice((5 * 256 + 5) * 4, (5 * 256 + 5) * 4 + 4)]).toEqual([
+      10, 20, 30, 255,
+    ]);
+
+    const restored = restoreLayerStack(snapshot);
+    setLayerPixel(restored, activeLayer(restored), 5, 5, [1, 2, 3, 255]);
+    expect([...firstBefore.slice((5 * 256 + 5) * 4, (5 * 256 + 5) * 4 + 4)]).toEqual([
+      10, 20, 30, 255,
+    ]);
+  });
+
+  it('commits a wide rendered region tile-by-tile without mutating shared history tiles', () => {
+    const width = LAYER_TILE_SIZE + 3;
+    const original = opaque(width, 1, [20, 30, 40, 255]);
+    const stack = createLayerStack(width, 1);
+    const before = composeLayerStack(stack, original);
+    const firstTarget = before.slice();
+    firstTarget.set([80, 90, 100, 255], 0);
+    firstTarget.set([110, 120, 130, 255], LAYER_TILE_SIZE * 4);
+    writeCompositeResultToActiveLayer(stack, before, firstTarget, { x: 0, y: 0, width, height: 1 });
+    const snapshot = snapshotLayerStack(stack);
+    const sharedFirstTile = snapshot.layers[0]!.tiles.find((tile) => tile.tileX === 0)!.pixels;
+    const sharedSecondTile = snapshot.layers[0]!.tiles.find((tile) => tile.tileX === 1)!.pixels;
+
+    const secondTarget = firstTarget.slice();
+    secondTarget.set([140, 150, 160, 255], 0);
+    secondTarget.set([170, 180, 190, 255], LAYER_TILE_SIZE * 4);
+    expect(
+      writeCompositeResultToActiveLayer(stack, firstTarget, secondTarget, {
+        x: 0,
+        y: 0,
+        width,
+        height: 1,
+      }),
+    ).toBe(2);
+    expect(activeLayer(stack).tiles.get('0:0')!.pixels).not.toBe(sharedFirstTile);
+    expect(activeLayer(stack).tiles.get('1:0')!.pixels).not.toBe(sharedSecondTile);
+    expect(composeLayerStack(restoreLayerStack(snapshot), original)).toEqual(firstTarget);
+    expect(composeLayerStack(stack, original)).toEqual(secondTarget);
+  });
+
+  it('composites opaque source-over sparse rows exactly', () => {
+    const stack = createLayerStack(3, 1);
+    const layer = activeLayer(stack);
+    setLayerPixel(stack, layer, 0, 0, [200, 10, 20, 255]);
+    setLayerPixel(stack, layer, 1, 0, [30, 210, 40, 255]);
+    setLayerPixel(stack, layer, 2, 0, [50, 60, 220, 255]);
+    expect(composeLayerStack(stack, opaque(3, 1, [1, 2, 3, 255]))).toEqual(
+      new Uint8ClampedArray([200, 10, 20, 255, 30, 210, 40, 255, 50, 60, 220, 255]),
+    );
+  });
+
+  it('reset keeps imported image layers but removes their direct effect tiles', () => {
+    const stack = createImageLayerStack(2, 1, 'Photo', opaque(2, 1, [10, 20, 30, 255]));
+    setLayerPixel(stack, activeLayer(stack), 0, 0, [200, 100, 50, 255]);
+    removeGeneratedLayers(stack);
+    expect(stack.layers).toHaveLength(1);
+    expect(stack.layers[0]!.kind).toBe('image');
+    expect(stack.layers[0]!.tiles.size).toBe(0);
+  });
+
+  it('shares immutable photo pixels across history snapshots but serializes them portably', () => {
+    const pixels = opaque(2, 2, [4, 8, 12, 255]);
+    const stack = createImageLayerStack(2, 2, 'Photo', pixels);
+    const snapshot = snapshotLayerStack(stack);
+    expect(snapshot.layers[0]!.raster!.pixels).toBe(pixels);
+    const restored = deserializeLayerStack(serializeLayerStack(stack));
+    expect(restored.layers[0]!.kind).toBe('image');
+    expect(restored.layers[0]!.raster?.pixels).toEqual(pixels);
   });
 });

@@ -9,7 +9,7 @@
 - Презентационные компоненты и feature hooks сохранены; новые крупные UI-блоки также вынесены в `LandingScreen`, `LayersDock`, `InterfaceModeSwitch` и `ImageBrushEssentialControls`.
 - File Corruption и raw mutation модули, описанные ниже, впоследствии удалены из production по продуктовому решению пользователя.
 - Динамический Effect Preview Worker заменён заранее сгенерированными статичными preview assets; Image Brush Preview остаётся отдельным Worker pipeline.
-- Sparse layer stack больше не является упрощением: пользователь может выбирать Original и любой рабочий слой, а операции со слоями проходят через общую history/composition модель.
+- Layer stack больше не является упрощением: каждая фотография — отдельный raster-слой над белым Background, а Glitch/Image Brush сохраняются в типизированные sparse-слои через общую history/composition модель.
 - Следующие проверки относятся уже к текущему интегрированному набору и записываются в `AGENT_WORKLOG.md`; приведённые ниже 161 тест не следует считать актуальным счётчиком.
 
 ## Этап A завершён — JSX вынесен в презентационные компоненты

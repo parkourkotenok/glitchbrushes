@@ -41,20 +41,6 @@ export function EffectPicker({
   }, [open]);
 
   useEffect(() => setPreviewId(value.id), [value.id]);
-  useEffect(() => {
-    const ids = [...items, ...legacyItems].map((item) => item.id);
-    const urls = [
-      '/assets/effect-previews/original.webp',
-      ...ids.flatMap((id) => [
-        effectPreviewAssetUrl(id, 'after'),
-        effectPreviewAssetUrl(id, 'difference'),
-      ]),
-    ];
-    for (const url of urls) {
-      const image = new Image();
-      image.src = url;
-    }
-  }, [items, legacyItems]);
   const previewItem = [...items, ...legacyItems].find((item) => item.id === previewId) ?? value;
   const sharedPreviewItem = sharedEffectForAlgorithm(previewId);
 

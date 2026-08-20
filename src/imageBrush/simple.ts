@@ -205,25 +205,14 @@ export function applyImageBrushStyleKeepingEssentials(
   current: ImageBrushSettings,
   styledSettings: ImageBrushSettings,
   styledRack: ImageBrushFxItem[],
-  styleId: string,
+  _styleId: string,
 ): { settings: ImageBrushSettings; rack: ImageBrushFxItem[] } {
   const preserved = preserveImageBrushEssentialControls(current, styledSettings);
-  if (current.glitchAmount === 'custom') {
-    return { settings: preserved, rack: styledRack.map((item) => ({ ...item })) };
-  }
-  const leveled = applyImageBrushGlitchAmount(
-    preserved,
-    styledRack.map((item) => ({ ...item })),
-    current.glitchAmount,
-    styleId,
-  );
-  return {
-    settings: {
-      ...leveled.settings,
-      effectVariation: current.effectVariation,
-    },
-    rack: leveled.rack,
-  };
+  // A Style preset owns its recipe: mutation mode, FX stage, recipe controls and rack must
+  // all arrive together. Glitch Amount is deliberately retained as a UI control, but it must
+  // not be re-applied here: a retained "Clean" level used to disable every FX item and force
+  // mutationMode back to clean, making every non-clean Style preset look identical to Clean.
+  return { settings: preserved, rack: styledRack.map((item) => ({ ...item })) };
 }
 
 export function describeCurrentImageBrush(

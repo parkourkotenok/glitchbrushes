@@ -68,14 +68,19 @@ import { useNotice } from './hooks/useNotice';
 import { finalizePatches, rowPatchesBefore } from './layers/patches';
 import {
   activeLayer,
+  addImageLayer,
   composeActiveLayerPixels,
+  composeImageLayers,
+  composeLayerPixels,
   composeLayerStack,
   composeLayerStackBelowActive,
+  createImageLayerStack,
   createLayerStack,
   deserializeLayerStack,
   eraseActiveLayerWithMask,
   flattenLayerStack,
   layerMemoryBytes,
+  removeGeneratedLayers,
   restoreLayerStack,
   serializeLayerStack,
   snapshotLayerStack,
@@ -184,15 +189,18 @@ function PanelLoading() {
   );
 }
 
-function decodeDocumentOffThread(file: File): Promise<{
+function decodeDocumentOffThread(
+  file: File,
+  options: { mode?: 'document' | 'layer'; maxWidth?: number; maxHeight?: number } = {},
+): Promise<{
   width: number;
   height: number;
   sourceWidth: number;
   sourceHeight: number;
   resized: boolean;
   original: ArrayBuffer;
-  pixels: ArrayBuffer;
-  mask: ArrayBuffer;
+  pixels?: ArrayBuffer;
+  mask?: ArrayBuffer;
 }> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('./workers/documentDecode.worker.ts', import.meta.url), {
@@ -228,8 +236,8 @@ function decodeDocumentOffThread(file: File): Promise<{
             sourceHeight: number;
             resized: boolean;
             original: ArrayBuffer;
-            pixels: ArrayBuffer;
-            mask: ArrayBuffer;
+            pixels?: ArrayBuffer;
+            mask?: ArrayBuffer;
           }
         | { jobId: string; type: 'error'; message: string }
       >,
@@ -246,7 +254,7 @@ function decodeDocumentOffThread(file: File): Promise<{
         resolve(event.data);
       }
     };
-    worker.postMessage({ jobId, file });
+    worker.postMessage({ jobId, file, ...options });
   });
 }
 
@@ -447,10 +455,18 @@ function GlitchBrushesEditor({
   const { notice, setNotice } = useNotice();
   const [originalLayerSelected, setOriginalLayerSelected] = useState(false);
   const originalLayerSelectedRef = useRef(false);
+  const [sampleAllLayers, setSampleAllLayersState] = useState(false);
+  const sampleAllLayersRef = useRef(false);
+  const setSampleAllLayers = useCallback((value: boolean) => {
+    sampleAllLayersRef.current = value;
+    setSampleAllLayersState(value);
+  }, []);
   const selectOriginalLayer = useCallback(() => {
     originalLayerSelectedRef.current = true;
     setOriginalLayerSelected(true);
-    setNotice('Original selected as a locked background. Select a glitch layer to paint.');
+    setNotice(
+      'White Background selected. It is permanently locked; choose an image layer to paint.',
+    );
   }, [setNotice]);
   const selectEditableLayer = useCallback(
     (id: string, name: string) => {
@@ -564,11 +580,23 @@ function GlitchBrushesEditor({
   const cursorVisualDiameterRef = useRef(-1);
   const renderedOriginalPixelsRef = useRef<Uint8ClampedArray | null>(null);
   const imageBrushPreviewBackgroundVersionRef = useRef(0);
+  const imageBrushHydrationStartedRef = useRef(false);
+  const imageBrushMountedRef = useRef(true);
   const imageBrushStorageHydratedRef = useRef(false);
   const imageBrushStorageWarningRef = useRef(false);
 
   useEffect(() => {
-    let cancelled = false;
+    imageBrushMountedRef.current = true;
+    return () => {
+      imageBrushMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    // Do not decode the astronaut and restore large saved brush buffers while the user is
+    // entering the Effect editor. Image Brush owns this work and starts it only when opened.
+    if (activePanel !== 'image-brush' || imageBrushHydrationStartedRef.current) return;
+    imageBrushHydrationStartedRef.current = true;
     void Promise.all([
       loadImageBrushState().catch(() => null),
       loadAstronautDemoAsset({
@@ -576,7 +604,7 @@ function GlitchBrushesEditor({
         trimThreshold: imageBrushSettingsRef.current.trimThreshold,
       }).catch(() => null),
     ]).then(([stored, astronaut]) => {
-      if (cancelled) return;
+      if (!imageBrushMountedRef.current) return;
       const savedAssets = (stored?.library ?? []).filter(
         (asset) => !asset.demo && asset.id !== astronautDemoAssetId,
       );
@@ -605,10 +633,7 @@ function GlitchBrushesEditor({
       if (!astronaut)
         setNotice('The astronaut brush demo could not be loaded; custom brushes still work.');
     });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  }, [activePanel]);
 
   useEffect(() => {
     if (!imageBrushStorageHydratedRef.current) return;
@@ -843,8 +868,19 @@ function GlitchBrushesEditor({
         selectedPixels,
         brushContextVersion: brushContext.version,
         brushDirection: brushContext.direction,
+        layerVersion,
+        sampleAllLayers,
+        sourceLayerId: layerStackRef.current.activeLayerId,
       }),
-    [documentVersion, moshRack, moshSeed, selectedPixels, brushContext],
+    [
+      documentVersion,
+      moshRack,
+      moshSeed,
+      selectedPixels,
+      brushContext,
+      layerVersion,
+      sampleAllLayers,
+    ],
   );
   const canvasOverlays = useMemo(() => {
     const overlays: CanvasOverlayState[] = deriveMoshOverlays(moshRack, moshDraftRegion);
@@ -868,25 +904,79 @@ function GlitchBrushesEditor({
     }
   }, []);
 
+  const processingSourcePixels = useCallback(
+    (layerId: string, allLayers: boolean): Uint8ClampedArray =>
+      allLayers ? docRef.current.pixels : composeLayerPixels(layerStackRef.current, layerId),
+    [],
+  );
+
+  const mergeSingleLayerResult = useCallback(
+    (
+      sourceBefore: Uint8ClampedArray,
+      processed: Uint8ClampedArray,
+      bounds: Rectangle,
+    ): Uint8ClampedArray => {
+      const current = docRef.current;
+      const visible = current.pixels.slice();
+      const left = Math.max(0, Math.floor(bounds.x));
+      const top = Math.max(0, Math.floor(bounds.y));
+      const right = Math.min(current.width, Math.ceil(bounds.x + bounds.width));
+      const bottom = Math.min(current.height, Math.ceil(bounds.y + bounds.height));
+      for (let y = top; y < bottom; y += 1) {
+        const rowStart = (y * current.width + left) * 4;
+        let x = left;
+        while (x < right) {
+          const offset = (y * current.width + x) * 4;
+          if (
+            sourceBefore[offset] === processed[offset] &&
+            sourceBefore[offset + 1] === processed[offset + 1] &&
+            sourceBefore[offset + 2] === processed[offset + 2] &&
+            sourceBefore[offset + 3] === processed[offset + 3]
+          ) {
+            x += 1;
+            continue;
+          }
+          const spanStart = offset;
+          x += 1;
+          while (x < right) {
+            const spanOffset = (y * current.width + x) * 4;
+            if (
+              sourceBefore[spanOffset] === processed[spanOffset] &&
+              sourceBefore[spanOffset + 1] === processed[spanOffset + 1] &&
+              sourceBefore[spanOffset + 2] === processed[spanOffset + 2] &&
+              sourceBefore[spanOffset + 3] === processed[spanOffset + 3]
+            ) {
+              break;
+            }
+            x += 1;
+          }
+          visible.set(processed.subarray(spanStart, rowStart + (x - left) * 4), spanStart);
+        }
+      }
+      return visible;
+    },
+    [],
+  );
+
   const runLayerOperation = useCallback(
     (label: string, mutate: (stack: LayerStack) => boolean | void) => {
       const current = docRef.current;
       const beforeSnapshot = snapshotLayerStack(layerStackRef.current);
-      const beforePixels = current.pixels.slice();
       const result = mutate(layerStackRef.current);
       if (result === false) {
         setNotice(`${label} is unavailable for the current layer state.`);
         return;
       }
-      current.pixels.set(composeLayerStack(layerStackRef.current, current.original));
-      const patch = createPatch(0, beforePixels, current.pixels);
+      current.pixels.set(composeLayerStack(layerStackRef.current, current.background));
       commitHistory({
         id: `layer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         label,
-        patches: patch ? [patch] : [],
+        // Layer snapshots are the exact undo source. A second full-document RGBA patch only
+        // duplicated memory and froze large canvases during simple visibility/selection work.
+        patches: [],
         timestamp: Date.now(),
         icon: 'image-brush',
-        affectedBytes: patch?.after.byteLength ?? 0,
+        affectedBytes: 0,
         layerBefore: beforeSnapshot,
         layerAfter: snapshotLayerStack(layerStackRef.current),
       });
@@ -911,11 +1001,7 @@ function GlitchBrushesEditor({
     (pixels: Uint8ClampedArray, affectedPixels: number, completedEffects: number) => {
       const current = docRef.current;
       if (originalLayerSelectedRef.current) {
-        setNotice('Original is a locked background. Select a glitch layer before applying MOSH.');
-        return;
-      }
-      if (activeLayer(layerStackRef.current).locked) {
-        setNotice('MOSH LAB cannot apply because the active glitch layer is locked.');
+        setNotice('Background is locked. Select an image layer before applying an effect.');
         return;
       }
       if (pixels.length !== current.pixels.length) {
@@ -1157,7 +1243,12 @@ function GlitchBrushesEditor({
         type: 'module',
       });
       const current = docRef.current;
-      const source = current.pixels.slice();
+      const capturedSampleAllLayers = sampleAllLayersRef.current;
+      const sourceBefore = processingSourcePixels(
+        layerStackRef.current.activeLayerId,
+        capturedSampleAllLayers,
+      );
+      const source = sourceBefore.slice();
       const selectionMask = new Uint8Array(current.width * current.height);
       for (const pixel of selectedPixels) {
         if (pixel >= 0 && pixel < selectionMask.length) selectionMask[pixel] = 255;
@@ -1210,7 +1301,15 @@ function GlitchBrushesEditor({
         if (moshWorkerRef.current === worker) moshWorkerRef.current = null;
         setMoshProcessing(false);
         setMoshProgress(null);
-        const output = new Uint8ClampedArray(result.pixels);
+        const processed = new Uint8ClampedArray(result.pixels);
+        const output = capturedSampleAllLayers
+          ? processed
+          : mergeSingleLayerResult(sourceBefore, processed, {
+              x: 0,
+              y: 0,
+              width: current.width,
+              height: current.height,
+            });
         if (mode === 'preview') {
           moshPreviewBufferRef.current = output;
           moshPreviewSignatureRef.current = moshSignature;
@@ -1250,10 +1349,12 @@ function GlitchBrushesEditor({
     [
       commitMoshBuffer,
       displayWorkingBuffer,
+      mergeSingleLayerResult,
       moshRack,
       moshSeed,
       moshSignature,
       selectedPixels,
+      processingSourcePixels,
       updateWorkingCanvas,
     ],
   );
@@ -1837,13 +1938,49 @@ function GlitchBrushesEditor({
           setNotice('Image Brush local result size did not match its affected bounds.');
           return;
         }
+        const sourceResult = stroke.sampleAllLayers
+          ? null
+          : cropRgbaRegion(sourcePixels, current.width, result.bounds);
         for (let row = 0; row < result.bounds.height; row += 1) {
-          const source = row * result.bounds.width * 4;
-          const destination = ((result.bounds.y + row) * current.width + result.bounds.x) * 4;
-          current.pixels.set(
-            output.subarray(source, source + result.bounds.width * 4),
-            destination,
-          );
+          const rowSource = row * result.bounds.width * 4;
+          const rowDestination =
+            ((result.bounds.y + row) * current.width + result.bounds.x) * 4;
+          const rowEnd = rowSource + result.bounds.width * 4;
+          if (!sourceResult) {
+            current.pixels.set(output.subarray(rowSource, rowEnd), rowDestination);
+            continue;
+          }
+          let column = 0;
+          while (column < result.bounds.width) {
+            const source = rowSource + column * 4;
+            if (
+              sourceResult[source] === output[source] &&
+              sourceResult[source + 1] === output[source + 1] &&
+              sourceResult[source + 2] === output[source + 2] &&
+              sourceResult[source + 3] === output[source + 3]
+            ) {
+              column += 1;
+              continue;
+            }
+            const spanStart = source;
+            column += 1;
+            while (column < result.bounds.width) {
+              const spanOffset = rowSource + column * 4;
+              if (
+                sourceResult[spanOffset] === output[spanOffset] &&
+                sourceResult[spanOffset + 1] === output[spanOffset + 1] &&
+                sourceResult[spanOffset + 2] === output[spanOffset + 2] &&
+                sourceResult[spanOffset + 3] === output[spanOffset + 3]
+              ) {
+                break;
+              }
+              column += 1;
+            }
+            current.pixels.set(
+              output.subarray(spanStart, rowSource + column * 4),
+              rowDestination + (spanStart - rowSource),
+            );
+          }
         }
         const committed = commitCurrentBufferToActiveLayer(stroke.layerBefore, result.bounds);
         const patches = committed.patches;
@@ -1900,7 +2037,8 @@ function GlitchBrushesEditor({
         current.width,
         current.height,
       );
-      const documentPixels = cropRgbaRegion(current.pixels, current.width, sourceBounds).buffer;
+      const sourcePixels = processingSourcePixels(stroke.sourceLayerId, stroke.sampleAllLayers);
+      const documentPixels = cropRgbaRegion(sourcePixels, current.width, sourceBounds).buffer;
       const workerAssets = requiredAssets.map((asset) => ({
         id: asset.id,
         width: asset.width,
@@ -1949,6 +2087,7 @@ function GlitchBrushesEditor({
       imageBrushPresetId,
       imageBrushRack,
       imageBrushSeed,
+      processingSourcePixels,
       updateWorkingCanvas,
     ],
   );
@@ -2018,6 +2157,7 @@ function GlitchBrushesEditor({
   const applyEffect = useCallback(
     (bounds: Rectangle, pressure: number, effectSeed: string, movement: Point): BytePatch[] => {
       const current = docRef.current;
+      const editPixels = strokeRef.current?.editPixels ?? current.pixels;
       const activeAlgorithm = algorithms[algorithm];
       const writeBounds =
         tool === 'restore' || activeAlgorithm.family === 'pixel'
@@ -2029,7 +2169,7 @@ function GlitchBrushesEditor({
               algorithm,
               settingsRef.current,
             );
-      const before = rowPatchesBefore(current.pixels, current.width, writeBounds);
+      const before = rowPatchesBefore(editPixels, current.width, writeBounds);
       if (tool === 'restore') {
         const random = createSeededRandom(`${effectSeed}:restore`);
         for (let y = bounds.y; y < bounds.y + bounds.height; y += 1) {
@@ -2037,12 +2177,12 @@ function GlitchBrushesEditor({
             const maskValue = maskRef.current[y * current.width + x]!;
             if (random.next() > maskValue * brushRef.current.strength * pressure) continue;
             const offset = pixelToByteOffset(x, y, current.width);
-            current.pixels.set(current.original.subarray(offset, offset + 4), offset);
+            editPixels.set(current.original.subarray(offset, offset + 4), offset);
           }
         }
       } else {
         algorithms[algorithm].apply({
-          pixels: current.pixels,
+          pixels: editPixels,
           originalPixels: current.original,
           width: current.width,
           height: current.height,
@@ -2057,7 +2197,37 @@ function GlitchBrushesEditor({
         });
       }
       current.dirty = true;
-      const patches = finalizePatches(before, current.pixels);
+      const patches = finalizePatches(before, editPixels);
+      if (editPixels !== current.pixels) {
+        for (const patch of patches) {
+          let offset = 0;
+          while (offset < patch.after.length) {
+            if (
+              patch.before[offset] === patch.after[offset] &&
+              patch.before[offset + 1] === patch.after[offset + 1] &&
+              patch.before[offset + 2] === patch.after[offset + 2] &&
+              patch.before[offset + 3] === patch.after[offset + 3]
+            ) {
+              offset += 4;
+              continue;
+            }
+            const spanStart = offset;
+            offset += 4;
+            while (offset < patch.after.length) {
+              if (
+                patch.before[offset] === patch.after[offset] &&
+                patch.before[offset + 1] === patch.after[offset + 1] &&
+                patch.before[offset + 2] === patch.after[offset + 2] &&
+                patch.before[offset + 3] === patch.after[offset + 3]
+              ) {
+                break;
+              }
+              offset += 4;
+            }
+            current.pixels.set(patch.after.subarray(spanStart, offset), patch.start + spanStart);
+          }
+        }
+      }
       updateWorkingCanvas(writeBounds);
       return patches;
     },
@@ -2130,6 +2300,7 @@ function GlitchBrushesEditor({
       const capturedBrush = { ...brushRef.current };
       const capturedBounds = { ...stroke.bounds };
       const capturedMovement = { ...stroke.movement };
+      const sourcePixels = processingSourcePixels(stroke.sourceLayerId, stroke.sampleAllLayers);
       const capturedCloneSource = cloneSource ? { ...cloneSource } : undefined;
       const capturedFeedbackMemory =
         capturedAlgorithm === 'feedback-brush' && feedbackMemoryRef.current
@@ -2203,8 +2374,15 @@ function GlitchBrushesEditor({
           setNotice('Brush Worker result size did not match the current document.');
           return;
         }
-        current.pixels.set(output);
-        const committed = commitCurrentBufferToActiveLayer(capturedLayerBefore, result.writeBounds);
+        current.pixels.set(
+          stroke.sampleAllLayers
+            ? output
+            : mergeSingleLayerResult(sourcePixels, output, result.writeBounds),
+        );
+        const committed = commitCurrentBufferToActiveLayer(
+          capturedLayerBefore,
+          result.writeBounds,
+        );
         const patches = committed.patches;
         updateWorkingCanvas(result.writeBounds);
         if (!patches.length) {
@@ -2246,7 +2424,7 @@ function GlitchBrushesEditor({
         bumpDocument();
       };
 
-      const pixels = current.pixels.slice().buffer;
+      const pixels = sourcePixels.slice().buffer;
       const maskBuffer = mask.buffer;
       const transfers: Transferable[] = [pixels, maskBuffer];
       if (capturedFeedbackMemory) transfers.push(capturedFeedbackMemory);
@@ -2280,6 +2458,8 @@ function GlitchBrushesEditor({
       cancelBrushJob,
       cloneSource,
       commitCurrentBufferToActiveLayer,
+      mergeSingleLayerResult,
+      processingSourcePixels,
       tool,
       updateWorkingCanvas,
     ],
@@ -2316,7 +2496,7 @@ function GlitchBrushesEditor({
         stroke.bounds,
         brushRef.current.strength * stroke.pressure,
       );
-      current.pixels.set(composeLayerStack(layerStackRef.current, current.original));
+      current.pixels.set(composeLayerStack(layerStackRef.current, current.background));
       const patches = finalizePatches(beforeRows, current.pixels);
       const action: HistoryAction = {
         id: `retouch-layer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -2361,6 +2541,7 @@ function GlitchBrushesEditor({
       const capturedBounds = { ...stroke.bounds };
       const capturedSettings = { ...retouchSettingsRef.current };
       const capturedBrush = { ...brushRef.current };
+      const processingPixels = processingSourcePixels(stroke.sourceLayerId, stroke.sampleAllLayers);
       let sourcePixels: Uint8ClampedArray | undefined;
       const samplePixels =
         !capturedSettings.sampleMergedLayers && capturedTool !== 'restore'
@@ -2369,13 +2550,13 @@ function GlitchBrushesEditor({
       if (capturedTool === 'restore') {
         if (capturedSettings.restoreSource === 'original') sourcePixels = current.original.slice();
         else if (capturedSettings.restoreSource === 'lower-layer') {
-          sourcePixels = composeLayerStackBelowActive(layerStackRef.current, current.original);
+          sourcePixels = composeLayerStackBelowActive(layerStackRef.current, current.background);
         } else {
           const latest = historyRef.current.undoEntries.at(-1);
           if (latest?.layerBefore) {
             sourcePixels = composeLayerStack(
               restoreLayerStack(latest.layerBefore),
-              current.original,
+              current.background,
             );
           } else {
             sourcePixels = current.pixels.slice();
@@ -2450,8 +2631,16 @@ function GlitchBrushesEditor({
         if (retouchWorkerRef.current === worker) retouchWorkerRef.current = null;
         setBrushProcessing(false);
         setBrushProgress(null);
-        current.pixels.set(new Uint8ClampedArray(result.pixels));
-        const committed = commitCurrentBufferToActiveLayer(capturedLayerBefore, result.writeBounds);
+        const output = new Uint8ClampedArray(result.pixels);
+        current.pixels.set(
+          stroke.sampleAllLayers
+            ? output
+            : mergeSingleLayerResult(processingPixels, output, result.writeBounds),
+        );
+        const committed = commitCurrentBufferToActiveLayer(
+          capturedLayerBefore,
+          result.writeBounds,
+        );
         updateWorkingCanvas(result.writeBounds);
         if (!committed.patches.length) {
           setNotice(`${capturedTool} completed without changing pixels.`);
@@ -2485,7 +2674,7 @@ function GlitchBrushesEditor({
         bumpDocument();
       };
 
-      const pixels = current.pixels.slice().buffer;
+      const pixels = processingPixels.slice().buffer;
       const maskBuffer = mask.buffer;
       const transfers: Transferable[] = [pixels, maskBuffer];
       const sourceBuffer = sourcePixels?.buffer;
@@ -2513,7 +2702,14 @@ function GlitchBrushesEditor({
         transfers,
       );
     },
-    [cancelBrushJob, commitCurrentBufferToActiveLayer, tool, updateWorkingCanvas],
+    [
+      cancelBrushJob,
+      commitCurrentBufferToActiveLayer,
+      mergeSingleLayerResult,
+      processingSourcePixels,
+      tool,
+      updateWorkingCanvas,
+    ],
   );
 
   const stampAt = useCallback(
@@ -2776,13 +2972,11 @@ function GlitchBrushesEditor({
       return;
     }
     if (originalLayerSelectedRef.current) {
-      setNotice('Original is a locked background. Select a glitch layer before painting.');
+      setNotice('Background is locked. Select an image layer before painting.');
       return;
     }
     if (activeLayer(layerStackRef.current).locked) {
-      setNotice(
-        'The active glitch layer is locked. Unlock it or select another layer before painting.',
-      );
+      setNotice('The active layer is locked. Unlock it or select another layer before painting.');
       return;
     }
     if (activePanel === 'image-brush' && tool === 'brush') {
@@ -2821,6 +3015,8 @@ function GlitchBrushesEditor({
         limitReached: false,
         reactRenderStart: imageBrushRenderCountRef.current,
         layerBefore: snapshotLayerStack(layerStackRef.current),
+        sourceLayerId: layerStackRef.current.activeLayerId,
+        sampleAllLayers: sampleAllLayersRef.current,
       };
       imageBrushStrokeRef.current = imageStroke;
       const feedbackStarted = performance.now();
@@ -2870,6 +3066,11 @@ function GlitchBrushesEditor({
       movement: { x: 0, y: 0 },
       path: [{ x: point.x, y: point.y, pressure: pressureFor(event) }],
       layerBefore: isRetouchTool(tool) ? null : snapshotLayerStack(layerStackRef.current),
+      sourceLayerId: layerStackRef.current.activeLayerId,
+      sampleAllLayers: sampleAllLayersRef.current,
+      editPixels: sampleAllLayersRef.current
+        ? null
+        : composeLayerPixels(layerStackRef.current, layerStackRef.current.activeLayerId),
       pendingRetouchSamples: [],
       retouchRaf: null,
       retouchEnded: false,
@@ -3278,8 +3479,9 @@ function GlitchBrushesEditor({
     pendingImageBrushEvolutionRef.current = null;
     clearAdvancedBrushTransientState();
     const current = docRef.current;
+    removeGeneratedLayers(layerStackRef.current);
+    current.original = composeImageLayers(layerStackRef.current, current.background);
     current.pixels.set(current.original);
-    layerStackRef.current = createLayerStack(current.width, current.height);
     bumpLayers();
     current.dirty = false;
     resetHistory();
@@ -3313,43 +3515,63 @@ function GlitchBrushesEditor({
     updateWorkingCanvas,
   ]);
 
-  const loadDocument = useCallback(
+  const prepareImageImport = useCallback((file: File): boolean => {
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      setNotice('Unsupported format. Choose PNG, JPEG, or WebP.');
+      return false;
+    }
+    if (file.size > 64 * 1024 * 1024) {
+      setNotice('The file exceeds the 64 MB safety limit.');
+      return false;
+    }
+    return true;
+  }, []);
+
+  const cancelForImageImport = useCallback(() => {
+    cancelMosh();
+    setMoshPreviewEnabled(false);
+    cancelBrushJob(true);
+    cancelImageBrushJob(true);
+    imageBrushStrokeRef.current = null;
+    imageBrushEvolutionOffsetRef.current = 0;
+    pendingImageBrushEvolutionRef.current = null;
+    clearAdvancedBrushTransientState();
+    setPendingPreview(null);
+  }, [cancelBrushJob, cancelImageBrushJob, cancelMosh, clearAdvancedBrushTransientState]);
+
+  const replaceDocumentWithImage = useCallback(
     async (file: File) => {
-      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
-        setNotice('Unsupported format. Choose PNG, JPEG, or WebP.');
-        return;
-      }
-      if (file.size > 64 * 1024 * 1024) {
-        setNotice('The file exceeds the 64 MB safety limit.');
-        return;
-      }
-      if (docRef.current.dirty && !window.confirm('Replace the image and discard unsaved changes?'))
-        return;
-      cancelMosh();
-      setMoshPreviewEnabled(false);
-      cancelBrushJob(true);
-      cancelImageBrushJob(true);
-      imageBrushStrokeRef.current = null;
-      imageBrushEvolutionOffsetRef.current = 0;
-      pendingImageBrushEvolutionRef.current = null;
-      clearAdvancedBrushTransientState();
-      setPendingPreview(null);
+      if (!prepareImageImport(file)) return;
+      cancelForImageImport();
       setProcessing(true);
       setNotice(`Decoding ${file.name} off the UI thread...`);
       try {
-        const decoded = await decodeDocumentOffThread(file);
+        const decoded = await decodeDocumentOffThread(file, { mode: 'layer' });
+        const rasterPixels = new Uint8ClampedArray(decoded.original);
+        const background = new Uint8ClampedArray(decoded.width * decoded.height * 4);
+        background.fill(255);
+        const stack = createImageLayerStack(
+          decoded.width,
+          decoded.height,
+          file.name.replace(/\.[^.]+$/, '') || 'Image 1',
+          rasterPixels,
+        );
+        const original = composeImageLayers(stack, background);
         docRef.current = {
           width: decoded.width,
           height: decoded.height,
-          original: new Uint8ClampedArray(decoded.original).slice(),
-          pixels: new Uint8ClampedArray(decoded.pixels).slice(),
+          background,
+          original,
+          pixels: original.slice(),
           fileName: file.name,
           mimeType: file.type,
           dirty: false,
         };
-        layerStackRef.current = createLayerStack(decoded.width, decoded.height);
+        layerStackRef.current = stack;
+        originalLayerSelectedRef.current = false;
+        setOriginalLayerSelected(false);
         bumpLayers();
-        maskRef.current = new Float32Array(decoded.mask).slice();
+        maskRef.current = new Float32Array(decoded.width * decoded.height);
         lastBrushMaskRef.current = { data: new Uint8Array(0), bounds: null };
         lastBrushDirectionRef.current = { x: 1, y: 0 };
         setBrushContext((context) => ({
@@ -3382,40 +3604,89 @@ function GlitchBrushesEditor({
         setProcessing(false);
       }
     },
-    [
-      bumpHistory,
-      cancelBrushJob,
-      cancelImageBrushJob,
-      cancelMosh,
-      clearAdvancedBrushTransientState,
-      resetHistory,
-    ],
+    [bumpHistory, cancelForImageImport, prepareImageImport, resetHistory],
   );
 
-  const loadDemo = useCallback(async () => {
-    try {
-      const response = await fetch('/assets/parkour-kotenok-road.jpg');
-      if (!response.ok) throw new Error('The Parkour Kotenok demo image could not be loaded.');
-      const blob = await response.blob();
-      await loadDocument(
-        new File([blob], 'parkour-kotenok-road.jpg', {
+  const addImageToCanvas = useCallback(
+    async (file: File) => {
+      if (!prepareImageImport(file)) return;
+      cancelForImageImport();
+      const current = docRef.current;
+      const layerBefore = snapshotLayerStack(layerStackRef.current);
+      setProcessing(true);
+      setNotice(`Adding ${file.name} as a separate image layer...`);
+      try {
+        const decoded = await decodeDocumentOffThread(file, {
+          mode: 'layer',
+          maxWidth: current.width,
+          maxHeight: current.height,
+        });
+        if (docRef.current !== current) return;
+        const image = addImageLayer(
+          layerStackRef.current,
+          file.name.replace(/\.[^.]+$/, '') || `Image ${layerStackRef.current.layers.length + 1}`,
+          new Uint8ClampedArray(decoded.original),
+          decoded.width,
+          decoded.height,
+        );
+        current.original = composeImageLayers(layerStackRef.current, current.background);
+        current.pixels.set(current.original);
+        current.dirty = true;
+        originalLayerSelectedRef.current = false;
+        setOriginalLayerSelected(false);
+        commitHistory({
+          id: `image-layer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          label: `Add image · ${image.name}`,
+          patches: [],
+          timestamp: Date.now(),
+          icon: 'image-brush',
+          affectedBytes: image.raster?.pixels.byteLength ?? 0,
+          detail: 'Independent raster layer · centered on canvas',
+          layerBefore,
+          layerAfter: snapshotLayerStack(layerStackRef.current),
+        });
+        updateWorkingCanvas();
+        bumpLayers();
+        bumpDocument();
+        setNotice(
+          `${file.name} added as its own ${decoded.width} × ${decoded.height} image layer. You can hide, move, duplicate, or delete it independently.`,
+        );
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : 'Image layer import failed.');
+      } finally {
+        setProcessing(false);
+      }
+    },
+    [cancelForImageImport, prepareImageImport, updateWorkingCanvas],
+  );
+
+  const loadDemo = useCallback(
+    async (replace = false) => {
+      try {
+        const response = await fetch('/assets/parkour-kotenok-road.jpg');
+        if (!response.ok) throw new Error('The Parkour Kotenok demo image could not be loaded.');
+        const blob = await response.blob();
+        const demo = new File([blob], 'parkour-kotenok-road.jpg', {
           type: blob.type || 'image/jpeg',
-        }),
-      );
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'The demo image could not be loaded.');
-    }
-  }, [loadDocument]);
+        });
+        if (replace) await replaceDocumentWithImage(demo);
+        else await addImageToCanvas(demo);
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : 'The demo image could not be loaded.');
+      }
+    },
+    [addImageToCanvas, replaceDocumentWithImage],
+  );
 
   useEffect(() => {
     if (initialDemoRequestedRef.current) return;
     initialDemoRequestedRef.current = true;
-    void loadDemo();
+    void loadDemo(true);
   }, [loadDemo]);
 
   const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) void loadDocument(file);
+    if (file) void addImageToCanvas(file);
     event.target.value = '';
   };
 
@@ -3712,7 +3983,7 @@ function GlitchBrushesEditor({
   const exportProject = () => {
     const current = docRef.current;
     const project = {
-      version: 2,
+      version: 3,
       app: 'GLITCH BRUSHES',
       image: {
         fileName: current.fileName,
@@ -3769,7 +4040,7 @@ function GlitchBrushesEditor({
         const embedded = new File([await response.blob()], project.image.fileName, {
           type: 'image/png',
         });
-        await loadDocument(embedded);
+        await replaceDocumentWithImage(embedded);
       } else if (
         project.image.width !== docRef.current.width ||
         project.image.height !== docRef.current.height
@@ -3787,8 +4058,18 @@ function GlitchBrushesEditor({
         if (restoredLayers.width !== current.width || restoredLayers.height !== current.height) {
           throw new Error('Project layer dimensions do not match the source image.');
         }
+        const containsRasterImages = restoredLayers.layers.some(
+          (layer) => layer.kind === 'image' && layer.raster,
+        );
+        if (!containsRasterImages) {
+          const importedImages = layerStackRef.current.layers.filter(
+            (layer) => layer.kind === 'image',
+          );
+          restoredLayers.layers = [...importedImages, ...restoredLayers.layers];
+        }
         layerStackRef.current = restoredLayers;
-        current.pixels.set(composeLayerStack(restoredLayers, current.original));
+        current.original = composeImageLayers(restoredLayers, current.background);
+        current.pixels.set(composeLayerStack(restoredLayers, current.background));
       } else {
         const migrated = createLayerStack(current.width, current.height);
         writeCompositeResultToActiveLayer(migrated, current.original, current.pixels, {
@@ -3798,7 +4079,7 @@ function GlitchBrushesEditor({
           height: current.height,
         });
         layerStackRef.current = migrated;
-        current.pixels.set(composeLayerStack(migrated, current.original));
+        current.pixels.set(composeLayerStack(migrated, current.background));
       }
       bumpLayers();
       current.dirty = true;
@@ -3890,11 +4171,11 @@ function GlitchBrushesEditor({
     if (brushJobGateRef.current.currentJobId) cancelBrushJob();
     if (pendingPreview) cancelPreview();
     if (originalLayerSelectedRef.current) {
-      setNotice('Original is a locked background. Select a glitch layer first.');
+      setNotice('Background is locked. Select an image layer first.');
       return;
     }
     if (activeLayer(layerStackRef.current).locked) {
-      setNotice('The active glitch layer is locked.');
+      setNotice('The active layer is locked.');
       return;
     }
     const current = docRef.current;
@@ -3911,6 +4192,11 @@ function GlitchBrushesEditor({
       movement: { x: 0, y: 0 },
       path: [{ x: point.x, y: point.y, pressure: 1 }],
       layerBefore: snapshotLayerStack(layerStackRef.current),
+      sourceLayerId: layerStackRef.current.activeLayerId,
+      sampleAllLayers: sampleAllLayersRef.current,
+      editPixels: sampleAllLayersRef.current
+        ? null
+        : composeLayerPixels(layerStackRef.current, layerStackRef.current.activeLayerId),
       pendingRetouchSamples: [],
       retouchRaf: null,
       retouchEnded: false,
@@ -4131,7 +4417,7 @@ function GlitchBrushesEditor({
         fileDropCounter.current = 0;
         event.currentTarget.classList.remove('dragging-file');
         const file = event.dataTransfer.files[0];
-        if (file) void loadDocument(file);
+        if (file) void addImageToCanvas(file);
       }}
     >
       <a className="skip-link" href="#editor-canvas">
@@ -4250,6 +4536,7 @@ function GlitchBrushesEditor({
           <div className="inspector-scroll">
             {activePanel === 'effect' && (
               <EffectPanel
+                interfaceMode={interfaceMode}
                 algorithm={algorithm}
                 algorithms={algorithms}
                 algorithmList={algorithmList}
@@ -4311,7 +4598,7 @@ function GlitchBrushesEditor({
                 currentLayer={currentLayer}
                 onFlattenLayers={() =>
                   runLayerOperation('Flatten layer stack', (stack) => {
-                    flattenLayerStack(stack, docRef.current.original);
+                    flattenLayerStack(stack, docRef.current.background);
                   })
                 }
                 onSelectLayer={(id, name) => {
@@ -4434,13 +4721,26 @@ function GlitchBrushesEditor({
             layerStack={layerStack}
             layerVersion={layerVersion}
             currentLayer={currentLayer}
-            originalSelected={originalLayerSelected}
+            backgroundSelected={originalLayerSelected}
+            sampleAllLayers={sampleAllLayers}
             onFlattenLayers={() =>
               runLayerOperation('Flatten layer stack', (stack) => {
-                flattenLayerStack(stack, docRef.current.original);
+                flattenLayerStack(stack, docRef.current.background);
               })
             }
-            onSelectOriginal={selectOriginalLayer}
+            onSelectBackground={selectOriginalLayer}
+            onSampleAllLayersChange={(value) => {
+              if (value && originalLayerSelectedRef.current) {
+                originalLayerSelectedRef.current = false;
+                setOriginalLayerSelected(false);
+              }
+              setSampleAllLayers(value);
+              setNotice(
+                value
+                  ? 'All Layers enabled: tools sample the visible composite and write the result into the selected layer.'
+                  : 'All Layers disabled: tools sample and edit only the selected layer.',
+              );
+            }}
             onSelectLayer={selectEditableLayer}
             onRunLayerOperation={runLayerOperation}
           />

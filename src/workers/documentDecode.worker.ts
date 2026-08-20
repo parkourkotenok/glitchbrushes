@@ -5,19 +5,35 @@ import { fitImportedDocument, readEncodedImageDimensions } from '../documentImpo
 interface DecodeRequest {
   jobId: string;
   file: File;
+  mode?: 'document' | 'layer';
+  maxWidth?: number;
+  maxHeight?: number;
 }
 
 self.onmessage = async (event: MessageEvent<DecodeRequest>) => {
-  const { jobId, file } = event.data;
+  const { jobId, file, mode = 'document', maxWidth, maxHeight } = event.data;
   try {
     const encodedBytes = await file.arrayBuffer();
     const encoded = readEncodedImageDimensions(encodedBytes, file.type);
-    const requested = encoded ? fitImportedDocument(encoded.width, encoded.height) : null;
+    const fittedDocument = encoded ? fitImportedDocument(encoded.width, encoded.height) : null;
+    const layerScale =
+      mode === 'layer' && fittedDocument && maxWidth && maxHeight
+        ? Math.min(1, maxWidth / fittedDocument.width, maxHeight / fittedDocument.height)
+        : 1;
+    const requested = encoded
+      ? {
+          width: Math.max(1, Math.round((fittedDocument?.width ?? encoded.width) * layerScale)),
+          height: Math.max(1, Math.round((fittedDocument?.height ?? encoded.height) * layerScale)),
+          resized: Boolean(fittedDocument?.resized || layerScale < 1),
+        }
+      : null;
     const resizeOptions: ImageBitmapOptions | undefined =
       requested?.resized && encoded
-        ? encoded.width >= encoded.height
-          ? { resizeWidth: requested.width, resizeQuality: 'high' }
-          : { resizeHeight: requested.height, resizeQuality: 'high' }
+        ? {
+            resizeWidth: requested.width,
+            resizeHeight: requested.height,
+            resizeQuality: 'high',
+          }
         : undefined;
     const bitmap = resizeOptions
       ? await createImageBitmap(file, resizeOptions)
@@ -25,7 +41,8 @@ self.onmessage = async (event: MessageEvent<DecodeRequest>) => {
     try {
       const fitted = fitImportedDocument(bitmap.width, bitmap.height);
       const dimensions = {
-        ...fitted,
+        width: bitmap.width,
+        height: bitmap.height,
         sourceWidth: encoded?.width ?? fitted.sourceWidth,
         sourceHeight: encoded?.height ?? fitted.sourceHeight,
         resized: Boolean(requested?.resized || fitted.resized),
@@ -37,18 +54,23 @@ self.onmessage = async (event: MessageEvent<DecodeRequest>) => {
       context.imageSmoothingQuality = 'high';
       context.drawImage(bitmap, 0, 0, dimensions.width, dimensions.height);
       const original = context.getImageData(0, 0, dimensions.width, dimensions.height).data;
-      const pixels = original.slice();
-      const mask = new Float32Array(dimensions.width * dimensions.height);
+      const pixels = mode === 'document' ? original.slice() : null;
+      const mask =
+        mode === 'document' ? new Float32Array(dimensions.width * dimensions.height) : null;
       const response = {
         jobId,
         type: 'result' as const,
         ...dimensions,
         original: original.buffer,
-        pixels: pixels.buffer,
-        mask: mask.buffer,
+        pixels: pixels?.buffer,
+        mask: mask?.buffer,
       };
       self.postMessage(response, {
-        transfer: [response.original, response.pixels, response.mask],
+        transfer: [
+          response.original,
+          ...(response.pixels ? [response.pixels] : []),
+          ...(response.mask ? [response.mask] : []),
+        ],
       });
       self.close();
     } finally {

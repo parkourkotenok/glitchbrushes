@@ -1,5 +1,6 @@
 import type { RefObject } from 'react';
 import type { ChangeEvent } from 'react';
+import type { InterfaceMode } from './InterfaceModeSwitch';
 import {
   Brush,
   Clipboard,
@@ -50,6 +51,7 @@ import type {
 } from '../types';
 
 interface EffectPanelProps {
+  interfaceMode: InterfaceMode;
   algorithm: AlgorithmId;
   algorithms: Record<AlgorithmId, GlitchAlgorithm>;
   algorithmList: GlitchAlgorithm[];
@@ -92,6 +94,7 @@ interface EffectPanelProps {
 }
 
 export function EffectPanel({
+  interfaceMode,
   algorithm,
   algorithms,
   algorithmList,
@@ -191,7 +194,7 @@ export function EffectPanel({
           suffix=" px"
           onChange={(value) => onUpdateBrush('size', value)}
         />
-        <div className="interface-advanced-only">
+        {interfaceMode === 'advanced' && <div className="interface-advanced-only">
           <SliderField
             label="Hardness"
             value={brush.hardness}
@@ -200,7 +203,7 @@ export function EffectPanel({
             step={0.01}
             onChange={(value) => onUpdateBrush('hardness', value)}
           />
-        </div>
+        </div>}
         <SliderField
           label="Opacity"
           value={brush.opacity}
@@ -217,7 +220,7 @@ export function EffectPanel({
           step={0.01}
           onChange={(value) => onUpdateBrush('strength', value)}
         />
-        <div className="interface-advanced-only">
+        {interfaceMode === 'advanced' && <div className="interface-advanced-only">
           <SliderField
             label="Structural corruption"
             value={settings.structuralIntensity}
@@ -308,10 +311,10 @@ export function EffectPanel({
               />
             </>
           )}
-        </div>
+        </div>}
       </PanelSection>
 
-      <PanelSection
+      {interfaceMode === 'advanced' && <PanelSection
         title="Algorithm parameters"
         icon={<SlidersHorizontal size={15} />}
         className="interface-advanced-only"
@@ -331,9 +334,9 @@ export function EffectPanel({
           onMetaRecipeLockChange={onMetaRecipeLockChange}
           onNewMetaRecipe={onNewMetaRecipe}
         />
-      </PanelSection>
+      </PanelSection>}
 
-      <PanelSection
+      {interfaceMode === 'advanced' && <PanelSection
         title="Seed & repeatability"
         icon={<RefreshCcw size={15} />}
         className="interface-advanced-only"
@@ -360,9 +363,9 @@ export function EffectPanel({
             <Clipboard size={15} />
           </button>
         </div>
-      </PanelSection>
+      </PanelSection>}
 
-      <PanelSection title="Presets" icon={<Save size={15} />} className="interface-advanced-only">
+      {interfaceMode === 'advanced' && <PanelSection title="Presets" icon={<Save size={15} />} className="interface-advanced-only">
         <div className="preset-grid">
           {[...builtInPresets, ...customPresets]
             .sort(
@@ -406,7 +409,7 @@ export function EffectPanel({
             }}
           />
         </div>
-      </PanelSection>
+      </PanelSection>}
 
       {false && (
         <PanelSection

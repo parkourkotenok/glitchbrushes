@@ -349,6 +349,9 @@ export interface HistoryAction {
 export interface EditorDocument {
   width: number;
   height: number;
+  /** Immutable white canvas used as the bottom of the layer composition. */
+  background: Uint8ClampedArray;
+  /** Composite of image layers before generated glitch/image-brush layers. */
   original: Uint8ClampedArray;
   pixels: Uint8ClampedArray;
   fileName: string;
@@ -375,6 +378,16 @@ export interface LayerInfo {
 }
 
 export type LayerBlendMode = 'source-over' | 'multiply' | 'screen' | 'overlay' | 'difference';
+export type LayerKind = 'image' | 'glitch' | 'image-brush';
+
+export interface RasterLayerSnapshot {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  opaque: boolean;
+  pixels: Uint8ClampedArray;
+}
 
 export interface SparseLayerTileSnapshot {
   tileX: number;
@@ -386,6 +399,8 @@ export interface SparseLayerTileSnapshot {
 
 export interface SparseLayerSnapshot extends Omit<LayerInfo, 'blendMode'> {
   blendMode: LayerBlendMode;
+  kind?: LayerKind;
+  raster?: RasterLayerSnapshot | null;
   tiles: SparseLayerTileSnapshot[];
 }
 

@@ -92,10 +92,10 @@ export function TopBar({
           accept="image/png,image/jpeg,image/webp"
           onChange={onFileChange}
         />
-        <button onClick={() => fileInputRef.current?.click()} aria-label="Open image">
-          <FileUp size={15} /> Open
+        <button onClick={() => fileInputRef.current?.click()} aria-label="Add image layer">
+          <FileUp size={15} /> Add image
         </button>
-        <button onClick={onLoadDemo} aria-label="Load demo image">
+        <button onClick={() => onLoadDemo()} aria-label="Load demo image">
           <ImageIcon size={15} /> Demo
         </button>
         <span className="toolbar-separator" />

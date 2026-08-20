@@ -849,6 +849,67 @@ describe('Image Brush presets, project and history contracts', () => {
     expect(applied.rack.every((item) => item.enabled)).toBe(true);
   });
 
+  it('keeps a clean Glitch Amount control without neutralizing non-clean Style presets', () => {
+    const current = {
+      ...defaultImageBrushSettings,
+      size: 173,
+      spacing: 41,
+      spacingUnit: 'pixels' as const,
+      opacity: 0.64,
+      angle: 27,
+      rotationMode: 'fixed' as const,
+      followDirection: false,
+      randomRotation: 0,
+      rotationJitter: 0,
+      flipXChance: 0.13,
+      flipYChance: 0.21,
+      glitchAmount: 'clean' as const,
+    };
+    const applyStyle = (id: string) => {
+      const preset = builtInImageBrushPresets.find((candidate) => candidate.id === id)!;
+      return applyImageBrushStyleKeepingEssentials(
+        current,
+        preset.settings,
+        preset.rack,
+        preset.id,
+      );
+    };
+    const clean = applyStyle('clean-repeat');
+    const fixed = applyStyle('glitched-repeat');
+    const progressive = applyStyle('progressive-decay');
+
+    for (const applied of [clean, fixed, progressive]) {
+      expect(applied.settings).toMatchObject({
+        size: current.size,
+        spacing: current.spacing,
+        spacingUnit: current.spacingUnit,
+        opacity: current.opacity,
+        angle: current.angle,
+        rotationMode: current.rotationMode,
+        followDirection: current.followDirection,
+        randomRotation: current.randomRotation,
+        rotationJitter: current.rotationJitter,
+        flipXChance: current.flipXChance,
+        flipYChance: current.flipYChance,
+        glitchAmount: 'clean',
+      });
+    }
+    expect(clean.settings.mutationMode).toBe('clean');
+    expect(clean.rack).toEqual([]);
+    expect(fixed.settings.mutationMode).toBe('fixed');
+    expect(progressive.settings.mutationMode).toBe('progressive');
+    expect(fixed.rack).toEqual(
+      builtInImageBrushPresets.find((preset) => preset.id === 'glitched-repeat')!.rack,
+    );
+    expect(progressive.rack).toEqual(
+      builtInImageBrushPresets.find((preset) => preset.id === 'progressive-decay')!.rack,
+    );
+    expect(fixed.rack.some((item) => item.enabled)).toBe(true);
+    expect(progressive.rack.some((item) => item.enabled)).toBe(true);
+    expect(fixed).not.toEqual(clean);
+    expect(progressive).not.toEqual(clean);
+  });
+
   it('seeded randomizers never replace or delete the image', () => {
     const first = randomizeImageBrush(defaultImageBrushSettings, [], 'same', 'everything');
     const second = randomizeImageBrush(defaultImageBrushSettings, [], 'same', 'everything');

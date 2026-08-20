@@ -37,6 +37,10 @@ export interface StrokeState {
   movement: Point;
   path: Array<Point & { pressure: number }>;
   layerBefore: LayerStackSnapshot | null;
+  sourceLayerId: string;
+  sampleAllLayers: boolean;
+  /** Separate processing buffer is allocated only for explicit single-layer sampling. */
+  editPixels: Uint8ClampedArray | null;
   pendingRetouchSamples: Array<{ point: Point; pressure: number }>;
   retouchRaf: number | null;
   retouchEnded: boolean;

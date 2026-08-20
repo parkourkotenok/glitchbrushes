@@ -1,5 +1,11 @@
 # Agent Worklog
 
+## 2026-08-21 — Documentation synchronization
+
+- `README.md` теперь отделяет реализованный быстрый путь слоёв от известных ограничений: overlay tiles, отсутствие replacement alpha/erase semantics и более дорогая композиция прозрачных, partial-opacity и non-Normal слоёв.
+- `DECOMPOSITION_REPORT.md` сохранён как исторический отчёт, но дополнен актуальной архитектурой 2026-08-21. Устаревшее утверждение об автоматических Glitch/Image Brush output-слоях помечено как история, а не текущее поведение.
+- Нереализованная P2 replacement-tile миграция явно зафиксирована и не представлена как завершённая оптимизация.
+
 ## 2026-08-21 — Startup, Slice commit and Image Brush Style performance repair
 
 - Benjamin-Plus подключён проектно через `AGENTS.md` по официальной рекомендации JetBrains; новые агенты получают правила one-pass recon, keyhole reads и task-specific green checks автоматически.

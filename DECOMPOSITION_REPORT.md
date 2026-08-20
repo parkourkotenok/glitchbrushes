@@ -4,12 +4,26 @@
 
 **Дата:** 2026-08-01 · **Статус на момент отчёта:** этапы A и B выполнены + валидация · **Тогдашняя валидация:** `typecheck` ✓ · `tests` 161/161 ✓ · `build` ✓ · `bun test`/`bunx vitest run` ✓ · Firefox headless BiDi smoke 13/13 ✓
 
-## Follow-up — 2026-08-19
+## Current follow-up — 2026-08-21
+
+- Каждая добавленная фотография является обычным выбираемым `Image`-слоем над закреплённым белым Background. Effect, MOSH, Retouch и Image Brush изменяют выбранный слой напрямую; автоматические Glitch/Image Brush output-слои больше не создаются. `All Layers` меняет только источник семплирования.
+- History использует copy-on-write для raster/tile buffers. Ограниченные мазки могут коммититься и перекомпоновываться по dirty region; для единственного полноразмерного непрозрачного Normal/100% слоя используется быстрый источник без дополнительной полной композиции.
+- Стартовый синхронный генератор старого signal-study demo удалён. Дорожное demo загружается асинхронно, а Image Brush library/astronaut и тяжёлые скрытые UI-деревья инициализируются только при открытии соответствующего режима.
+- Image Brush Style сохраняет Essential Controls, но применяет собственный mutation/FX recipe; это проверено для Glitched Repeat и Progressive Decay.
+- Текущая зелёная линия: TypeScript, 200/200 Vitest, production build и browser acceptance для входа, Slice Displacement commit/History и Image Brush Style.
+
+### Не реализовано после оптимизации 2026-08-21
+
+- Sparse tiles всё ещё являются overlay над raster, а не канонической replacement-копией участка слоя. Поэтому корректная запись alpha=0 поверх исходного raster, а также полная семантика erase для прозрачных/частичных изображений требуют отдельной P2-миграции.
+- Для opacity ниже 100%, blend mode не Normal, частичных raster и сложного многослойного композита остаётся общий более дорогой путь. Региональная композиция применяется только там, где текущие guards гарантируют эквивалентный результат.
+- История и project v3 ещё не мигрированы на replacement tiles; смешивать эту миграцию с P0/P1 исправлением зависаний сознательно не стали.
+
+## Historical follow-up — 2026-08-19
 
 - Презентационные компоненты и feature hooks сохранены; новые крупные UI-блоки также вынесены в `LandingScreen`, `LayersDock`, `InterfaceModeSwitch` и `ImageBrushEssentialControls`.
 - File Corruption и raw mutation модули, описанные ниже, впоследствии удалены из production по продуктовому решению пользователя.
 - Динамический Effect Preview Worker заменён заранее сгенерированными статичными preview assets; Image Brush Preview остаётся отдельным Worker pipeline.
-- Layer stack больше не является упрощением: каждая фотография — отдельный raster-слой над белым Background, а Glitch/Image Brush сохраняются в типизированные sparse-слои через общую history/composition модель.
+- Layer stack больше не является упрощением: каждая фотография — отдельный raster-слой над белым Background. На том этапе Glitch/Image Brush сохранялись в типизированные sparse output-слои; 2026-08-20 эта модель была заменена прямым редактированием выбранного `Image`-слоя, как указано выше.
 - Следующие проверки относятся уже к текущему интегрированному набору и записываются в `AGENT_WORKLOG.md`; приведённые ниже 161 тест не следует считать актуальным счётчиком.
 
 ## Этап A завершён — JSX вынесен в презентационные компоненты

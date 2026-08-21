@@ -6,6 +6,7 @@ import type {
   ImageBrushFxItem,
   ImageBrushSettings,
 } from './types';
+import { resolveImageBrushStyleId } from './presets';
 
 const databaseName = 'glitch-brushes';
 const storeName = 'image-brush-state';
@@ -139,9 +140,9 @@ export async function loadImageBrushState(): Promise<StoredImageBrushState | nul
       seed: typeof stored.seed === 'string' ? stored.seed : 'stamp-4F21',
       activeStyleId:
         typeof stored.activeStyleId === 'string'
-          ? stored.activeStyleId
+          ? resolveImageBrushStyleId(stored.activeStyleId)
           : typeof stored.activePresetId === 'string'
-            ? stored.activePresetId
+            ? resolveImageBrushStyleId(stored.activePresetId)
             : 'clean-repeat',
       activePresetId:
         typeof stored.activePresetId === 'string' ? stored.activePresetId : 'clean-repeat',

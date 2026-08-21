@@ -10,6 +10,7 @@ import effectPickerSource from './components/EffectPicker.tsx?raw';
 import imageBrushEssentialSource from './components/ImageBrushEssentialControls.tsx?raw';
 import interfaceModeSource from './components/InterfaceModeSwitch.tsx?raw';
 import imageBrushPanelSource from './components/ImageBrushPanel.tsx?raw';
+import imageBrushSimpleSource from './imageBrush/simple.ts?raw';
 import landingSource from './components/LandingScreen.tsx?raw';
 import layersDockSource from './components/LayersDock.tsx?raw';
 import imageBrushDecodeSource from './imageBrush/decode.ts?raw';
@@ -93,7 +94,7 @@ describe('production editor cleanup', () => {
     expect(imageBrushPanelSource).toContain('aria-label="Image source mode"');
     expect(imageBrushPanelSource).toContain('Selected');
     expect(imageBrushPanelSource).toContain('All');
-    expect(imageBrushPanelSource).toContain('assetMode === \'all\'');
+    expect(imageBrushPanelSource).toContain("assetMode === 'all'");
     expect(imageBrushPanelSource).toContain('>Order<');
     expect(imageBrushPanelSource).toContain('value="cycle"');
     expect(imageBrushPanelSource).toContain('value="random"');
@@ -119,6 +120,21 @@ describe('production editor cleanup', () => {
     expect(imageBrushPanelSource).not.toContain('Demo images');
     expect(imageBrushStorageSource).toContain('indexedDB.open(databaseName, 1)');
     expect(appSource).toContain('saveImageBrushLibrary(customAssets)');
+  });
+
+  it('uses a static visual Style browser and keeps raw recipe editing Advanced-only', () => {
+    expect(imageBrushPanelSource).toContain('aria-label="Image Brush style browser"');
+    expect(imageBrushPanelSource).toContain('Static previews · no preview jobs');
+    expect(imageBrushPanelSource).toContain('imageBrushStaticStyleThumbnail');
+    expect(imageBrushPanelSource).not.toContain('new Worker');
+    expect(imageBrushSimpleSource).toContain('preGeneratedStyleThumbnails');
+    expect(imageBrushSimpleSource).toContain("catalog: 'legacy'");
+    expect(imageBrushPanelSource).toContain('image-brush-workflow-tabs interface-advanced-only');
+    expect(imageBrushPanelSource).toContain('image-brush-master-advanced interface-advanced-only');
+    expect(imageBrushPanelSource).toContain('Balanced variation');
+    expect(imageBrushPresetSource).toContain('Pixel Embroidery');
+    expect(imageBrushPresetSource).toContain('Xerox Decay');
+    expect(imageBrushPresetSource).toContain('Zine Stitch');
   });
 
   it('removes duplicate Image Brush production blocks and exposes persistent accessible tabs', () => {
@@ -244,14 +260,19 @@ describe('production editor cleanup', () => {
     expect(imageBrushPanelSource).toContain(
       'definition.experimental && <em className="new-effect-badge">NEW</em>',
     );
+    const experimentalImageFxIds = new Set<string>(experimentalImageFx.map((item) => item.id));
     for (const item of [...experimentalAlgorithms, ...experimentalImageFx]) {
       expect(defaultAlgorithmSettings.structuralMixPool).not.toContain(item.id);
       expect(defaultImageBrushSettings.effectPool).not.toContain(item.id);
-      expect(
-        builtInImageBrushPresets.some((preset) =>
-          preset.rack.some((fx) => fx.effectId === item.id),
-        ),
-      ).toBe(false);
+      if (experimentalImageFxIds.has(item.id)) {
+        expect(builtInImageBrushPresets.some((preset) => preset.id === item.id)).toBe(true);
+      } else {
+        expect(
+          builtInImageBrushPresets.some((preset) =>
+            preset.rack.some((fx) => fx.effectId === item.id),
+          ),
+        ).toBe(false);
+      }
     }
     expect(imageBrushPresetSource).toContain('!definition.experimental');
   });

@@ -22,10 +22,12 @@ function preset(
   name: string,
   settings: Partial<ImageBrushSettings>,
   rack: ImageBrushFxItem[],
+  presentation: Pick<ImageBrushPreset, 'category' | 'catalog' | 'badge'> = {},
 ): ImageBrushPreset {
   return {
     id,
     name,
+    ...presentation,
     settings: {
       ...defaultImageBrushSettings,
       ...settings,
@@ -34,6 +36,32 @@ function preset(
         : { ...defaultImageBrushSettings.customAnchor },
     },
     rack,
+  };
+}
+
+function embroideryFx(amount: number, suffix = ''): ImageBrushFxItem {
+  return {
+    ...fx('pixel-embroidery', amount, 1, suffix),
+    embroideryGridSize: 7,
+    embroideryStitchType: 'cross-stitch',
+    embroideryPaletteLevels: 8,
+    embroideryThreadAngle: 0,
+    embroideryMissingStitches: 0.05,
+    embroideryThreadJitter: 0.08,
+    embroideryBackgroundTransparency: 1,
+  };
+}
+
+function xeroxFx(amount: number, suffix = ''): ImageBrushFxItem {
+  return {
+    ...fx('xerox-decay', amount, 1, suffix),
+    xeroxThreshold: 0.54,
+    xeroxTonerLoss: 0.24,
+    xeroxSpeckle: 0.18,
+    xeroxEdgeErosion: 0.16,
+    xeroxBanding: 0.1,
+    xeroxBlackCrush: 0.32,
+    xeroxColorMode: 'mono',
   };
 }
 
@@ -233,7 +261,7 @@ export const builtInImageBrushPresets: ImageBrushPreset[] = [
   ),
   preset(
     'compression-breakdown',
-    'Compression Breakdown',
+    'Codec Breakdown',
     {
       glitchAmount: 'broken',
       mode: 'trail',
@@ -312,7 +340,92 @@ export const builtInImageBrushPresets: ImageBrushPreset[] = [
     },
     [fx('block-corruption', 0.66), fx('slice', 0.58), fx('codec-block-damage', 0.62)],
   ),
+  preset(
+    'pixel-embroidery',
+    'Pixel Embroidery',
+    {
+      glitchAmount: 'medium',
+      mode: 'trail',
+      spacing: 70,
+      mutationMode: 'fixed',
+      fxStage: 'before',
+      alphaMode: 'preserve',
+      effectVariation: 0.04,
+      renderingQuality: 'high',
+    },
+    [embroideryFx(0.84)],
+    { category: 'PRINT / TEXTURE', catalog: 'core', badge: 'NEW' },
+  ),
+  preset(
+    'xerox-decay',
+    'Xerox Decay',
+    {
+      glitchAmount: 'strong',
+      mode: 'trail',
+      spacing: 62,
+      mutationMode: 'progressive',
+      fxStage: 'each',
+      progressiveStart: 0.04,
+      progressiveEnd: 0.88,
+      evolutionCurve: 'ease-in',
+      effectVariation: 0.12,
+      alphaMode: 'preserve',
+      renderingQuality: 'balanced',
+    },
+    [xeroxFx(0.82)],
+    { category: 'PRINT / TEXTURE', catalog: 'core', badge: 'NEW' },
+  ),
+  preset(
+    'zine-stitch',
+    'Zine Stitch',
+    {
+      glitchAmount: 'strong',
+      mode: 'trail',
+      spacing: 68,
+      mutationMode: 'fixed',
+      fxStage: 'before',
+      alphaMode: 'preserve',
+      effectVariation: 0.06,
+      renderingQuality: 'high',
+    },
+    [
+      { ...embroideryFx(0.78, '-zine'), embroideryGridSize: 6, embroideryMissingStitches: 0.03 },
+      { ...xeroxFx(0.46, '-zine'), xeroxTonerLoss: 0.16, xeroxSpeckle: 0.12 },
+    ],
+    { category: 'PRINT / TEXTURE', catalog: 'core', badge: 'NEW' },
+  ),
 ];
+
+/**
+ * Serialized recipe IDs remain stable. This alias only accepts the short catalog name that was
+ * used by early style-first experiments; saved `compression-breakdown` projects stay untouched.
+ */
+export const imageBrushStyleAliases: Readonly<Record<string, string>> = {
+  'codec-breakdown': 'compression-breakdown',
+};
+
+export function resolveImageBrushStyleId(styleId: string): string {
+  return imageBrushStyleAliases[styleId] ?? styleId;
+}
+
+export function prepareImageBrushPresetForApplication(preset: ImageBrushPreset): {
+  preset: ImageBrushPreset;
+  legacyAssetMode: 'all' | null;
+  legacyAssetOrder: 'cycle' | 'random' | null;
+} {
+  const legacyMode = preset.settings.mode;
+  return {
+    preset: {
+      ...preset,
+      settings: normalizeImageBrushSettings(preset.settings),
+      rack: preset.rack.map((item) => ({ ...item })),
+    },
+    legacyAssetMode:
+      legacyMode === 'sequence' || legacyMode === 'random-hose' ? 'all' : null,
+    legacyAssetOrder:
+      legacyMode === 'random-hose' ? 'random' : legacyMode === 'sequence' ? 'cycle' : null,
+  };
+}
 
 const STORAGE_KEY = 'hex-redactor:image-brush-presets:v1';
 
@@ -322,10 +435,17 @@ export function loadImageBrushPresets(): ImageBrushPreset[] {
     return Array.isArray(parsed)
       ? parsed
           .filter((item) => item?.custom && typeof item.name === 'string')
-          .map((item) => ({
-            ...item,
-            settings: normalizeImageBrushSettings(item.settings),
-          }))
+          .map((item) => {
+            const legacyMode = item.settings?.mode;
+            const settings = normalizeImageBrushSettings(item.settings);
+            return {
+              ...item,
+              settings:
+                legacyMode === 'sequence' || legacyMode === 'random-hose'
+                  ? { ...settings, mode: legacyMode }
+                  : settings,
+            };
+          })
       : [];
   } catch {
     return [];
@@ -366,7 +486,7 @@ export function randomizeImageBrush(
   if (layout) {
     output.mode = random.pick(
       wild
-        ? (['stamp', 'trail', 'scatter', 'sequence', 'random-hose'] as const)
+        ? (['stamp', 'trail', 'scatter'] as const)
         : (['stamp', 'trail', 'scatter'] as const),
     );
     output.size = random.int(wild ? 22 : 54, wild ? 260 : 150);

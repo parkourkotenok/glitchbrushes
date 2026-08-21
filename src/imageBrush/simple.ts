@@ -12,75 +12,204 @@ export const imageBrushSimplePresetIds = [
   'clean-repeat',
   'glitched-repeat',
   'progressive-decay',
-  'random-glitch-chain',
   'datamosh-trail',
-  'rgb-separation-trail',
   'pixel-sort-trail',
+  'mosh-flow-trail',
   'chroma-feedback',
   'compression-breakdown',
-  'packet-loss-stream',
   'broken-interface',
   'scatter-fragments',
+  'pixel-embroidery',
+  'xerox-decay',
+  'zine-stitch',
 ] as const;
 
-export const imageBrushPresetPresentation: Readonly<
-  Record<
-    string,
-    {
-      description: string;
-      cost: 'Low' | 'Medium' | 'High' | 'Very High';
-    }
-  >
-> = {
+export const imageBrushStyleCategories = [
+  'BASIC',
+  'MOTION',
+  'BREAKDOWN',
+  'COLOR',
+  'PRINT / TEXTURE',
+] as const;
+
+export type ImageBrushStyleCategory = (typeof imageBrushStyleCategories)[number];
+export type ImageBrushStyleCatalog = 'core' | 'more' | 'legacy';
+
+type ImageBrushStylePresentation = {
+  description: string;
+  cost: 'Low' | 'Medium' | 'High' | 'Very High';
+  category: ImageBrushStyleCategory | 'MORE';
+  catalog: ImageBrushStyleCatalog;
+  badge?: 'NEW';
+};
+
+export const imageBrushPresetPresentation: Readonly<Record<string, ImageBrushStylePresentation>> = {
   'clean-repeat': {
     description: 'Places clear, readable copies without running Stamp FX.',
     cost: 'Low',
+    category: 'BASIC',
+    catalog: 'core',
   },
   'glitched-repeat': {
     description: 'Repeats one identical sliced and RGB-separated result.',
     cost: 'Medium',
+    category: 'BASIC',
+    catalog: 'core',
   },
   'progressive-decay': {
     description: 'Moves through bounded key variants from light to severe damage.',
     cost: 'High',
+    category: 'BREAKDOWN',
+    catalog: 'core',
   },
   'random-glitch-chain': {
     description: 'Cycles a seeded pool of different structural effect recipes.',
     cost: 'Medium',
+    category: 'MORE',
+    catalog: 'more',
   },
   'datamosh-trail': {
     description: 'Accumulates directional datamosh and feedback from copy to copy.',
     cost: 'High',
+    category: 'MOTION',
+    catalog: 'core',
   },
   'rgb-separation-trail': {
     description: 'Generates varied coherent RGB and chroma separation stacks.',
     cost: 'Medium',
+    category: 'MORE',
+    catalog: 'more',
   },
   'pixel-sort-trail': {
     description: 'Processes the complete trail into connected sorted streaks.',
     cost: 'High',
+    category: 'BREAKDOWN',
+    catalog: 'core',
+  },
+  'whole-trail': {
+    description: 'Legacy connected feedback trail retained for existing projects.',
+    cost: 'High',
+    category: 'MORE',
+    catalog: 'legacy',
+  },
+  'mosh-flow-trail': {
+    description: 'Bends the connected trail through a geometry-moving flow field.',
+    cost: 'High',
+    category: 'MOTION',
+    catalog: 'core',
   },
   'chroma-feedback': {
     description: 'Accumulates colored feedback memories across the trail.',
     cost: 'High',
+    category: 'COLOR',
+    catalog: 'core',
+  },
+  'codec-damage-trail': {
+    description: 'Builds spatial codec blocks across one connected local trail.',
+    cost: 'High',
+    category: 'MORE',
+    catalog: 'more',
   },
   'compression-breakdown': {
     description: 'Gradually changes from clean copies into compression damage.',
     cost: 'High',
+    category: 'BREAKDOWN',
+    catalog: 'core',
   },
   'packet-loss-stream': {
     description: 'Builds randomized missing, repeated and scrambled packet stacks.',
     cost: 'High',
+    category: 'MORE',
+    catalog: 'more',
   },
   'scatter-fragments': {
     description: 'Throws rotated packet-damaged fragments around the path.',
     cost: 'Medium',
+    category: 'BREAKDOWN',
+    catalog: 'core',
   },
   'broken-interface': {
     description: 'Creates hard macroblock and packet-loss UI fragments.',
     cost: 'Medium',
+    category: 'BREAKDOWN',
+    catalog: 'core',
+  },
+  'pixel-embroidery': {
+    description: 'Preserves the source silhouette as a readable stitched pixel grid.',
+    cost: 'Medium',
+    category: 'PRINT / TEXTURE',
+    catalog: 'core',
+    badge: 'NEW',
+  },
+  'xerox-decay': {
+    description: 'Progressively loses toner, halftones and copy bands along the stroke.',
+    cost: 'Medium',
+    category: 'PRINT / TEXTURE',
+    catalog: 'core',
+    badge: 'NEW',
+  },
+  'zine-stitch': {
+    description: 'Layers restrained copier decay over a preserved embroidery grid.',
+    cost: 'High',
+    category: 'PRINT / TEXTURE',
+    catalog: 'core',
+    badge: 'NEW',
   },
 };
+
+const fallbackStylePresentation: ImageBrushStylePresentation = {
+  description: 'Saved Image Brush recipe.',
+  cost: 'Medium',
+  category: 'MORE',
+  catalog: 'more',
+};
+
+export function imageBrushStylePresentationFor(
+  style: Pick<ImageBrushPreset, 'id' | 'category' | 'catalog' | 'badge' | 'custom'>,
+): ImageBrushStylePresentation {
+  const known = imageBrushPresetPresentation[style.id];
+  if (known)
+    return {
+      ...known,
+      category: style.category ?? known.category,
+      catalog: style.catalog ?? known.catalog,
+      badge: style.badge ?? known.badge,
+    };
+  if (style.custom)
+    return { ...fallbackStylePresentation, description: 'Saved custom Image Brush recipe.' };
+  return fallbackStylePresentation;
+}
+
+/** Pre-generated palette thumbnails. They never initialize a preview Worker or inspect user pixels. */
+const preGeneratedStyleThumbnails: Readonly<Record<string, string>> = Object.fromEntries(
+  [
+    ['clean-repeat', '#71d7e8', '#e9e6d7', 'repeat'],
+    ['glitched-repeat', '#ed9d75', '#6bb8e6', 'slices'],
+    ['progressive-decay', '#e8c766', '#9c5e69', 'decay'],
+    ['datamosh-trail', '#d2626b', '#5cd0b1', 'motion'],
+    ['pixel-sort-trail', '#e6c25e', '#85abce', 'sort'],
+    ['mosh-flow-trail', '#8f7fe6', '#72d4c9', 'flow'],
+    ['chroma-feedback', '#f06c9d', '#59c9de', 'chroma'],
+    ['compression-breakdown', '#dca36a', '#8290bd', 'codec'],
+    ['broken-interface', '#e48686', '#e0c56e', 'blocks'],
+    ['scatter-fragments', '#c086de', '#77c3dc', 'scatter'],
+    ['random-glitch-chain', '#dc8496', '#6fbed1', 'slices'],
+    ['rgb-separation-trail', '#ef6c84', '#5ec8d4', 'chroma'],
+    ['codec-damage-trail', '#b78a66', '#8898c2', 'codec'],
+    ['packet-loss-stream', '#ceaa68', '#9d7574', 'blocks'],
+    ['whole-trail', '#8a8999', '#c27284', 'flow'],
+    ['pixel-embroidery', '#e7ba79', '#5cc7bd', 'stitch'],
+    ['xerox-decay', '#d6d0bd', '#504846', 'xerox'],
+    ['zine-stitch', '#d68f87', '#e1c36d', 'zine'],
+  ].map(([id, primary, accent, motif]) => [
+    id,
+    `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 64"><rect width="160" height="64" fill="#141717"/><path d="M0 49C29 29 48 56 77 36s47-8 83-27" fill="none" stroke="${primary}" stroke-width="12" stroke-linecap="square" opacity=".9"/><path d="M0 49C29 29 48 56 77 36s47-8 83-27" fill="none" stroke="${accent}" stroke-width="3" stroke-dasharray="${motif === 'stitch' || motif === 'zine' ? '3 4' : motif === 'xerox' ? '9 5' : '18 7'}"/><g fill="${accent}" opacity=".75">${motif === 'blocks' || motif === 'codec' ? '<rect x="18" y="12" width="18" height="13"/><rect x="86" y="32" width="22" height="15"/><rect x="126" y="11" width="14" height="18"/>' : motif === 'scatter' ? '<rect x="21" y="11" width="12" height="12" transform="rotate(18 27 17)"/><rect x="99" y="8" width="15" height="15" transform="rotate(-22 106 15)"/><rect x="132" y="42" width="11" height="11" transform="rotate(31 137 47)"/>' : motif === 'slices' ? '<rect x="11" y="15" width="36" height="5"/><rect x="55" y="41" width="39" height="5"/><rect x="105" y="19" width="32" height="5"/>' : '<circle cx="29" cy="19" r="4"/><circle cx="68" cy="45" r="4"/><circle cx="111" cy="21" r="4"/>'}</g></svg>`)}`,
+  ]),
+);
+
+export function imageBrushStaticStyleThumbnail(styleId: string): string {
+  return preGeneratedStyleThumbnails[styleId] ?? preGeneratedStyleThumbnails['clean-repeat']!;
+}
 
 export const imageBrushGlitchLevels: ReadonlyArray<{
   id: Exclude<ImageBrushGlitchAmount, 'custom'>;

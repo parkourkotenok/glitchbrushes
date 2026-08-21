@@ -1,0 +1,570 @@
+{
+  "harnessVersion": 1,
+  "sourceSize": 64,
+  "document": {
+    "width": 512,
+    "height": 184
+  },
+  "fixedInput": {
+    "seed": "image-brush-style-audit-v1",
+    "strokeId": "style-audit-stroke",
+    "size": 64,
+    "spacing": 32,
+    "spacingUnit": "pixels",
+    "stamps": 9
+  },
+  "sources": [
+    {
+      "id": "transparent-illustration",
+      "label": "transparent illustration",
+      "file": "public/assets/image-brush-astronaut.png"
+    },
+    {
+      "id": "photographic-image",
+      "label": "photographic image",
+      "file": "public/assets/parkour-kotenok-road.jpg"
+    }
+  ],
+  "presets": [
+    {
+      "id": "clean-repeat",
+      "name": "Clean Repeat",
+      "sources": [
+        {
+          "id": "transparent-illustration",
+          "label": "transparent illustration",
+          "pixelHash": "12d17886",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 13.25
+        },
+        {
+          "id": "photographic-image",
+          "label": "photographic image",
+          "pixelHash": "388ed11f",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 7.68
+        }
+      ]
+    },
+    {
+      "id": "glitched-repeat",
+      "name": "Glitched Repeat",
+      "sources": [
+        {
+          "id": "transparent-illustration",
+          "label": "transparent illustration",
+          "pixelHash": "438c2141",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 14.1
+        },
+        {
+          "id": "photographic-image",
+          "label": "photographic image",
+          "pixelHash": "fb345d56",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 5.06
+        }
+      ]
+    },
+    {
+      "id": "progressive-decay",
+      "name": "Progressive Decay",
+      "sources": [
+        {
+          "id": "transparent-illustration",
+          "label": "transparent illustration",
+          "pixelHash": "d1bec205",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 12.22
+        },
+        {
+          "id": "photographic-image",
+          "label": "photographic image",
+          "pixelHash": "0b203fb7",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 11.24
+        }
+      ]
+    },
+    {
+      "id": "random-glitch-chain",
+      "name": "Random Glitch Chain",
+      "sources": [
+        {
+          "id": "transparent-illustration",
+          "label": "transparent illustration",
+          "pixelHash": "90081c45",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 35.16
+        },
+        {
+          "id": "photographic-image",
+          "label": "photographic image",
+          "pixelHash": "14ac21df",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 12.8
+        }
+      ]
+    },
+    {
+      "id": "datamosh-trail",
+      "name": "Datamosh Trail",
+      "sources": [
+        {
+          "id": "transparent-illustration",
+          "label": "transparent illustration",
+          "pixelHash": "84d73695",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 22.86
+        },
+        {
+          "id": "photographic-image",
+          "label": "photographic image",
+          "pixelHash": "3eb7f373",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 9.23
+        }
+      ]
+    },
+    {
+      "id": "rgb-separation-trail",
+      "name": "RGB Separation Trail",
+      "sources": [
+        {
+          "id": "transparent-illustration",
+          "label": "transparent illustration",
+          "pixelHash": "b2fa3f20",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 12.21
+        },
+        {
+          "id": "photographic-image",
+          "label": "photographic image",
+          "pixelHash": "cd1f6bac",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 6.29
+        }
+      ]
+    },
+    {
+      "id": "pixel-sort-trail",
+      "name": "Pixel Sort Trail",
+      "sources": [
+        {
+          "id": "transparent-illustration",
+          "label": "transparent illustration",
+          "pixelHash": "6ed389dd",
+          "bounds": {
+            "x": 17,
+            "y": 19,
+            "width": 484,
+            "height": 159
+          },
+          "firstRenderMs": 110.19
+        },
+        {
+          "id": "photographic-image",
+          "label": "photographic image",
+          "pixelHash": "6ec5e960",
+          "bounds": {
+            "x": 17,
+            "y": 19,
+            "width": 484,
+            "height": 159
+          },
+          "firstRenderMs": 93.4
+        }
+      ]
+    },
+    {
+      "id": "whole-trail",
+      "name": "Whole Trail",
+      "sources": [
+        {
+          "id": "transparent-illustration",
+          "label": "transparent illustration",
+          "pixelHash": "2118abbc",
+          "bounds": {
+            "x": 16,
+            "y": 17,
+            "width": 486,
+            "height": 162
+          },
+          "firstRenderMs": 195.64
+        },
+        {
+          "id": "photographic-image",
+          "label": "photographic image",
+          "pixelHash": "2b549b1a",
+          "bounds": {
+            "x": 16,
+            "y": 17,
+            "width": 486,
+            "height": 162
+          },
+          "firstRenderMs": 185.73
+        }
+      ]
+    },
+    {
+      "id": "mosh-flow-trail",
+      "name": "MOSH Flow Trail",
+      "sources": [
+        {
+          "id": "transparent-illustration",
+          "label": "transparent illustration",
+          "pixelHash": "cd6cb6f8",
+          "bounds": {
+            "x": 14,
+            "y": 15,
+            "width": 491,
+            "height": 167
+          },
+          "firstRenderMs": 319.05
+        },
+        {
+          "id": "photographic-image",
+          "label": "photographic image",
+          "pixelHash": "ce909076",
+          "bounds": {
+            "x": 14,
+            "y": 15,
+            "width": 491,
+            "height": 167
+          },
+          "firstRenderMs": 304.22
+        }
+      ]
+    },
+    {
+      "id": "codec-damage-trail",
+      "name": "Codec Damage Trail",
+      "sources": [
+        {
+          "id": "transparent-illustration",
+          "label": "transparent illustration",
+          "pixelHash": "91ff1d4c",
+          "bounds": {
+            "x": 17,
+            "y": 19,
+            "width": 484,
+            "height": 159
+          },
+          "firstRenderMs": 160.04
+        },
+        {
+          "id": "photographic-image",
+          "label": "photographic image",
+          "pixelHash": "4110acbc",
+          "bounds": {
+            "x": 17,
+            "y": 19,
+            "width": 484,
+            "height": 159
+          },
+          "firstRenderMs": 159.72
+        }
+      ]
+    },
+    {
+      "id": "chroma-feedback",
+      "name": "Chroma Feedback",
+      "sources": [
+        {
+          "id": "transparent-illustration",
+          "label": "transparent illustration",
+          "pixelHash": "0efed0b8",
+          "bounds": {
+            "x": 13,
+            "y": 13,
+            "width": 493,
+            "height": 170
+          },
+          "firstRenderMs": 560.51
+        },
+        {
+          "id": "photographic-image",
+          "label": "photographic image",
+          "pixelHash": "e4a0e267",
+          "bounds": {
+            "x": 13,
+            "y": 13,
+            "width": 493,
+            "height": 170
+          },
+          "firstRenderMs": 547.5
+        }
+      ]
+    },
+    {
+      "id": "compression-breakdown",
+      "name": "Codec Breakdown",
+      "sources": [
+        {
+          "id": "transparent-illustration",
+          "label": "transparent illustration",
+          "pixelHash": "91c75ef8",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 15.59
+        },
+        {
+          "id": "photographic-image",
+          "label": "photographic image",
+          "pixelHash": "4ec0daba",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 13.58
+        }
+      ]
+    },
+    {
+      "id": "packet-loss-stream",
+      "name": "Packet Loss Stream",
+      "sources": [
+        {
+          "id": "transparent-illustration",
+          "label": "transparent illustration",
+          "pixelHash": "292c1a1c",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 36.62
+        },
+        {
+          "id": "photographic-image",
+          "label": "photographic image",
+          "pixelHash": "4085e39c",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 29.8
+        }
+      ]
+    },
+    {
+      "id": "broken-interface",
+      "name": "Broken Interface",
+      "sources": [
+        {
+          "id": "transparent-illustration",
+          "label": "transparent illustration",
+          "pixelHash": "14322a56",
+          "bounds": {
+            "x": 19,
+            "y": 35,
+            "width": 466,
+            "height": 130
+          },
+          "firstRenderMs": 14.33
+        },
+        {
+          "id": "photographic-image",
+          "label": "photographic image",
+          "pixelHash": "3200a967",
+          "bounds": {
+            "x": 19,
+            "y": 35,
+            "width": 466,
+            "height": 130
+          },
+          "firstRenderMs": 12.31
+        }
+      ]
+    },
+    {
+      "id": "scatter-fragments",
+      "name": "Scatter Fragments",
+      "sources": [
+        {
+          "id": "transparent-illustration",
+          "label": "transparent illustration",
+          "pixelHash": "83f2d686",
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 414,
+            "height": 180
+          },
+          "firstRenderMs": 8.83
+        },
+        {
+          "id": "photographic-image",
+          "label": "photographic image",
+          "pixelHash": "44798a6c",
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 414,
+            "height": 180
+          },
+          "firstRenderMs": 9.38
+        }
+      ]
+    },
+    {
+      "id": "pixel-embroidery",
+      "name": "Pixel Embroidery",
+      "sources": [
+        {
+          "id": "transparent-illustration",
+          "label": "transparent illustration",
+          "pixelHash": "7d0d2f09",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 2.71
+        },
+        {
+          "id": "photographic-image",
+          "label": "photographic image",
+          "pixelHash": "2fe92aa2",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 3.76
+        }
+      ]
+    },
+    {
+      "id": "xerox-decay",
+      "name": "Xerox Decay",
+      "sources": [
+        {
+          "id": "transparent-illustration",
+          "label": "transparent illustration",
+          "pixelHash": "7c936514",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 6.43
+        },
+        {
+          "id": "photographic-image",
+          "label": "photographic image",
+          "pixelHash": "2861bd8d",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 4.43
+        }
+      ]
+    },
+    {
+      "id": "zine-stitch",
+      "name": "Zine Stitch",
+      "sources": [
+        {
+          "id": "transparent-illustration",
+          "label": "transparent illustration",
+          "pixelHash": "f998c293",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 2.45
+        },
+        {
+          "id": "photographic-image",
+          "label": "photographic image",
+          "pixelHash": "dfebf149",
+          "bounds": {
+            "x": 22,
+            "y": 25,
+            "width": 473,
+            "height": 147
+          },
+          "firstRenderMs": 4.35
+        }
+      ]
+    }
+  ]
+}

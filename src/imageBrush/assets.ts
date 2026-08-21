@@ -1,6 +1,7 @@
 import type { Rectangle } from '../types';
 import { clamp } from '../utils/geometry';
 import { normalizeImageBrushSettings } from './performance';
+import { resolveImageBrushStyleId } from './presets';
 import type {
   ImageBrushAsset,
   ImageBrushAssetMode,
@@ -32,7 +33,9 @@ export function normalizeImageBrushAssetSelection(
   const fallback = library.filter((asset) => !asset.demo);
   const defaultIds = (fallback.length ? fallback : library).map((asset) => asset.id);
   const supplied = Array.isArray(selection?.enabledAssetIds)
-    ? selection.enabledAssetIds.filter((id, index, list) => ids.has(id) && list.indexOf(id) === index)
+    ? selection.enabledAssetIds.filter(
+        (id, index, list) => ids.has(id) && list.indexOf(id) === index,
+      )
     : [];
   const enabledAssetIds = legacyAllAssets
     ? library.map((asset) => asset.id)
@@ -390,7 +393,9 @@ export function serializeImageBrushProject(
   data: Omit<ImageBrushProjectData, 'version' | 'library'> & { library: ImageBrushAsset[] },
 ): ImageBrushProjectData {
   const activeStyleId =
-    typeof data.activeStyleId === 'string' ? data.activeStyleId : data.activePresetId;
+    typeof data.activeStyleId === 'string'
+      ? resolveImageBrushStyleId(data.activeStyleId)
+      : resolveImageBrushStyleId(data.activePresetId);
   return {
     ...data,
     version: 1,
@@ -416,7 +421,8 @@ export function restoreImageBrushProject(project: ImageBrushProjectData): {
   library: ImageBrushAsset[];
 } {
   if (project.version !== 1) throw new Error('Unsupported Image Brush project version.');
-  const legacyMode = project.settings.mode === 'sequence' || project.settings.mode === 'random-hose';
+  const legacyMode =
+    project.settings.mode === 'sequence' || project.settings.mode === 'random-hose';
   const normalized = normalizeImageBrushSettings(project.settings);
   const settings: ImageBrushSettings = {
     ...normalized,
@@ -435,11 +441,11 @@ export function restoreImageBrushProject(project: ImageBrushProjectData): {
     activeAssetId,
     {
       mode:
-        project.assetMode ?? (project.settings.mode === 'sequence' || project.settings.mode === 'random-hose'
+        project.assetMode ??
+        (project.settings.mode === 'sequence' || project.settings.mode === 'random-hose'
           ? 'all'
           : 'selected'),
-      order:
-        project.assetOrder ?? (project.settings.mode === 'random-hose' ? 'random' : 'cycle'),
+      order: project.assetOrder ?? (project.settings.mode === 'random-hose' ? 'random' : 'cycle'),
       enabledAssetIds: project.enabledAssetIds,
     },
     legacyMode,
@@ -451,9 +457,9 @@ export function restoreImageBrushProject(project: ImageBrushProjectData): {
     // size or opacity override does not turn an old project's selected Style into Custom.
     activeStyleId:
       typeof project.activeStyleId === 'string'
-        ? project.activeStyleId
+        ? resolveImageBrushStyleId(project.activeStyleId)
         : typeof project.activePresetId === 'string'
-          ? project.activePresetId
+          ? resolveImageBrushStyleId(project.activePresetId)
           : 'clean-repeat',
     activeAssetId,
     assetMode: selection.mode,

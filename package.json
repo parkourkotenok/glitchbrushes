@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "generate:effect-previews": "node node_modules/esbuild/bin/esbuild scripts/generate-effect-previews.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/generate-effect-previews.mjs && node node_modules/.tmp/generate-effect-previews.mjs",
+    "audit:image-brush-styles": "node node_modules/esbuild/bin/esbuild scripts/image-brush-style-audit.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/image-brush-style-audit.mjs && node node_modules/.tmp/image-brush-style-audit.mjs",
     "audit:controls": "vitest run src/controlSensitivity.test.ts",
     "acceptance:ui": "node scripts/interface-redesign-acceptance.mjs",
     "preview": "vite preview",

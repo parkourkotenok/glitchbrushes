@@ -28,6 +28,7 @@ import { imageBrushFxLevelAmount } from '../imageBrush/performance';
 import {
   builtInImageBrushPresets,
   loadImageBrushPresets,
+  prepareImageBrushPresetForApplication,
   saveImageBrushPresets,
   type ImageBrushRandomizeScope,
 } from '../imageBrush/presets';
@@ -35,6 +36,9 @@ import {
   applyImageBrushGlitchAmount,
   applyImageBrushStyleKeepingEssentials,
   imageBrushGlitchLevels,
+  imageBrushStaticStyleThumbnail,
+  imageBrushStyleCategories,
+  imageBrushStylePresentationFor,
   isImageBrushEssentialSetting,
 } from '../imageBrush/simple';
 import {
@@ -442,12 +446,15 @@ export function ImageBrushPanel({
   const assetMenuRef = useRef<HTMLDivElement>(null);
   const styleMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const styleMenuRef = useRef<HTMLDivElement>(null);
+  const styleBrowserTriggerRef = useRef<HTMLButtonElement>(null);
+  const styleBrowserRef = useRef<HTMLDivElement>(null);
   const randomizeTriggerRef = useRef<HTMLButtonElement>(null);
   const randomizeMenuRef = useRef<HTMLDivElement>(null);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [sourcePickerOpen, setSourcePickerOpen] = useState(false);
   const [assetMenuOpen, setAssetMenuOpen] = useState(false);
   const [styleMenuOpen, setStyleMenuOpen] = useState(false);
+  const [styleBrowserOpen, setStyleBrowserOpen] = useState(false);
   const [randomizeMenuOpen, setRandomizeMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ImageBrushTab>(() => {
     if (typeof sessionStorage === 'undefined') return 'placement';
@@ -460,6 +467,21 @@ export function ImageBrushPanel({
   const diagnosticsEnabled = performanceDiagnosticsEnabled();
   const allPresets = [...builtInImageBrushPresets, ...userPresets];
   const selectedPreset = allPresets.find((preset) => preset.id === activeStyleId);
+  const coreStyleGroups = imageBrushStyleCategories
+    .map((category) => ({
+      category,
+      presets: builtInImageBrushPresets.filter((preset) => {
+        const presentation = imageBrushStylePresentationFor(preset);
+        return presentation.catalog === 'core' && presentation.category === category;
+      }),
+    }))
+    .filter((group) => group.presets.length);
+  const moreStyles = builtInImageBrushPresets.filter(
+    (preset) => imageBrushStylePresentationFor(preset).catalog === 'more',
+  );
+  const legacyStyles = builtInImageBrushPresets.filter(
+    (preset) => imageBrushStylePresentationFor(preset).catalog === 'legacy',
+  );
   const mutationCopy = mutationSummary(settings);
   const requiredFxStages = effectiveImageBrushStages(settings.fxStage, settings.mutationMode);
   const addEffectDefinition = imageBrushFxDefinitions.find((item) => item.id === addEffect);
@@ -492,6 +514,12 @@ export function ImageBrushPanel({
   useDismissiblePopover(sourcePickerOpen, setSourcePickerOpen, sourceTriggerRef, sourcePopoverRef);
   useDismissiblePopover(assetMenuOpen, setAssetMenuOpen, assetMenuTriggerRef, assetMenuRef);
   useDismissiblePopover(styleMenuOpen, setStyleMenuOpen, styleMenuTriggerRef, styleMenuRef);
+  useDismissiblePopover(
+    styleBrowserOpen,
+    setStyleBrowserOpen,
+    styleBrowserTriggerRef,
+    styleBrowserRef,
+  );
   useDismissiblePopover(
     randomizeMenuOpen,
     setRandomizeMenuOpen,
@@ -600,13 +628,19 @@ export function ImageBrushPanel({
   };
 
   const applyPreset = (preset: ImageBrushPreset) => {
+    const prepared = prepareImageBrushPresetForApplication(preset);
+    if (prepared.legacyAssetMode) {
+      onAssetModeChange(prepared.legacyAssetMode);
+      onAssetOrderChange(prepared.legacyAssetOrder ?? 'cycle');
+      onEnabledAssetIdsChange(library.map((asset) => asset.id));
+    }
     const styled = applyImageBrushStyleKeepingEssentials(
       settings,
       {
-        ...preset.settings,
-        customAnchor: { ...preset.settings.customAnchor },
+        ...prepared.preset.settings,
+        customAnchor: { ...prepared.preset.settings.customAnchor },
       },
-      preset.rack,
+      prepared.preset.rack,
       preset.id,
     );
     onSettingsChange(styled.settings);
@@ -614,6 +648,37 @@ export function ImageBrushPanel({
     onStyleChange(preset.id);
     onNotice(`${preset.name} loaded. Essential size, spacing, opacity and orientation were kept.`);
   };
+
+  const chooseStyle = (preset: ImageBrushPreset) => {
+    applyPreset(preset);
+    setStyleBrowserOpen(false);
+    requestAnimationFrame(() => styleBrowserTriggerRef.current?.focus());
+  };
+
+  const renderStyleCards = (presets: ImageBrushPreset[]) => (
+    <div className="image-brush-style-browser-cards">
+      {presets.map((preset) => {
+        const presentation = imageBrushStylePresentationFor(preset);
+        return (
+          <button
+            type="button"
+            key={preset.id}
+            className={preset.id === activeStyleId ? 'active' : ''}
+            aria-pressed={preset.id === activeStyleId}
+            onClick={() => chooseStyle(preset)}
+          >
+            <img src={imageBrushStaticStyleThumbnail(preset.id)} alt="" aria-hidden="true" />
+            <span>
+              <strong>{preset.name}</strong>
+              {presentation.badge === 'NEW' && <em className="new-effect-badge">NEW</em>}
+            </span>
+            <small>{presentation.description}</small>
+            <i>{presentation.cost}</i>
+          </button>
+        );
+      })}
+    </div>
+  );
 
   const saveCurrentPreset = () => {
     const name = window.prompt('Style name:', 'My Image Brush');
@@ -861,10 +926,7 @@ export function ImageBrushPanel({
           >
             <div className="image-brush-library-strip" aria-label="Brush image library">
               {library.map((asset) => (
-                <article
-                  key={asset.id}
-                  className={asset.id === activeAssetId ? 'active' : ''}
-                >
+                <article key={asset.id} className={asset.id === activeAssetId ? 'active' : ''}>
                   <button
                     className="image-brush-library-select"
                     aria-pressed={asset.id === activeAssetId}
@@ -911,10 +973,7 @@ export function ImageBrushPanel({
             role="dialog"
             aria-label="Source image actions"
           >
-            <button
-              disabled={!active}
-              onClick={() => active && duplicateAsset(active)}
-            >
+            <button disabled={!active} onClick={() => active && duplicateAsset(active)}>
               <Copy size={13} aria-hidden="true" /> Duplicate image
             </button>
             <button
@@ -973,39 +1032,19 @@ export function ImageBrushPanel({
           <span>{selectedPreset?.name ?? 'Custom'}</span>
         </header>
         <div className="image-brush-style-row">
-          <select
-            aria-label="Image Brush style"
+          <button
+            ref={styleBrowserTriggerRef}
+            type="button"
+            className="image-brush-style-browser-trigger"
+            aria-label="Choose Image Brush style"
             data-help-id="image-brush.preset"
-            value={activeStyleId}
-            onChange={(event) => {
-              if (event.target.value === 'custom') {
-                onStyleChange('custom');
-                return;
-              }
-              const preset = allPresets.find((item) => item.id === event.target.value);
-              if (preset) applyPreset(preset);
-            }}
+            aria-haspopup="dialog"
+            aria-expanded={styleBrowserOpen}
+            onClick={() => setStyleBrowserOpen((value) => !value)}
           >
-            <optgroup label="Built-in">
-              {builtInImageBrushPresets.map((preset) => (
-                <option value={preset.id} key={preset.id}>
-                  {preset.name}
-                </option>
-              ))}
-            </optgroup>
-            {userPresets.length > 0 && (
-              <optgroup label="My styles">
-                {userPresets.map((preset) => (
-                  <option value={preset.id} key={preset.id}>
-                    {preset.name}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-            <optgroup label="Custom">
-              <option value="custom">Current custom settings</option>
-            </optgroup>
-          </select>
+            <span>{selectedPreset?.name ?? 'Custom'}</span>
+            <ChevronDown size={14} aria-hidden="true" />
+          </button>
           <div className="image-brush-split-button">
             <button
               className="image-brush-randomize-main"
@@ -1035,6 +1074,45 @@ export function ImageBrushPanel({
             <MoreHorizontal size={16} aria-hidden="true" />
           </button>
         </div>
+        {styleBrowserOpen && (
+          <div
+            ref={styleBrowserRef}
+            className="image-brush-popover image-brush-style-browser"
+            role="dialog"
+            aria-label="Image Brush style browser"
+          >
+            <header>
+              <strong>Style browser</strong>
+              <span>Static previews · no preview jobs</span>
+            </header>
+            <div className="image-brush-style-browser-scroll">
+              {coreStyleGroups.map((group) => (
+                <section key={group.category} aria-label={`${group.category} styles`}>
+                  <h3>{group.category}</h3>
+                  {renderStyleCards(group.presets)}
+                </section>
+              ))}
+              {moreStyles.length > 0 && (
+                <section className="interface-advanced-only" aria-label="More styles">
+                  <h3>MORE</h3>
+                  {renderStyleCards(moreStyles)}
+                </section>
+              )}
+              {userPresets.length > 0 && (
+                <section aria-label="My styles">
+                  <h3>MY STYLES</h3>
+                  {renderStyleCards(userPresets)}
+                </section>
+              )}
+              {legacyStyles.length > 0 && (
+                <section className="interface-advanced-only" aria-label="Legacy styles">
+                  <h3>LEGACY</h3>
+                  {renderStyleCards(legacyStyles)}
+                </section>
+              )}
+            </div>
+          </div>
+        )}
         {randomizeMenuOpen && (
           <div
             ref={randomizeMenuRef}
@@ -1042,18 +1120,10 @@ export function ImageBrushPanel({
             role="dialog"
             aria-label="Randomize brush"
           >
-            <button onClick={() => onRandomize('everything')}>
-              Randomize whole brush
-            </button>
-            <button onClick={() => onRandomize('layout')}>
-              Randomize placement only
-            </button>
-            <button onClick={() => onRandomize('mutation')}>
-              Randomize evolution only
-            </button>
-            <button onClick={() => onRandomize('fx')}>
-              Randomize FX only
-            </button>
+            <button onClick={() => onRandomize('balanced')}>Balanced variation</button>
+            <button onClick={() => onRandomize('layout')}>Placement only</button>
+            <button onClick={() => onRandomize('mutation')}>Evolution only</button>
+            <button onClick={() => onRandomize('fx')}>FX only</button>
             <button onClick={() => onRandomize('wild')}>
               <Zap size={12} aria-hidden="true" /> Wild variation
             </button>
@@ -1063,7 +1133,7 @@ export function ImageBrushPanel({
               checked={randomizeLockSeed}
               onChange={onRandomizeLockSeedChange}
             />
-            <label className="image-brush-seed-inline">
+            <label className="image-brush-seed-inline interface-advanced-only">
               <span>Repeatable result</span>
               <input value={seed} onChange={(event) => onSeedChange(event.target.value)} />
             </label>
@@ -1160,7 +1230,7 @@ export function ImageBrushPanel({
       />
 
       <div
-        className="image-brush-workflow-tabs"
+        className="image-brush-workflow-tabs interface-advanced-only"
         role="tablist"
         aria-label="Image Brush controls"
         onKeyDown={(event) => {
@@ -1197,7 +1267,7 @@ export function ImageBrushPanel({
 
       <section
         id={`${tabsId}-panel-evolution`}
-        className="image-brush-tab-panel image-brush-evolution-panel"
+        className="image-brush-tab-panel image-brush-evolution-panel interface-advanced-only"
         role="tabpanel"
         aria-labelledby={`${tabsId}-tab-evolution`}
         hidden={activeTab !== 'evolution'}
@@ -1238,7 +1308,7 @@ export function ImageBrushPanel({
 
       <section
         id={`${tabsId}-panel-fx`}
-        className="image-brush-tab-panel image-brush-fx-panel"
+        className="image-brush-tab-panel image-brush-fx-panel interface-advanced-only"
         role="tabpanel"
         aria-labelledby={`${tabsId}-tab-fx`}
         hidden={activeTab !== 'fx'}
@@ -1695,7 +1765,7 @@ export function ImageBrushPanel({
 
       <section
         id={`${tabsId}-panel-placement`}
-        className="image-brush-tab-panel image-brush-placement-panel"
+        className="image-brush-tab-panel image-brush-placement-panel interface-advanced-only"
         role="tabpanel"
         aria-labelledby={`${tabsId}-tab-placement`}
         hidden={activeTab !== 'placement'}
@@ -1712,8 +1782,6 @@ export function ImageBrushPanel({
             ['stamp', 'Stamp'],
             ['trail', 'Trail'],
             ['scatter', 'Scatter'],
-            ['sequence', 'Sequence'],
-            ['random-hose', 'Random Hose'],
           ]}
         />
         <SelectField
@@ -2307,7 +2375,7 @@ export function ImageBrushPanel({
         )}
       </div>
 
-      <details className="image-brush-master-advanced">
+      <details className="image-brush-master-advanced interface-advanced-only">
         <summary>Advanced</summary>
         <div className="image-brush-master-advanced-body">
           <LazyAdvancedDetails summary="Alpha and blending" initiallyMounted={false}>

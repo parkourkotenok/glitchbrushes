@@ -227,6 +227,10 @@ export interface ImageBrushPreset {
   name: string;
   settings: ImageBrushSettings;
   rack: ImageBrushFxItem[];
+  /** Presentation metadata is catalog-only; it never becomes part of a project recipe. */
+  category?: 'BASIC' | 'MOTION' | 'BREAKDOWN' | 'COLOR' | 'PRINT / TEXTURE' | 'MORE';
+  catalog?: 'core' | 'more' | 'legacy';
+  badge?: 'NEW';
   custom?: boolean;
 }
 

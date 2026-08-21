@@ -48,7 +48,9 @@ import {
 import {
   applyImageBrushPreset,
   builtInImageBrushPresets,
+  prepareImageBrushPresetForApplication,
   randomizeImageBrush,
+  resolveImageBrushStyleId,
 } from './imageBrush/presets';
 import {
   imageBrushFxCacheKey,
@@ -65,9 +67,13 @@ import {
   applyImageBrushGlitchAmount,
   applyImageBrushStyleKeepingEssentials,
   describeCurrentImageBrush,
+  imageBrushPresetPresentation,
+  imageBrushSimplePresetIds,
+  imageBrushStaticStyleThumbnail,
   imageBrushStyleHistoryLabel,
   isImageBrushEssentialSetting,
   preserveImageBrushEssentialControls,
+  simplePresetCards,
 } from './imageBrush/simple';
 import {
   defaultImageBrushSettings,
@@ -116,7 +122,15 @@ function separatedShapeAsset() {
   fill(2, 2, 6, 6, [238, 54, 66, 255]);
   fill(11, 3, 16, 7, [52, 196, 244, 255]);
   fill(6, 11, 11, 16, [248, 190, 48, 255]);
-  return createImageBrushAsset('Separated shapes', 'separated.png', 'image/png', pixels, width, height, false);
+  return createImageBrushAsset(
+    'Separated shapes',
+    'separated.png',
+    'image/png',
+    pixels,
+    width,
+    height,
+    false,
+  );
 }
 
 function alphaChannel(pixels: Uint8ClampedArray): Uint8Array {
@@ -204,31 +218,67 @@ function pixelDistance(first: Uint8ClampedArray, second: Uint8ClampedArray): num
 
 describe('Image Brush assets and path placement', () => {
   it('keeps project source selection independent, minimal, and demo-safe', () => {
-    const demo = createImageBrushAsset('Demo', 'demo.png', 'image/png', new Uint8ClampedArray([1, 2, 3, 255]), 1, 1, false, 0, { id: 'demo', demo: true });
-    const custom = createImageBrushAsset('Custom', 'custom.png', 'image/png', new Uint8ClampedArray([4, 5, 6, 255]), 1, 1, false, 0, { id: 'custom' });
+    const demo = createImageBrushAsset(
+      'Demo',
+      'demo.png',
+      'image/png',
+      new Uint8ClampedArray([1, 2, 3, 255]),
+      1,
+      1,
+      false,
+      0,
+      { id: 'demo', demo: true },
+    );
+    const custom = createImageBrushAsset(
+      'Custom',
+      'custom.png',
+      'image/png',
+      new Uint8ClampedArray([4, 5, 6, 255]),
+      1,
+      1,
+      false,
+      0,
+      { id: 'custom' },
+    );
     const initial = normalizeImageBrushAssetSelection([demo, custom], custom.id, undefined);
     expect(initial).toEqual({ mode: 'selected', order: 'cycle', enabledAssetIds: ['custom'] });
     const all = normalizeImageBrushAssetSelection([demo, custom], custom.id, {
-      mode: 'all', order: 'random', enabledAssetIds: ['custom'],
+      mode: 'all',
+      order: 'random',
+      enabledAssetIds: ['custom'],
     });
-    expect(requiredImageBrushAssets([demo, custom], custom.id, all).map((asset) => asset.id)).toEqual(['custom']);
-    expect(requiredImageBrushAssets([demo, custom], custom.id, { ...all, mode: 'selected' })).toEqual([custom]);
-    expect(normalizeImageBrushAssetSelection([demo], demo.id, { mode: 'all', enabledAssetIds: [] }).enabledAssetIds).toEqual(['demo']);
+    expect(
+      requiredImageBrushAssets([demo, custom], custom.id, all).map((asset) => asset.id),
+    ).toEqual(['custom']);
+    expect(
+      requiredImageBrushAssets([demo, custom], custom.id, { ...all, mode: 'selected' }),
+    ).toEqual([custom]);
+    expect(
+      normalizeImageBrushAssetSelection([demo], demo.id, { mode: 'all', enabledAssetIds: [] })
+        .enabledAssetIds,
+    ).toEqual(['demo']);
   });
 
   it('migrates legacy sequence and random-hose into placement plus project source selection', () => {
     const library = createTestBrushAssets(2);
     const serialized = serializeImageBrushProject({
       settings: { ...defaultImageBrushSettings, mode: 'sequence' },
-      seed: 'legacy', activePresetId: 'legacy', activeAssetId: library[0]!.id,
-      evolutionOffset: 0, rack: [], library,
+      seed: 'legacy',
+      activePresetId: 'legacy',
+      activeAssetId: library[0]!.id,
+      evolutionOffset: 0,
+      rack: [],
+      library,
     });
     const sequence = restoreImageBrushProject(serialized);
     expect(sequence.settings.mode).toBe('trail');
     expect(sequence.assetMode).toBe('all');
     expect(sequence.assetOrder).toBe('cycle');
     expect(sequence.enabledAssetIds).toEqual(library.map((asset) => asset.id));
-    const hose = restoreImageBrushProject({ ...serialized, settings: { ...serialized.settings, mode: 'random-hose' } });
+    const hose = restoreImageBrushProject({
+      ...serialized,
+      settings: { ...serialized.settings, mode: 'random-hose' },
+    });
     expect(hose.settings.mode).toBe('scatter');
     expect(hose.assetMode).toBe('all');
     expect(hose.assetOrder).toBe('random');
@@ -318,22 +368,69 @@ describe('Image Brush processing', () => {
   ];
 
   it('uses enabled assets only and keeps cycle/random byte deterministic per seed, stroke, and flat index', () => {
-    const red = createImageBrushAsset('Red', 'red.png', 'image/png', new Uint8ClampedArray([255, 0, 0, 255]), 1, 1, false, 0, { id: 'red' });
-    const green = createImageBrushAsset('Green', 'green.png', 'image/png', new Uint8ClampedArray([0, 255, 0, 255]), 1, 1, false, 0, { id: 'green' });
-    const blue = createImageBrushAsset('Blue', 'blue.png', 'image/png', new Uint8ClampedArray([0, 0, 255, 255]), 1, 1, false, 0, { id: 'blue' });
+    const red = createImageBrushAsset(
+      'Red',
+      'red.png',
+      'image/png',
+      new Uint8ClampedArray([255, 0, 0, 255]),
+      1,
+      1,
+      false,
+      0,
+      { id: 'red' },
+    );
+    const green = createImageBrushAsset(
+      'Green',
+      'green.png',
+      'image/png',
+      new Uint8ClampedArray([0, 255, 0, 255]),
+      1,
+      1,
+      false,
+      0,
+      { id: 'green' },
+    );
+    const blue = createImageBrushAsset(
+      'Blue',
+      'blue.png',
+      'image/png',
+      new Uint8ClampedArray([0, 0, 255, 255]),
+      1,
+      1,
+      false,
+      0,
+      { id: 'blue' },
+    );
     const request = strokeRequest('clean', []);
     request.assets = [red, green];
     request.activeAssetId = red.id;
-    request.settings = { ...request.settings, size: 4, pressureSize: false, spacing: 10, rotationMode: 'fixed' };
-    const selected = processImageBrushStroke({ ...request, assetMode: 'selected', assetOrder: 'cycle' });
+    request.settings = {
+      ...request.settings,
+      size: 4,
+      pressureSize: false,
+      spacing: 10,
+      rotationMode: 'fixed',
+    };
+    const selected = processImageBrushStroke({
+      ...request,
+      assetMode: 'selected',
+      assetOrder: 'cycle',
+    });
     const cycle = processImageBrushStroke({ ...request, assetMode: 'all', assetOrder: 'cycle' });
     expect(selected.pixels).not.toEqual(cycle.pixels);
     expect(cycle.pixels.some((value, index) => index % 4 === 1 && value === 255)).toBe(true);
-    const randomRequest = { ...request, assets: [red, green, blue], assetMode: 'all' as const, assetOrder: 'random' as const };
+    const randomRequest = {
+      ...request,
+      assets: [red, green, blue],
+      assetMode: 'all' as const,
+      assetOrder: 'random' as const,
+    };
     const first = processImageBrushStroke(randomRequest);
     const second = processImageBrushStroke(randomRequest);
     expect(second.pixels).toEqual(first.pixels);
-    expect(processImageBrushStroke({ ...randomRequest, strokeId: 'stroke-2' }).pixels).not.toEqual(first.pixels);
+    expect(processImageBrushStroke({ ...randomRequest, strokeId: 'stroke-2' }).pixels).not.toEqual(
+      first.pixels,
+    );
   });
 
   it('builds processed, asset-order-aligned live sources for All Cycle and All Random', () => {
@@ -379,8 +476,24 @@ describe('Image Brush processing', () => {
     const small = { id: 'small', width: 2, height: 2 };
     const large = { id: 'large', width: 80, height: 160 };
     const stamps = strokeRequest('clean', []).stamps;
-    const selected = estimateImageBrushReadBounds(stamps, { ...defaultImageBrushSettings, size: 40 }, [small, large], small.id, 200, 100, 'selected');
-    const all = estimateImageBrushReadBounds(stamps, { ...defaultImageBrushSettings, size: 40 }, [small, large], small.id, 200, 100, 'all');
+    const selected = estimateImageBrushReadBounds(
+      stamps,
+      { ...defaultImageBrushSettings, size: 40 },
+      [small, large],
+      small.id,
+      200,
+      100,
+      'selected',
+    );
+    const all = estimateImageBrushReadBounds(
+      stamps,
+      { ...defaultImageBrushSettings, size: 40 },
+      [small, large],
+      small.id,
+      200,
+      100,
+      'all',
+    );
     expect(all.width).toBeGreaterThan(selected.width);
   });
 
@@ -797,7 +910,9 @@ describe('Image Brush processing', () => {
       { id: 'flow-trail', effectId: 'flow-field', enabled: true, amount: 1, mix: 1 },
     ];
     const request = strokeRequest('whole-trail', flowRack);
-    request.assets = [{ id: asset.id, width: asset.width, height: asset.height, pixels: asset.pixels }];
+    request.assets = [
+      { id: asset.id, width: asset.width, height: asset.height, pixels: asset.pixels },
+    ];
     request.activeAssetId = asset.id;
     request.width = 120;
     request.height = 64;
@@ -838,7 +953,12 @@ describe('Image Brush processing', () => {
     const patch = createPatch(0, before, flowed.pixels)!;
     const history = new PatchHistory();
     const canvas = flowed.pixels.slice();
-    history.push({ id: 'flow', label: 'Image Brush · MOSH Flow Trail', patches: [patch], timestamp: 1 });
+    history.push({
+      id: 'flow',
+      label: 'Image Brush · MOSH Flow Trail',
+      patches: [patch],
+      timestamp: 1,
+    });
     history.undo(canvas);
     expect(canvas).toEqual(before);
     history.redo(canvas);
@@ -932,8 +1052,8 @@ describe('Image Brush presets, project and history contracts', () => {
     }
   });
 
-  it('all fifteen built-ins keep the current image selected', () => {
-    expect(builtInImageBrushPresets).toHaveLength(15);
+  it('curates eighteen built-ins while preserving the current image and legacy IDs', () => {
+    expect(builtInImageBrushPresets).toHaveLength(18);
     expect(builtInImageBrushPresets.map((preset) => preset.name)).toEqual([
       'Clean Repeat',
       'Glitched Repeat',
@@ -946,10 +1066,13 @@ describe('Image Brush presets, project and history contracts', () => {
       'MOSH Flow Trail',
       'Codec Damage Trail',
       'Chroma Feedback',
-      'Compression Breakdown',
+      'Codec Breakdown',
       'Packet Loss Stream',
       'Broken Interface',
       'Scatter Fragments',
+      'Pixel Embroidery',
+      'Xerox Decay',
+      'Zine Stitch',
     ]);
     expect(new Set(builtInImageBrushPresets.map((preset) => preset.settings.mutationMode))).toEqual(
       new Set([
@@ -967,6 +1090,88 @@ describe('Image Brush presets, project and history contracts', () => {
     for (const preset of builtInImageBrushPresets) {
       expect(applyImageBrushPreset('uploaded-image', preset).assetId).toBe('uploaded-image');
     }
+
+    expect(imageBrushSimplePresetIds).toEqual([
+      'clean-repeat',
+      'glitched-repeat',
+      'progressive-decay',
+      'datamosh-trail',
+      'pixel-sort-trail',
+      'mosh-flow-trail',
+      'chroma-feedback',
+      'compression-breakdown',
+      'broken-interface',
+      'scatter-fragments',
+      'pixel-embroidery',
+      'xerox-decay',
+      'zine-stitch',
+    ]);
+    expect(simplePresetCards(builtInImageBrushPresets).map((preset) => preset.id)).toEqual(
+      imageBrushSimplePresetIds,
+    );
+    expect(imageBrushPresetPresentation['whole-trail']?.catalog).toBe('legacy');
+    expect(imageBrushPresetPresentation['packet-loss-stream']?.catalog).toBe('more');
+    expect(resolveImageBrushStyleId('codec-breakdown')).toBe('compression-breakdown');
+    expect(resolveImageBrushStyleId('whole-trail')).toBe('whole-trail');
+  });
+
+  it('migrates legacy Style JSON source modes without keeping them in the modern recipe', () => {
+    const legacy = {
+      ...builtInImageBrushPresets[0]!,
+      id: 'legacy-sequence-style',
+      settings: { ...builtInImageBrushPresets[0]!.settings, mode: 'sequence' as const },
+    };
+    const cycle = prepareImageBrushPresetForApplication(legacy);
+    expect(cycle.preset.settings.mode).toBe('trail');
+    expect(cycle.legacyAssetMode).toBe('all');
+    expect(cycle.legacyAssetOrder).toBe('cycle');
+    const random = prepareImageBrushPresetForApplication({
+      ...legacy,
+      settings: { ...legacy.settings, mode: 'random-hose' },
+    });
+    expect(random.preset.settings.mode).toBe('scatter');
+    expect(random.legacyAssetMode).toBe('all');
+    expect(random.legacyAssetOrder).toBe('random');
+    for (let nonce = 0; nonce < 24; nonce += 1) {
+      expect(
+        ['sequence', 'random-hose'].includes(
+          randomizeImageBrush(
+            defaultImageBrushSettings,
+            [],
+            'modern-placement',
+            'wild',
+            nonce,
+          ).settings.mode,
+        ),
+      ).toBe(false);
+    }
+  });
+
+  it('ships the three NEW print and texture Styles as focused, alpha-safe recipes', () => {
+    const embroidery = builtInImageBrushPresets.find((preset) => preset.id === 'pixel-embroidery')!;
+    const xerox = builtInImageBrushPresets.find((preset) => preset.id === 'xerox-decay')!;
+    const zine = builtInImageBrushPresets.find((preset) => preset.id === 'zine-stitch')!;
+    for (const style of [embroidery, xerox, zine]) {
+      expect(style.category).toBe('PRINT / TEXTURE');
+      expect(style.catalog).toBe('core');
+      expect(style.badge).toBe('NEW');
+      expect(style.settings.alphaMode).toBe('preserve');
+    }
+    expect(embroidery.settings.mutationMode).toBe('fixed');
+    expect(embroidery.rack.map((item) => item.effectId)).toEqual(['pixel-embroidery']);
+    expect(xerox.settings.mutationMode).toBe('progressive');
+    expect(xerox.rack.map((item) => item.effectId)).toEqual(['xerox-decay']);
+    expect(zine.rack.map((item) => item.effectId)).toEqual(['pixel-embroidery', 'xerox-decay']);
+    expect(zine.rack).not.toContainEqual(expect.objectContaining({ effectId: 'rgb-split' }));
+  });
+
+  it('uses stable pre-generated card thumbnails instead of rendering style preview jobs', () => {
+    const first = imageBrushStaticStyleThumbnail('zine-stitch');
+    expect(first).toBe(imageBrushStaticStyleThumbnail('zine-stitch'));
+    expect(first).toMatch(/^data:image\/svg\+xml,/);
+    expect(imageBrushStaticStyleThumbnail('missing-style')).toBe(
+      imageBrushStaticStyleThumbnail('clean-repeat'),
+    );
   });
 
   it('Glitch Amount maps into mode-specific controls and Variation changes recipe diversity', () => {
@@ -1241,7 +1446,7 @@ describe('experimental Image Brush FX', () => {
     return pixels;
   }
 
-  it('lists both FX first with persistent metadata and every supported stage', () => {
+  it('lists both FX first with persistent metadata, every supported stage, and dedicated Styles', () => {
     expect(imageBrushFxDefinitions.slice(0, 2).map((item) => item.id)).toEqual([
       'pixel-embroidery',
       'xerox-decay',
@@ -1251,10 +1456,17 @@ describe('experimental Image Brush FX', () => {
       expect(definition.experimental).toBe(true);
       expect(supportsImageBrushStages(id, ['tip', 'stamp', 'trail'])).toBe(true);
       expect(defaultImageBrushSettings.effectPool).not.toContain(id);
-      expect(
-        builtInImageBrushPresets.some((preset) => preset.rack.some((item) => item.effectId === id)),
-      ).toBe(false);
+      expect(builtInImageBrushPresets.some((preset) => preset.id === id)).toBe(true);
     }
+    expect(
+      builtInImageBrushPresets
+        .filter((preset) => !['pixel-embroidery', 'xerox-decay', 'zine-stitch'].includes(preset.id))
+        .some((preset) =>
+          preset.rack.some(
+            (item) => item.effectId === 'pixel-embroidery' || item.effectId === 'xerox-decay',
+          ),
+        ),
+    ).toBe(false);
   });
 
   it('Pixel Embroidery deterministically creates a transparent structural stitch grid', () => {

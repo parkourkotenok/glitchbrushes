@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { resolveEditorShortcut } from './utils/shortcuts';
 import appSource from './App.tsx?raw';
 import algorithmControlsSource from './components/AlgorithmControls.tsx?raw';
+import effectControlRegistrySource from './components/effectControlRegistry.ts?raw';
 import canvasWorkspaceSource from './components/CanvasWorkspace.tsx?raw';
 import effectPanelSource from './components/EffectPanel.tsx?raw';
 import effectPreviewSource from './components/EffectPreviewStage.tsx?raw';
@@ -138,7 +139,7 @@ describe('production editor cleanup', () => {
   });
 
   it('exposes six explicit Clone Corruption modes and factual source alignment', () => {
-    const source = `${appSource}\n${algorithmControlsSource}`;
+    const source = `${appSource}\n${algorithmControlsSource}\n${effectControlRegistrySource}`;
     for (const label of [
       'Clean Clone',
       'Fragment Clone',

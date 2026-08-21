@@ -1,0 +1,232 @@
+.effect-inspector {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  padding-bottom: 14px;
+}
+
+.inspector-section {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 13px 14px 15px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 94%, #000);
+}
+
+.inspector-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.inspector-section-heading h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: none;
+}
+
+.effect-choice-section {
+  position: relative;
+  z-index: 7;
+}
+
+.effect-choice-section .effect-picker-trigger {
+  min-height: 38px;
+}
+
+.effect-controls-section,
+.effect-brush-section {
+  gap: 12px;
+}
+
+.effect-inspector .slider-field {
+  margin: 0;
+}
+
+.effect-inspector .inline-select {
+  margin: 0;
+}
+
+.compact-menu {
+  position: relative;
+}
+
+.compact-menu-trigger {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
+}
+
+.compact-menu-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: grid;
+  width: min(270px, calc(100vw - 28px));
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #17152e;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.52);
+}
+
+.compact-menu-popover > button {
+  justify-content: flex-start;
+  min-height: 32px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.compact-menu-popover > button:hover:not(:disabled) {
+  background: var(--panel-soft);
+  transform: none;
+}
+
+.compact-menu-separator {
+  height: 1px;
+  margin: 5px 3px;
+  background: var(--line);
+}
+
+.compact-menu-field {
+  display: grid;
+  gap: 5px;
+  padding: 5px 4px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.compact-menu-field input {
+  width: 100%;
+}
+
+.compact-menu-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+  padding: 4px;
+}
+
+.compact-menu-actions button {
+  min-width: 0;
+  box-shadow: none;
+}
+
+.inspector-details {
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 96%, #000);
+}
+
+.inspector-details > summary,
+.nested-inspector-details > summary {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  padding: 0 14px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 650;
+  list-style: none;
+}
+
+.inspector-details > summary::after,
+.nested-inspector-details > summary::after {
+  margin-left: auto;
+  color: var(--accent);
+  content: '+';
+}
+
+.inspector-details[open] > summary::after,
+.nested-inspector-details[open] > summary::after {
+  content: '−';
+}
+
+.inspector-details-content {
+  display: grid;
+  gap: 12px;
+  padding: 0 14px 14px;
+}
+
+.nested-inspector-details {
+  border-top: 1px solid var(--line);
+}
+
+.nested-inspector-details > summary {
+  padding-inline: 0;
+}
+
+.nested-inspector-details .inspector-details-content {
+  padding: 0 0 2px;
+}
+
+.effect-range-control,
+.effect-axis-control,
+.effect-segmented-control {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 7px;
+}
+
+.effect-range-control legend,
+.effect-axis-control legend,
+.effect-segmented-control legend {
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.effect-segmented-control > div {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(58px, 1fr));
+  gap: 4px;
+}
+
+.effect-segmented-control button {
+  min-width: 0;
+  min-height: 30px;
+  padding-inline: 6px;
+  font-size: 9px;
+}
+
+.effect-segmented-control button.active {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.effect-inspector .advanced-state-row {
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+}
+
+.effect-inspector .meta-effect-controls,
+.effect-inspector .meta-effect-pool {
+  margin: 0;
+}
+
+@media (max-height: 820px) {
+  .inspector-section {
+    gap: 8px;
+    padding: 9px 11px 11px;
+  }
+
+  .effect-choice-section .effect-picker-trigger {
+    min-height: 34px;
+  }
+
+  .effect-inspector .slider-field {
+    margin-bottom: 1px;
+  }
+}

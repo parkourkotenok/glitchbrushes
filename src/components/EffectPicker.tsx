@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { GlitchAlgorithm } from '../types';
 import { EffectIcon, algorithmIconIds } from '../icons/effects';
 import { EffectPreviewStage } from './EffectPreviewStage';
@@ -23,6 +23,14 @@ export function EffectPicker({
   const [showLegacy, setShowLegacy] = useState(false);
   const [previewId, setPreviewId] = useState(value.id);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const optionRefs = useRef<Partial<Record<GlitchAlgorithm['id'], HTMLButtonElement | null>>>({});
+  const listboxId = useId();
+
+  const closeAndRestoreFocus = () => {
+    setOpen(false);
+    requestAnimationFrame(() => triggerRef.current?.focus());
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -30,7 +38,7 @@ export function EffectPicker({
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape') closeAndRestoreFocus();
     };
     window.addEventListener('pointerdown', close);
     window.addEventListener('keydown', closeOnEscape);
@@ -39,6 +47,11 @@ export function EffectPicker({
       window.removeEventListener('keydown', closeOnEscape);
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    requestAnimationFrame(() => optionRefs.current[value.id]?.focus());
+  }, [open, value.id]);
 
   useEffect(() => setPreviewId(value.id), [value.id]);
   const previewItem = [...items, ...legacyItems].find((item) => item.id === previewId) ?? value;
@@ -53,13 +66,17 @@ export function EffectPicker({
             aria-selected={item.id === value.id}
             className={item.id === value.id ? 'selected' : ''}
             key={item.id}
+            ref={(node) => {
+              optionRefs.current[item.id] = node;
+            }}
             onClick={() => {
               onChange(item.id);
-              setOpen(false);
+              closeAndRestoreFocus();
             }}
             onPointerEnter={() => setPreviewId(item.id)}
             onFocus={() => setPreviewId(item.id)}
             role="option"
+            tabIndex={-1}
           >
             <EffectIcon id={algorithmIconIds[item.id]} size={18} />
             <span>
@@ -78,8 +95,10 @@ export function EffectPicker({
   return (
     <div className={`effect-picker ${open ? 'open' : ''}`} ref={rootRef}>
       <button
+        ref={triggerRef}
         aria-expanded={open}
-        aria-haspopup="dialog"
+        aria-haspopup="listbox"
+        aria-controls={listboxId}
         className="effect-picker-trigger"
         onClick={() => setOpen((current) => !current)}
       >
@@ -89,7 +108,7 @@ export function EffectPicker({
         <span aria-hidden="true">⌄</span>
       </button>
       {open && (
-        <div className="effect-picker-menu" role="dialog" aria-label="Choose an effect">
+        <div className="effect-picker-menu">
           <div className="effect-picker-preview-pinned">
             <EffectPreviewStage
               algorithm={previewId}
@@ -105,7 +124,26 @@ export function EffectPicker({
               experimental={previewItem.experimental}
             />
           </div>
-          <div className="effect-picker-options" role="listbox" aria-label="Effects">
+          <div
+            className="effect-picker-options"
+            id={listboxId}
+            role="listbox"
+            aria-label="Effects"
+            onKeyDown={(event) => {
+              const visible = [...items, ...(showLegacy ? legacyItems : [])];
+              const current = visible.findIndex(
+                (item) => optionRefs.current[item.id] === document.activeElement,
+              );
+              let next = current;
+              if (event.key === 'ArrowDown') next = Math.min(visible.length - 1, current + 1);
+              else if (event.key === 'ArrowUp') next = Math.max(0, current - 1);
+              else if (event.key === 'Home') next = 0;
+              else if (event.key === 'End') next = visible.length - 1;
+              else return;
+              event.preventDefault();
+              optionRefs.current[visible[Math.max(0, next)]?.id ?? value.id]?.focus();
+            }}
+          >
             {renderGroup(
               'NEW / EXPERIMENTAL',
               items.filter((item) => item.experimental),

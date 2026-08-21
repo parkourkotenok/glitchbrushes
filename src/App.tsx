@@ -37,12 +37,9 @@ import {
   defaultAlgorithmSettings,
   legacyAlgorithmList,
 } from './glitchAlgorithms';
-import { migrateAlgorithmSelection, migratePreset } from './glitchAlgorithms/migration';
-import {
-  deriveAdvancedBrushOverlays,
-  isAdvancedBrushId,
-  randomizeAdvancedBrush,
-} from './glitchAlgorithms/advancedBrushConfig';
+import { migrateAlgorithmSelection } from './glitchAlgorithms/migration';
+import { deriveAdvancedBrushOverlays } from './glitchAlgorithms/advancedBrushConfig';
+import { randomizeEffectSettings, resetEffectSettings } from './components/effectControlRegistry';
 import type { BrushProgress } from './brush/engine';
 import type { RetouchProgress } from './retouch/types';
 import { isRetouchTool } from './retouch/tools';
@@ -147,7 +144,6 @@ import {
   type MoshEffectCard,
   type MoshProgress,
 } from './mosh/types';
-import { builtInPresets, saveCustomPresets } from './presets';
 import { applyProjectRuns, encodeProjectRuns, type ProjectRun } from './projectRuns';
 import type {
   AlgorithmId,
@@ -160,16 +156,12 @@ import type {
   LayerSourceMode,
   LayerStackSnapshot,
   Point,
-  Preset,
   Rectangle,
   CanvasOverlayState,
   Tool,
 } from './types';
 import { clamp, formatBytes, pixelToByteOffset, unionRect } from './utils/geometry';
-import {
-  recordPerformanceMeasure,
-  startRafGapRecorder,
-} from './utils/performance';
+import { recordPerformanceMeasure, startRafGapRecorder } from './utils/performance';
 import { createSeed, createSeededRandom } from './utils/prng';
 import { isTypingTarget, resolveEditorShortcut } from './utils/shortcuts';
 import { algorithmDescriptions } from './effects/descriptions';
@@ -415,14 +407,7 @@ function GlitchBrushesEditor({
     setEmbedProjectImage,
     renderExportCanvas,
   } = useExport(docRef);
-  const {
-    projectOpen,
-    setProjectOpen,
-    customPresets,
-    setCustomPresets,
-    projectInputRef,
-    presetInputRef,
-  } = useProject();
+  const { projectOpen, setProjectOpen, projectInputRef } = useProject();
   const {
     zoom,
     setZoom,
@@ -993,10 +978,7 @@ function GlitchBrushesEditor({
             }
             x += 1;
           }
-          destination.set(
-            processed.subarray(spanStart, rowStart + (x - left) * 4),
-            spanStart,
-          );
+          destination.set(processed.subarray(spanStart, rowStart + (x - left) * 4), spanStart);
         }
       }
       recordPerformanceMeasure('glitchbrushes:merge-single-layer-result', startedAt);
@@ -1055,10 +1037,7 @@ function GlitchBrushesEditor({
             column += 1;
           }
           destination.set(
-            processedRegion.subarray(
-              localRowStart + spanStart * 4,
-              localRowStart + column * 4,
-            ),
+            processedRegion.subarray(localRowStart + spanStart * 4, localRowStart + column * 4),
             destinationRowStart + spanStart * 4,
           );
         }
@@ -1417,12 +1396,17 @@ function GlitchBrushesEditor({
         if (capturedSourceMode === 'selected-layer') {
           const destination =
             mode === 'preview' ? new Uint8ClampedArray(current.pixels) : current.pixels;
-          mergeSingleLayerResult(sourceBefore, processed, {
-            x: 0,
-            y: 0,
-            width: current.width,
-            height: current.height,
-          }, destination);
+          mergeSingleLayerResult(
+            sourceBefore,
+            processed,
+            {
+              x: 0,
+              y: 0,
+              width: current.width,
+              height: current.height,
+            },
+            destination,
+          );
           output = destination;
         }
         if (mode === 'preview') {
@@ -2490,20 +2474,11 @@ function GlitchBrushesEditor({
           capturedAlgorithm === 'feedback-brush'
             ? (() => {
                 const memory = sourcePixels.slice();
-                adoptRegionalWorkerResult(
-                  sourcePixels,
-                  output,
-                  result.writeBounds,
-                  memory,
-                  false,
-                );
+                adoptRegionalWorkerResult(sourcePixels, output, result.writeBounds, memory, false);
                 return memory;
               })()
             : null;
-        const committed = commitCurrentBufferToActiveLayer(
-          capturedLayerBefore,
-          result.writeBounds,
-        );
+        const committed = commitCurrentBufferToActiveLayer(capturedLayerBefore, result.writeBounds);
         const patches = committed.patches;
         updateWorkingCanvas(result.writeBounds);
         if (!patches.length) {
@@ -2757,10 +2732,7 @@ function GlitchBrushesEditor({
         } else {
           current.pixels.set(output);
         }
-        const committed = commitCurrentBufferToActiveLayer(
-          capturedLayerBefore,
-          result.writeBounds,
-        );
+        const committed = commitCurrentBufferToActiveLayer(capturedLayerBefore, result.writeBounds);
         updateWorkingCanvas(result.writeBounds);
         if (!committed.patches.length) {
           setNotice(`${capturedTool} completed without changing pixels.`);
@@ -3199,9 +3171,7 @@ function GlitchBrushesEditor({
       sourceLayerId,
       sourceMode,
       editPixels:
-        sourceMode === 'selected-layer'
-          ? processingSourcePixels(sourceLayerId, sourceMode)
-          : null,
+        sourceMode === 'selected-layer' ? processingSourcePixels(sourceLayerId, sourceMode) : null,
       pendingRetouchSamples: [],
       retouchRaf: null,
       retouchEnded: false,
@@ -4243,65 +4213,6 @@ function GlitchBrushesEditor({
     }
   };
 
-  const applyPreset = (preset: Preset) => {
-    changeAlgorithm(preset.algorithm);
-    setBrush((current) => ({
-      ...(preset.custom ? current : defaultBrush),
-      ...preset.brush,
-    }));
-    setSettings((current) => ({
-      ...(preset.custom ? current : defaultAlgorithmSettings),
-      ...preset.settings,
-    }));
-    setNotice(`${preset.name} preset loaded.`);
-  };
-
-  const savePreset = () => {
-    const name = window.prompt('Preset name', `Custom ${algorithms[algorithm].name}`);
-    if (!name?.trim()) return;
-    const preset: Preset = {
-      id: `custom-${Date.now()}`,
-      name: name.trim(),
-      algorithm,
-      brush,
-      settings,
-      custom: true,
-    };
-    const next = [...customPresets, preset];
-    setCustomPresets(next);
-    saveCustomPresets(next);
-    setNotice(`${preset.name} saved in localStorage.`);
-  };
-
-  const deletePreset = (id: string) => {
-    const next = customPresets.filter((preset) => preset.id !== id);
-    setCustomPresets(next);
-    saveCustomPresets(next);
-  };
-
-  const exportPresets = () => {
-    triggerDownload(
-      new Blob([JSON.stringify(customPresets, null, 2)], { type: 'application/json' }),
-      'glitch-brushes-presets.json',
-    );
-  };
-
-  const importPresets = async (file: File) => {
-    try {
-      const imported = JSON.parse(await file.text()) as Preset[];
-      const clean = imported
-        .filter((preset) => preset.id && preset.name && algorithms[preset.algorithm])
-        .map(migratePreset)
-        .map((preset) => ({ ...preset, id: `custom-${Date.now()}-${preset.id}`, custom: true }));
-      const next = [...customPresets, ...clean];
-      setCustomPresets(next);
-      saveCustomPresets(next);
-      setNotice(`${clean.length} preset(s) imported.`);
-    } catch {
-      setNotice('Preset JSON is invalid.');
-    }
-  };
-
   const randomGlitch = useCallback(() => {
     if (moshPreviewBufferRef.current || moshJobGateRef.current.currentJobId) cancelMosh();
     if (brushJobGateRef.current.currentJobId) cancelBrushJob();
@@ -4333,9 +4244,7 @@ function GlitchBrushesEditor({
       sourceLayerId,
       sourceMode,
       editPixels:
-        sourceMode === 'selected-layer'
-          ? processingSourcePixels(sourceLayerId, sourceMode)
-          : null,
+        sourceMode === 'selected-layer' ? processingSourcePixels(sourceLayerId, sourceMode) : null,
       pendingRetouchSamples: [],
       retouchRaf: null,
       retouchEnded: false,
@@ -4457,70 +4366,17 @@ function GlitchBrushesEditor({
   const updateSetting = <K extends keyof AlgorithmSettings>(key: K, value: AlgorithmSettings[K]) =>
     setSettings((current) => ({ ...current, [key]: value }));
 
-  const randomizeSelectedAdvancedBrush = (mode: 'balanced' | 'wild') => {
-    if (!isAdvancedBrushId(algorithm)) return;
-    const randomized = randomizeAdvancedBrush(algorithm, settings, brush, seed, mode);
-    setSettings(randomized.settings);
-    setBrush(randomized.brush);
+  const randomizeSelectedEffect = (mode: 'balanced' | 'wild') => {
+    setSettings((current) => randomizeEffectSettings(algorithm, current, seed, mode));
     setNotice(
       `${algorithms[algorithm].name} ${mode} randomization loaded from seed. No pixels changed.`,
     );
   };
 
-  const resetSelectedAdvancedBrush = () => {
-    if (!isAdvancedBrushId(algorithm)) return;
-    setSettings({ ...defaultAlgorithmSettings });
-    setBrush({ ...defaultBrush });
+  const resetSelectedEffect = () => {
+    setSettings((current) => resetEffectSettings(algorithm, current));
     if (algorithm === 'feedback-brush') resetFeedbackMemory();
     setNotice(`${algorithms[algorithm].name} defaults restored. No pixels changed.`);
-  };
-
-  const applyQuickLevel = (level: 'subtle' | 'medium' | 'aggressive' | 'broken' | 'extreme') => {
-    const levelIndex = ['subtle', 'medium', 'aggressive', 'broken', 'extreme'].indexOf(level);
-    const structuralIntensity = [0.38, 0.68, 0.94, 1.2, 1.48][levelIndex]!;
-    const microIntensity = [0.24, 0.42, 0.62, 0.82, 1][levelIndex]!;
-    const strength = [0.5, 0.66, 0.8, 0.92, 1][levelIndex]!;
-    const spill = (['local', 'small', 'small', 'medium', 'strong'] as const)[levelIndex]!;
-    const overrides: Partial<AlgorithmSettings> = {
-      structuralIntensity,
-      microIntensity,
-      spill,
-      structuralDensity: [0.3, 0.48, 0.66, 0.84, 1][levelIndex]!,
-    };
-    if (algorithm === 'slice-displacement') {
-      overrides.sliceCount = [1, 2, 3, 5, 7][levelIndex]!;
-      overrides.sliceMaxOffset = [32, 58, 92, 138, 210][levelIndex]!;
-      overrides.sliceMaxThickness = [10, 18, 28, 42, 64][levelIndex]!;
-    } else if (algorithm === 'block-corruption' || algorithm === 'macroblock-shift') {
-      overrides.macroblockMaxSize = [22, 34, 48, 68, 96][levelIndex]!;
-      overrides.macroblockOffset = [28, 48, 74, 112, 170][levelIndex]!;
-    } else if (algorithm === 'datamosh-smear') {
-      overrides.datamoshLength = [56, 96, 150, 230, 340][levelIndex]!;
-      overrides.datamoshPersistence = [0.42, 0.64, 0.84, 1.05, 1.3][levelIndex]!;
-    } else if (algorithm === 'rgb-chunk-split') {
-      overrides.rgbChunkOffset = [5, 10, 18, 30, 48][levelIndex]!;
-      overrides.rgbRegionSize = [48, 72, 104, 150, 220][levelIndex]!;
-    } else if (algorithm === 'scanline-tear-pro') {
-      overrides.tearBandCount = [2, 3, 5, 8, 12][levelIndex]!;
-      overrides.tearShift = [24, 52, 88, 132, 210][levelIndex]!;
-    } else if (algorithm === 'codec-block-damage' || algorithm === 'compression-block-damage') {
-      overrides.compressionQuantization = [0.3, 0.5, 0.7, 0.86, 1][levelIndex]!;
-      overrides.compressionScramble = [0.08, 0.16, 0.28, 0.48, 0.72][levelIndex]!;
-    } else if (algorithm === 'packet-loss') {
-      overrides.packetLossDensity = [0.18, 0.34, 0.52, 0.75, 1][levelIndex]!;
-    } else if (algorithm === 'tile-scramble') {
-      overrides.tileShuffle = [0.2, 0.38, 0.62, 0.82, 1][levelIndex]!;
-    } else if (algorithm === 'row-column-repeat') {
-      overrides.repeatCount = [2, 4, 7, 11, 16][levelIndex]!;
-    } else if (algorithm === 'structural-mixed') {
-      const mixMaximum = [2, 2, 2, 3, 3][levelIndex]!;
-      overrides.structuralMixCount = mixMaximum;
-      overrides.structuralMixMinEffects = 2;
-      overrides.structuralMixMaxEffects = mixMaximum;
-    }
-    setBrush((current) => ({ ...current, strength }));
-    setSettings((current) => ({ ...current, ...overrides }));
-    setNotice(`${level.toUpperCase()} level loaded for ${algorithms[algorithm].name}.`);
   };
 
   const layerStack = layerStackRef.current;
@@ -4675,7 +4531,6 @@ function GlitchBrushesEditor({
           <div className="inspector-scroll">
             {activePanel === 'effect' && (
               <EffectPanel
-                interfaceMode={interfaceMode}
                 algorithm={algorithm}
                 algorithms={algorithms}
                 algorithmList={algorithmList}
@@ -4688,9 +4543,8 @@ function GlitchBrushesEditor({
                 onUpdateBrush={updateBrush}
                 onUpdateSetting={updateSetting}
                 onSeedChange={setSeed}
-                onQuickLevel={applyQuickLevel}
-                onRandomizeAdvancedBrush={randomizeSelectedAdvancedBrush}
-                onResetAdvancedBrush={resetSelectedAdvancedBrush}
+                onRandomizeEffect={randomizeSelectedEffect}
+                onResetEffect={resetSelectedEffect}
                 onNotice={setNotice}
                 cloneSource={cloneSource}
                 cloneSourcePickMode={cloneSourcePickMode}
@@ -4724,30 +4578,6 @@ function GlitchBrushesEditor({
                     `New Mixed Structural recipe generated with seed ${nextSeed}. No pixels changed.`,
                   );
                 }}
-                builtInPresets={builtInPresets}
-                customPresets={customPresets}
-                onApplyPreset={applyPreset}
-                onDeletePreset={deletePreset}
-                onSavePreset={savePreset}
-                onExportPresets={exportPresets}
-                onImportPresets={importPresets}
-                presetInputRef={presetInputRef}
-                layerStack={layerStack}
-                layerVersion={layerVersion}
-                currentLayer={currentLayer}
-                onFlattenLayers={() =>
-                  runLayerOperation('Flatten layer stack', (stack) => {
-                    flattenLayerStack(stack, docRef.current.background);
-                  })
-                }
-                onSelectLayer={(id, name) => {
-                  layerStackRef.current.activeLayerId = id;
-                  originalLayerSelectedRef.current = false;
-                  setOriginalLayerSelected(false);
-                  bumpLayers();
-                  setNotice(`${name} is now the active paint target.`);
-                }}
-                onRunLayerOperation={runLayerOperation}
               />
             )}
 

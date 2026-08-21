@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { HelpProvider } from './help/HelpContext';
 import './styles.css';
+import './inspectorRedesign.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -1,8 +1,11 @@
 import type { BytePatch, HistoryAction } from '../types';
+import { recordPerformanceMeasure } from '../utils/performance';
 
 export class PatchHistory {
   private undoActions: HistoryAction[] = [];
   private redoActions: HistoryAction[] = [];
+  private retainedMemoryBytes = 0;
+  private logicalRetainedMemoryBytes = 0;
 
   constructor(private readonly limit = 50) {}
 
@@ -11,6 +14,7 @@ export class PatchHistory {
     this.undoActions.push(action);
     this.redoActions = [];
     if (this.undoActions.length > this.limit) this.undoActions.shift();
+    this.recalculateMemory();
   }
 
   undo(buffer: Uint8ClampedArray): HistoryAction | null {
@@ -21,6 +25,7 @@ export class PatchHistory {
       buffer.set(patch.before, patch.start);
     }
     this.redoActions.push(action);
+    this.recalculateMemory();
     return action;
   }
 
@@ -29,12 +34,14 @@ export class PatchHistory {
     if (!action) return null;
     for (const patch of action.patches) buffer.set(patch.after, patch.start);
     this.undoActions.push(action);
+    this.recalculateMemory();
     return action;
   }
 
   clear(): void {
     this.undoActions = [];
     this.redoActions = [];
+    this.recalculateMemory();
   }
 
   undoTo(buffer: Uint8ClampedArray, actionId: string): HistoryAction[] {
@@ -74,26 +81,40 @@ export class PatchHistory {
   }
 
   get memoryBytes(): number {
-    return [...this.undoActions, ...this.redoActions].reduce(
-      (total, action) =>
-        total +
-        action.patches.reduce(
-          (patchTotal, patch) => patchTotal + patch.before.byteLength + patch.after.byteLength,
-          0,
-        ) +
-        [action.layerBefore, action.layerAfter].reduce(
-          (snapshotTotal, snapshot) =>
-            snapshotTotal +
-            (snapshot?.layers.reduce(
-              (layerTotal, layer) =>
-                layerTotal +
-                layer.tiles.reduce((tileTotal, tile) => tileTotal + tile.pixels.byteLength, 0),
-              0,
-            ) ?? 0),
-          0,
-        ),
-      0,
-    );
+    const startedAt = performance.now();
+    const result = this.retainedMemoryBytes;
+    recordPerformanceMeasure('glitchbrushes:history-memory-read', startedAt);
+    return result;
+  }
+
+  get logicalMemoryBytes(): number {
+    return this.logicalRetainedMemoryBytes;
+  }
+
+  private recalculateMemory(): void {
+    const uniqueBuffers = new Set<ArrayBufferLike>();
+    let uniqueBytes = 0;
+    let logicalBytes = 0;
+    const count = (pixels: Uint8Array | Uint8ClampedArray) => {
+      logicalBytes += pixels.byteLength;
+      if (uniqueBuffers.has(pixels.buffer)) return;
+      uniqueBuffers.add(pixels.buffer);
+      uniqueBytes += pixels.buffer.byteLength;
+    };
+    for (const action of [...this.undoActions, ...this.redoActions]) {
+      for (const patch of action.patches) {
+        count(patch.before);
+        count(patch.after);
+      }
+      for (const snapshot of [action.layerBefore, action.layerAfter]) {
+        if (!snapshot) continue;
+        for (const layer of snapshot.layers) {
+          for (const tile of layer.tiles) count(tile.pixels);
+        }
+      }
+    }
+    this.retainedMemoryBytes = uniqueBytes;
+    this.logicalRetainedMemoryBytes = logicalBytes;
   }
 }
 

@@ -3,6 +3,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -165,7 +166,10 @@ import type {
   Tool,
 } from './types';
 import { clamp, formatBytes, pixelToByteOffset, unionRect } from './utils/geometry';
-import { recordPerformanceMeasure } from './utils/performance';
+import {
+  recordPerformanceMeasure,
+  startRafGapRecorder,
+} from './utils/performance';
 import { createSeed, createSeededRandom } from './utils/prng';
 import { isTypingTarget, resolveEditorShortcut } from './utils/shortcuts';
 import { algorithmDescriptions } from './effects/descriptions';
@@ -332,16 +336,23 @@ function GlitchBrushesEditor({
   onInterfaceModeChange,
   onExit,
 }: GlitchBrushesEditorProps) {
+  const renderStartedAt = typeof performance === 'undefined' ? 0 : performance.now();
   const { helpMode, panelOpen: helpPanelOpen, togglePanel: toggleHelpPanel } = useHelp();
   const {
     docRef,
     documentVersion,
+    documentSurfaceVersion,
     bumpDocument,
+    bumpDocumentSurface,
     processing,
     setProcessing,
     exportName,
     setExportName,
   } = useDocument();
+  useLayoutEffect(() => {
+    recordPerformanceMeasure('glitchbrushes:react-post-commit', renderStartedAt);
+  });
+  useEffect(() => startRafGapRecorder(), []);
   const {
     layerStackRef,
     layerVersion,
@@ -856,12 +867,17 @@ function GlitchBrushesEditor({
 
   const doc = docRef.current;
   const history = historyRef.current;
+  const historyMemoryBytes = useMemo(() => history.memoryBytes, [history, historyVersion]);
+  const currentLayerMemoryBytes = useMemo(
+    () => layerMemoryBytes(layerStackRef.current),
+    [layerStackRef, layerVersion],
+  );
   const memoryEstimate =
     doc.pixels.byteLength * 3 +
     maskRef.current.byteLength +
     lastBrushMaskRef.current.data.byteLength +
-    layerMemoryBytes(layerStackRef.current) +
-    history.memoryBytes;
+    currentLayerMemoryBytes +
+    historyMemoryBytes;
   const moshSignature = useMemo(
     () =>
       JSON.stringify({
@@ -891,6 +907,7 @@ function GlitchBrushesEditor({
   }, [algorithm, cloneSource, moshDraftRegion, moshRack]);
 
   const updateWorkingCanvas = useCallback((bounds?: Rectangle) => {
+    const startedAt = performance.now();
     const current = docRef.current;
     const canvas = workCanvasRef.current;
     if (!canvas) return;
@@ -905,6 +922,11 @@ function GlitchBrushesEditor({
     } else {
       context.putImageData(data, 0, 0);
     }
+    recordPerformanceMeasure(
+      bounds ? 'glitchbrushes:canvas-dirty-upload' : 'glitchbrushes:canvas-full-sync',
+      startedAt,
+    );
+    recordPerformanceMeasure('glitchbrushes:canvas-upload', startedAt);
   }, []);
 
   const processingSourcePixels = useCallback(
@@ -978,6 +1000,69 @@ function GlitchBrushesEditor({
         }
       }
       recordPerformanceMeasure('glitchbrushes:merge-single-layer-result', startedAt);
+    },
+    [],
+  );
+
+  const adoptRegionalWorkerResult = useCallback(
+    (
+      sourceBefore: Uint8ClampedArray,
+      processedRegion: Uint8ClampedArray,
+      bounds: Rectangle,
+      destination: Uint8ClampedArray,
+      compareWithSource: boolean,
+    ): void => {
+      const current = docRef.current;
+      if (processedRegion.length !== bounds.width * bounds.height * 4) {
+        throw new Error('Regional Worker result size did not match its write bounds.');
+      }
+      for (let row = 0; row < bounds.height; row += 1) {
+        const localRowStart = row * bounds.width * 4;
+        const destinationRowStart = ((bounds.y + row) * current.width + bounds.x) * 4;
+        if (!compareWithSource) {
+          destination.set(
+            processedRegion.subarray(localRowStart, localRowStart + bounds.width * 4),
+            destinationRowStart,
+          );
+          continue;
+        }
+        let column = 0;
+        while (column < bounds.width) {
+          const localOffset = localRowStart + column * 4;
+          const sourceOffset = destinationRowStart + column * 4;
+          if (
+            sourceBefore[sourceOffset] === processedRegion[localOffset] &&
+            sourceBefore[sourceOffset + 1] === processedRegion[localOffset + 1] &&
+            sourceBefore[sourceOffset + 2] === processedRegion[localOffset + 2] &&
+            sourceBefore[sourceOffset + 3] === processedRegion[localOffset + 3]
+          ) {
+            column += 1;
+            continue;
+          }
+          const spanStart = column;
+          column += 1;
+          while (column < bounds.width) {
+            const nextLocal = localRowStart + column * 4;
+            const nextSource = destinationRowStart + column * 4;
+            if (
+              sourceBefore[nextSource] === processedRegion[nextLocal] &&
+              sourceBefore[nextSource + 1] === processedRegion[nextLocal + 1] &&
+              sourceBefore[nextSource + 2] === processedRegion[nextLocal + 2] &&
+              sourceBefore[nextSource + 3] === processedRegion[nextLocal + 3]
+            ) {
+              break;
+            }
+            column += 1;
+          }
+          destination.set(
+            processedRegion.subarray(
+              localRowStart + spanStart * 4,
+              localRowStart + column * 4,
+            ),
+            destinationRowStart + spanStart * 4,
+          );
+        }
+      }
     },
     [],
   );
@@ -1324,7 +1409,6 @@ function GlitchBrushesEditor({
         const result = event.data.result;
         if (!result || !moshJobGateRef.current.isActive(result.jobId)) return;
         moshJobGateRef.current.cancel(result.jobId);
-        worker.terminate();
         if (moshWorkerRef.current === worker) moshWorkerRef.current = null;
         setMoshProcessing(false);
         setMoshProgress(null);
@@ -1450,6 +1534,7 @@ function GlitchBrushesEditor({
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
+      const syncStartedAt = performance.now();
       const current = docRef.current;
       let canvasResized = false;
       for (const canvas of [baseCanvasRef.current, workCanvasRef.current]) {
@@ -1471,12 +1556,13 @@ function GlitchBrushesEditor({
         const context = workCanvasRef.current.getContext('2d', { alpha: true });
         context?.clearRect(0, 0, current.width, current.height);
         context?.drawImage(baseCanvasRef.current, 0, 0);
+        recordPerformanceMeasure('glitchbrushes:canvas-full-sync', syncStartedAt);
       } else {
         updateWorkingCanvas();
       }
     });
     return () => cancelAnimationFrame(frame);
-  }, [documentVersion, updateOriginalCanvas, updateWorkingCanvas]);
+  }, [documentSurfaceVersion, updateOriginalCanvas, updateWorkingCanvas]);
 
   useEffect(() => {
     const canvas = overlayCanvasRef.current;
@@ -1535,7 +1621,7 @@ function GlitchBrushesEditor({
   useEffect(() => {
     const frame = requestAnimationFrame(fitToScreen);
     return () => cancelAnimationFrame(frame);
-  }, [documentVersion, fitToScreen]);
+  }, [documentSurfaceVersion, fitToScreen]);
 
   const clearOverlay = useCallback(() => {
     const canvas = overlayCanvasRef.current;
@@ -1936,11 +2022,47 @@ function GlitchBrushesEditor({
           return;
         }
         imageBrushJobGateRef.current.cancel(result.jobId);
-        worker.terminate();
         if (imageBrushWorkerRef.current === worker) imageBrushWorkerRef.current = null;
         setImageBrushProcessing(false);
         setImageBrushProgress(null);
+        const resultReceivedAt = performance.now();
+        const pointerUpToResultMs = recordPerformanceMeasure(
+          'glitchbrushes:pointer-up-to-result',
+          stroke.pointerUpAt,
+        );
+        const adoptionStartedAt = resultReceivedAt;
         const output = new Uint8ClampedArray(result.pixels);
+        if (output.length !== result.bounds.width * result.bounds.height * 4) {
+          updateWorkingCanvas();
+          clearImageBrushOverlay();
+          setNotice('Image Brush local result size did not match its affected bounds.');
+          return;
+        }
+        adoptRegionalWorkerResult(
+          sourcePixels,
+          output,
+          result.bounds,
+          current.pixels,
+          stroke.sourceMode === 'selected-layer',
+        );
+        const resultAdoptionMs = recordPerformanceMeasure(
+          'glitchbrushes:worker-result-adoption',
+          adoptionStartedAt,
+        );
+        const layerCommitStartedAt = performance.now();
+        const committed = commitCurrentBufferToActiveLayer(stroke.layerBefore, result.bounds);
+        const layerCommitMs = recordPerformanceMeasure(
+          'glitchbrushes:layer-commit',
+          layerCommitStartedAt,
+        );
+        const patches = committed.patches;
+        const canvasUploadStartedAt = performance.now();
+        updateWorkingCanvas(result.bounds);
+        const canvasUploadMs = recordPerformanceMeasure(
+          'glitchbrushes:image-brush-canvas-upload',
+          canvasUploadStartedAt,
+        );
+        clearImageBrushOverlay();
         const elapsedSeconds = Math.max(0.001, (performance.now() - stroke.startedAt) / 1000);
         setImageBrushPerformance({
           ...result.metrics,
@@ -1951,7 +2073,10 @@ function GlitchBrushesEditor({
           stampsGenerated: stroke.stamps.length,
           stampsPerSecond: result.stampCount / elapsedSeconds,
           firstFeedbackMs: Math.max(0, stroke.firstFeedbackAt - stroke.startedAt),
-          pointerUpCommitMs: Math.max(0, performance.now() - stroke.pointerUpAt),
+          pointerUpToResultMs,
+          resultAdoptionMs,
+          layerCommitMs,
+          canvasUploadMs,
           workerPostMs,
           workerTransferOutBytes,
           workerTransferInBytes: output.byteLength,
@@ -1964,61 +2089,6 @@ function GlitchBrushesEditor({
           maxLiveFrameMs: stroke.maxLiveFrameMs,
           quality: capturedSettings.renderingQuality,
         });
-        if (output.length !== result.bounds.width * result.bounds.height * 4) {
-          updateWorkingCanvas();
-          clearImageBrushOverlay();
-          setNotice('Image Brush local result size did not match its affected bounds.');
-          return;
-        }
-        const sourceResult =
-          stroke.sourceMode === 'selected-layer'
-            ? cropRgbaRegion(sourcePixels, current.width, result.bounds)
-            : null;
-        for (let row = 0; row < result.bounds.height; row += 1) {
-          const rowSource = row * result.bounds.width * 4;
-          const rowDestination =
-            ((result.bounds.y + row) * current.width + result.bounds.x) * 4;
-          const rowEnd = rowSource + result.bounds.width * 4;
-          if (!sourceResult) {
-            current.pixels.set(output.subarray(rowSource, rowEnd), rowDestination);
-            continue;
-          }
-          let column = 0;
-          while (column < result.bounds.width) {
-            const source = rowSource + column * 4;
-            if (
-              sourceResult[source] === output[source] &&
-              sourceResult[source + 1] === output[source + 1] &&
-              sourceResult[source + 2] === output[source + 2] &&
-              sourceResult[source + 3] === output[source + 3]
-            ) {
-              column += 1;
-              continue;
-            }
-            const spanStart = source;
-            column += 1;
-            while (column < result.bounds.width) {
-              const spanOffset = rowSource + column * 4;
-              if (
-                sourceResult[spanOffset] === output[spanOffset] &&
-                sourceResult[spanOffset + 1] === output[spanOffset + 1] &&
-                sourceResult[spanOffset + 2] === output[spanOffset + 2] &&
-                sourceResult[spanOffset + 3] === output[spanOffset + 3]
-              ) {
-                break;
-              }
-              column += 1;
-            }
-            current.pixels.set(
-              output.subarray(spanStart, rowSource + column * 4),
-              rowDestination + (spanStart - rowSource),
-            );
-          }
-        }
-        const committed = commitCurrentBufferToActiveLayer(stroke.layerBefore, result.bounds);
-        const patches = committed.patches;
-        updateWorkingCanvas(result.bounds);
-        clearImageBrushOverlay();
         if (!patches.length) {
           setImageBrushStrokeNonce((nonce) => nonce + 1);
           setNotice('Image Brush stroke completed without changing visible pixels.');
@@ -2114,6 +2184,7 @@ function GlitchBrushesEditor({
       workerPostMs = performance.now() - postStarted;
     },
     [
+      adoptRegionalWorkerResult,
       cancelImageBrushJob,
       clearImageBrushOverlay,
       commitCurrentBufferToActiveLayer,
@@ -2397,21 +2468,38 @@ function GlitchBrushesEditor({
           return;
         }
         brushJobGateRef.current.cancel(result.jobId);
-        worker.terminate();
         if (brushWorkerRef.current === worker) brushWorkerRef.current = null;
         setBrushProcessing(false);
         setBrushProgress(null);
+        const adoptionStartedAt = performance.now();
         const output = new Uint8ClampedArray(result.pixels);
-        if (output.length !== current.pixels.length) {
+        if (output.length !== result.writeBounds.width * result.writeBounds.height * 4) {
           updateWorkingCanvas();
-          setNotice('Brush Worker result size did not match the current document.');
+          setNotice('Brush Worker result size did not match its write bounds.');
           return;
         }
-        if (stroke.sourceMode === 'selected-layer') {
-          mergeSingleLayerResult(sourcePixels, output, result.writeBounds, current.pixels);
-        } else {
-          current.pixels.set(output);
-        }
+        adoptRegionalWorkerResult(
+          sourcePixels,
+          output,
+          result.writeBounds,
+          current.pixels,
+          stroke.sourceMode === 'selected-layer',
+        );
+        recordPerformanceMeasure('glitchbrushes:worker-result-adoption', adoptionStartedAt);
+        const nextFeedbackMemory =
+          capturedAlgorithm === 'feedback-brush'
+            ? (() => {
+                const memory = sourcePixels.slice();
+                adoptRegionalWorkerResult(
+                  sourcePixels,
+                  output,
+                  result.writeBounds,
+                  memory,
+                  false,
+                );
+                return memory;
+              })()
+            : null;
         const committed = commitCurrentBufferToActiveLayer(
           capturedLayerBefore,
           result.writeBounds,
@@ -2441,13 +2529,13 @@ function GlitchBrushesEditor({
         current.dirty = true;
         if (mode === 'preview') {
           if (capturedAlgorithm === 'feedback-brush') {
-            pendingFeedbackMemoryRef.current = output.slice();
+            pendingFeedbackMemoryRef.current = nextFeedbackMemory;
           }
           setPendingPreview(action);
           setNotice('Worker preview is active. Apply with Enter or cancel with Escape.');
         } else {
           if (capturedAlgorithm === 'feedback-brush') {
-            feedbackMemoryRef.current = output.slice();
+            feedbackMemoryRef.current = nextFeedbackMemory;
             pendingFeedbackMemoryRef.current = null;
             setFeedbackMemoryVersion((version) => version + 1);
           }
@@ -2488,10 +2576,10 @@ function GlitchBrushesEditor({
     },
     [
       algorithm,
+      adoptRegionalWorkerResult,
       cancelBrushJob,
       cloneSource,
       commitCurrentBufferToActiveLayer,
-      mergeSingleLayerResult,
       processingSourcePixels,
       tool,
       updateWorkingCanvas,
@@ -2660,7 +2748,6 @@ function GlitchBrushesEditor({
         )
           return;
         brushJobGateRef.current.cancel(result.jobId);
-        worker.terminate();
         if (retouchWorkerRef.current === worker) retouchWorkerRef.current = null;
         setBrushProcessing(false);
         setBrushProgress(null);
@@ -2825,7 +2912,10 @@ function GlitchBrushesEditor({
     const useWorker = tool === 'brush' && algorithms[algorithm].family !== 'pixel';
     if (useWorker && stroke.bounds) {
       const mask = lastBrushMaskRef.current.data.slice();
-      maskRef.current = new Float32Array(maskRef.current.length);
+      for (let row = stroke.bounds.y; row < stroke.bounds.y + stroke.bounds.height; row += 1) {
+        const start = row * docRef.current.width + stroke.bounds.x;
+        maskRef.current.fill(0, start, start + stroke.bounds.width);
+      }
       clearOverlay();
       strokeRef.current = null;
       startBrushJob(stroke, mask, applyModeRef.current);
@@ -3637,7 +3727,7 @@ function GlitchBrushesEditor({
         setSelectedByte(0);
         setSelectedPixels([0]);
         setExportName(file.name.replace(/\.[^.]+$/, ''));
-        bumpDocument();
+        bumpDocumentSurface();
         bumpHistory();
         setNotice(
           decoded.resized
@@ -3650,7 +3740,7 @@ function GlitchBrushesEditor({
         setProcessing(false);
       }
     },
-    [bumpHistory, cancelForImageImport, prepareImageImport, resetHistory],
+    [bumpDocumentSurface, bumpHistory, cancelForImageImport, prepareImageImport, resetHistory],
   );
 
   const addImageToCanvas = useCallback(
@@ -3693,7 +3783,7 @@ function GlitchBrushesEditor({
         });
         updateWorkingCanvas();
         bumpLayers();
-        bumpDocument();
+        bumpDocumentSurface();
         setNotice(
           `${file.name} added as its own ${decoded.width} × ${decoded.height} image layer. You can hide, move, duplicate, or delete it independently.`,
         );
@@ -3703,7 +3793,7 @@ function GlitchBrushesEditor({
         setProcessing(false);
       }
     },
-    [cancelForImageImport, prepareImageImport, updateWorkingCanvas],
+    [bumpDocumentSurface, cancelForImageImport, prepareImageImport, updateWorkingCanvas],
   );
 
   const loadDemo = useCallback(
@@ -4146,7 +4236,7 @@ function GlitchBrushesEditor({
       }
       resetHistory();
       updateWorkingCanvas();
-      bumpDocument();
+      bumpDocumentSurface();
       setNotice('Project imported. History starts from the imported result.');
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Project import failed.');
@@ -4806,7 +4896,7 @@ function GlitchBrushesEditor({
         zoom={zoom}
         undoCount={history.undoCount}
         redoCount={history.redoCount}
-        historyMemoryBytes={history.memoryBytes}
+        historyMemoryBytes={historyMemoryBytes}
         memoryEstimate={memoryEstimate}
       />
 

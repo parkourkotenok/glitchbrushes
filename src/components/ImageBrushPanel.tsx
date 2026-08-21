@@ -2112,8 +2112,13 @@ export function ImageBrushPanel({
             <dd>{performance.firstFeedbackMs.toFixed(1)} ms</dd>
             <dt>Live frame max</dt>
             <dd>{performance.maxLiveFrameMs.toFixed(1)} ms</dd>
-            <dt>Commit</dt>
-            <dd>{performance.pointerUpCommitMs.toFixed(1)} ms</dd>
+            <dt>Pointer up → result</dt>
+            <dd>{performance.pointerUpToResultMs.toFixed(1)} ms</dd>
+            <dt>Adopt / layer / canvas</dt>
+            <dd>
+              {performance.resultAdoptionMs.toFixed(1)} / {performance.layerCommitMs.toFixed(1)} /{' '}
+              {performance.canvasUploadMs.toFixed(1)} ms
+            </dd>
             <dt>Worker transfer</dt>
             <dd>
               {formatBytes(performance.workerTransferOutBytes)} out ·{' '}

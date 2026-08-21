@@ -29,6 +29,7 @@ export function useDocument() {
   const docRef = useRef<EditorDocument>(null!);
   if (!docRef.current) docRef.current = createDemoDocument();
   const [documentVersion, setDocumentVersion] = useState(0);
+  const [documentSurfaceVersion, setDocumentSurfaceVersion] = useState(0);
   const [processing, setProcessing] = useState(false);
   const [exportName, setExportName] = useState('glitch-brushes');
 
@@ -36,10 +37,17 @@ export function useDocument() {
     setDocumentVersion((version) => version + 1);
   }, []);
 
+  const bumpDocumentSurface = useCallback(() => {
+    setDocumentVersion((version) => version + 1);
+    setDocumentSurfaceVersion((version) => version + 1);
+  }, []);
+
   return {
     docRef,
     documentVersion,
+    documentSurfaceVersion,
     bumpDocument,
+    bumpDocumentSurface,
     processing,
     setProcessing,
     exportName,

@@ -1,6 +1,6 @@
 @echo off
 setlocal
-title Glitchbrushes Local Server
+title Glitchbrushes Development Server
 cd /d "%~dp0"
 
 where npm >nul 2>&1
@@ -17,18 +17,14 @@ if not exist "node_modules\" (
   if errorlevel 1 goto :failed
 )
 
-echo Building the production version...
-call npm run build
-if errorlevel 1 goto :failed
-
-echo Starting production Glitchbrushes at http://127.0.0.1:4173/
-call npm run preview -- --host 127.0.0.1 --port 4173 --open
+echo Starting development Glitchbrushes at http://127.0.0.1:5173/
+call npm run dev -- --host 127.0.0.1 --port 5173 --open
 
 if errorlevel 1 goto :failed
 exit /b 0
 
 :failed
 echo.
-echo Server failed to start. See the error above.
+echo Development server failed to start. See the error above.
 pause
 exit /b 1

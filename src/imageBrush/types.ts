@@ -305,7 +305,10 @@ export interface ImageBrushPerformanceSnapshot extends ImageBrushPerformanceMetr
   stampsGenerated: number;
   stampsPerSecond: number;
   firstFeedbackMs: number;
-  pointerUpCommitMs: number;
+  pointerUpToResultMs: number;
+  resultAdoptionMs: number;
+  layerCommitMs: number;
+  canvasUploadMs: number;
   workerPostMs: number;
   workerTransferOutBytes: number;
   workerTransferInBytes: number;

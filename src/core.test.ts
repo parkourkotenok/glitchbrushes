@@ -108,6 +108,27 @@ describe('patch history', () => {
     expect([...buffer]).toEqual([1, 9, 8, 4]);
   });
 
+  it('caches unique retained History buffers instead of recounting shared COW storage', () => {
+    const shared = new Uint8ClampedArray(8);
+    const history = new PatchHistory();
+    history.push({
+      id: 'shared',
+      label: 'Shared buffers',
+      timestamp: 1,
+      patches: [
+        {
+          start: 0,
+          before: shared.subarray(0, 4),
+          after: shared.subarray(4, 8),
+        },
+      ],
+    });
+
+    expect(history.logicalMemoryBytes).toBe(8);
+    expect(history.memoryBytes).toBe(8);
+    expect(history.memoryBytes).toBe(8);
+  });
+
   it('restores a selected range from the original', () => {
     const original = new Uint8ClampedArray([1, 2, 3, 4]);
     const buffer = new Uint8ClampedArray([9, 9, 9, 9]);

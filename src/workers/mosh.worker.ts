@@ -60,6 +60,7 @@ self.onmessage = (
       },
       { transfer: [buffer] },
     );
+    self.close();
   } catch (error) {
     if (error instanceof MoshCancelledError || cancelledJobs.has(request.jobId)) return;
     self.postMessage({

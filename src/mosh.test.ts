@@ -682,7 +682,21 @@ describe('direct brush Worker engine', () => {
     const result = processBrushEffect(request, {
       onProgress: (update) => progress.push(update.percent),
     });
+    const processedFull = new Uint8ClampedArray(request.pixels);
+    const expectedRegion = new Uint8ClampedArray(
+      result.writeBounds.width * result.writeBounds.height * 4,
+    );
+    for (let row = 0; row < result.writeBounds.height; row += 1) {
+      const sourceStart =
+        ((result.writeBounds.y + row) * request.width + result.writeBounds.x) * 4;
+      expectedRegion.set(
+        processedFull.subarray(sourceStart, sourceStart + result.writeBounds.width * 4),
+        row * result.writeBounds.width * 4,
+      );
+    }
     expect(result.affectedPixels).toBeGreaterThan(0);
+    expect(result.pixels).toHaveLength(result.writeBounds.width * result.writeBounds.height * 4);
+    expect(result.pixels).toEqual(expectedRegion);
     expect(result.pixels).not.toEqual(source);
     expect(progress).toEqual([8, 92, 100]);
   });

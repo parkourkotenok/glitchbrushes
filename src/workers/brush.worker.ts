@@ -33,6 +33,7 @@ self.onmessage = (
       },
       { transfer: [buffer] },
     );
+    self.close();
   } catch (error) {
     if (error instanceof BrushCancelledError || cancelledJobs.has(request.jobId)) return;
     self.postMessage({

@@ -44,25 +44,19 @@ export class BrushCancelledError extends Error {
   }
 }
 
-function countChangedPixelsInBounds(
+function countChangedPixels(
   before: Uint8ClampedArray,
   after: Uint8ClampedArray,
-  width: number,
-  bounds: Rectangle,
 ): number {
   let changed = 0;
-  for (let y = bounds.y; y < bounds.y + bounds.height; y += 1) {
-    for (let x = bounds.x; x < bounds.x + bounds.width; x += 1) {
-      const offset = pixelToByteOffset(x, y, width);
-      const beforeOffset = ((y - bounds.y) * bounds.width + (x - bounds.x)) * 4;
-      if (
-        before[beforeOffset] !== after[offset] ||
-        before[beforeOffset + 1] !== after[offset + 1] ||
-        before[beforeOffset + 2] !== after[offset + 2] ||
-        before[beforeOffset + 3] !== after[offset + 3]
-      ) {
-        changed += 1;
-      }
+  for (let offset = 0; offset < before.length; offset += 4) {
+    if (
+      before[offset] !== after[offset] ||
+      before[offset + 1] !== after[offset + 1] ||
+      before[offset + 2] !== after[offset + 2] ||
+      before[offset + 3] !== after[offset + 3]
+    ) {
+      changed += 1;
     }
   }
   return changed;
@@ -153,11 +147,19 @@ export function processBrushEffect(
   }
   progress(92);
   guard();
-  const affectedPixels = countChangedPixelsInBounds(before, pixels, request.width, writeBounds);
+  const resultPixels = new Uint8ClampedArray(writeBounds.width * writeBounds.height * 4);
+  for (let row = 0; row < writeBounds.height; row += 1) {
+    const sourceStart = ((writeBounds.y + row) * request.width + writeBounds.x) * 4;
+    resultPixels.set(
+      pixels.subarray(sourceStart, sourceStart + writeBounds.width * 4),
+      row * writeBounds.width * 4,
+    );
+  }
+  const affectedPixels = countChangedPixels(before, resultPixels);
   progress(100);
   return {
     jobId: request.jobId,
-    pixels,
+    pixels: resultPixels,
     writeBounds,
     affectedPixels,
   };

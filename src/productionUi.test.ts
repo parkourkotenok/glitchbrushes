@@ -15,6 +15,13 @@ import imageBrushStorageSource from './imageBrush/libraryStorage.ts?raw';
 import retouchPanelSource from './components/RetouchPanel.tsx?raw';
 import statusBarSource from './components/StatusBar.tsx?raw';
 import topBarSource from './components/TopBar.tsx?raw';
+import documentHookSource from './hooks/useDocument.ts?raw';
+import brushWorkerSource from './workers/brush.worker.ts?raw';
+import imageBrushWorkerSource from './workers/imageBrush.worker.ts?raw';
+import retouchWorkerSource from './workers/retouch.worker.ts?raw';
+import moshWorkerSource from './workers/mosh.worker.ts?raw';
+import localLauncherSource from '../start-local.bat?raw';
+import devLauncherSource from '../start-dev.bat?raw';
 
 describe('production editor cleanup', () => {
   it('does not import, route or render the HEX editor in the production App', () => {
@@ -138,5 +145,41 @@ describe('production editor cleanup', () => {
     }
     expect(source).toContain('source and destination move together');
     expect(source).toContain('reuse the picked source');
+  });
+
+  it('keeps pixel revisions separate from document surface initialization', () => {
+    expect(documentHookSource).toContain('documentSurfaceVersion');
+    expect(documentHookSource).toContain('bumpDocumentSurface');
+    expect(appSource).toContain(
+      '[documentSurfaceVersion, updateOriginalCanvas, updateWorkingCanvas]',
+    );
+    expect(appSource).toContain('[documentSurfaceVersion, fitToScreen]');
+    expect(appSource).not.toContain('[documentVersion, fitToScreen]');
+    expect(appSource).toContain('glitchbrushes:canvas-dirty-upload');
+    expect(appSource).toContain('glitchbrushes:canvas-full-sync');
+  });
+
+  it('lets successful one-shot workers close themselves after transferring results', () => {
+    for (const workerSource of [
+      brushWorkerSource,
+      imageBrushWorkerSource,
+      retouchWorkerSource,
+      moshWorkerSource,
+    ]) {
+      expect(workerSource).toContain('self.close()');
+    }
+    expect(appSource).not.toMatch(
+      /(?:mosh|brush|imageBrush)JobGateRef\.current\.cancel\(result\.jobId\);\s*worker\.terminate\(\)/,
+    );
+  });
+
+  it('reuses the full brush mask and launches production separately from development', () => {
+    expect(appSource).not.toContain(
+      'maskRef.current = new Float32Array(maskRef.current.length)',
+    );
+    expect(localLauncherSource).toContain('npm run build');
+    expect(localLauncherSource).toContain('npm run preview');
+    expect(localLauncherSource).not.toContain('npm run dev');
+    expect(devLauncherSource).toContain('npm run dev');
   });
 });

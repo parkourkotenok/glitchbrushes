@@ -58,6 +58,7 @@ self.onmessage = (
       },
       { transfer: [buffer] },
     );
+    self.close();
   } catch (error) {
     if (error instanceof ImageBrushCancelledError || cancelledJobs.has(request.jobId)) return;
     self.postMessage({

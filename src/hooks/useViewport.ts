@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clamp } from '../utils/geometry';
+import { recordPerformanceMeasure } from '../utils/performance';
 import type { EditorDocument, MaskView, Point } from '../types';
 
 export type DocRef = { current: EditorDocument };
@@ -46,6 +47,7 @@ export function useViewport(docRef: DocRef) {
   }, []);
 
   const fitToScreen = useCallback(() => {
+    const startedAt = performance.now();
     const viewport = viewportRef.current;
     if (!viewport) return;
     const current = docRef.current;
@@ -60,8 +62,11 @@ export function useViewport(docRef: DocRef) {
       x: (viewport.clientWidth - current.width * nextZoom) / 2,
       y: (viewport.clientHeight - current.height * nextZoom) / 2,
     };
-    setZoom(nextZoom);
-    setPan(nextPan);
+    setZoom((currentZoom) => (currentZoom === nextZoom ? currentZoom : nextZoom));
+    setPan((currentPan) =>
+      currentPan.x === nextPan.x && currentPan.y === nextPan.y ? currentPan : nextPan,
+    );
+    recordPerformanceMeasure('glitchbrushes:fit-to-screen', startedAt);
   }, [docRef]);
 
   const screenToImage = useCallback((clientX: number, clientY: number): Point => {

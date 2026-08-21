@@ -1,5 +1,15 @@
 # Agent Worklog
 
+## 2026-08-21 — Production post-stroke jank repair
+
+- Pixel revision отделена от document surface generation: обычный Effect/Retouch/Image Brush commit больше не запускает следующий full canvas sync или automatic fit. Surface generation меняется при replace/import/add-image, когда меняются dimensions/document/original identity.
+- Инструментированный baseline `c59c536` на 20 Slice strokes выполнял 20 dirty uploads + 20 повторных full sync + 20 fit; итоговая версия выполняет 20 dirty uploads + 0 full sync + 0 fit и сохраняет zoom/pan.
+- Brush Worker возвращает только `writeBounds` RGBA; main thread принимает регион строками. One-shot Brush/Image Brush/Retouch/Mosh Workers после transfer вызывают `self.close()`, а main thread больше не terminate'ит успешный result.
+- Full Float32 mask переиспользуется с построчной очисткой dirty bounds. History memory getter стал O(1) между мутациями и считает уникальные shared COW buffers; App читает его один раз на `historyVersion`, layer memory — один раз на `layerVersion`.
+- `start-local.bat` теперь собирает и запускает production preview; прежний Vite dev workflow вынесен в `start-dev.bat`.
+- Production acceptance: headed Edge 151 и Firefox 154 по 20 Slice strokes, плюс Chromium/IAB по 20 Pixel Sort, Displacement, short/long Slice и двум Image Brush recipes. Во всех bounded сериях full-sync/fit delta = 0, zoom стабилен, rAF gaps ≥50 ms = 0. Точные p50/p95/max — в `PERFORMANCE_REPORT_2026-08-21.md`.
+- P2 replacement tiles, region-aware algorithm input, persistent Image Brush Worker и History TileDelta сознательно не реализованы в этой задаче.
+
 ## 2026-08-21 — Documentation synchronization
 
 - `README.md` теперь отделяет реализованный быстрый путь слоёв от известных ограничений: overlay tiles, отсутствие replacement alpha/erase semantics и более дорогая композиция прозрачных, partial-opacity и non-Normal слоёв.

@@ -23,6 +23,7 @@ self.onmessage = (
     if (cancelledJobs.has(request.jobId)) return;
     const pixels = result.pixels.buffer;
     self.postMessage({ type: 'result', result: { ...result, pixels } }, { transfer: [pixels] });
+    self.close();
   } catch (error) {
     if (error instanceof RetouchCancelledError || cancelledJobs.has(request.jobId)) return;
     self.postMessage({

@@ -23,8 +23,7 @@ export function ImageBrushEssentialControls({
       data-testid="image-brush-essential"
     >
       <header>
-        <strong>ESSENTIAL CONTROLS</strong>
-        <span>PRIMARY · STYLE-SAFE</span>
+        <strong>Essentials</strong>
       </header>
       <SliderField
         helpId="control.size"

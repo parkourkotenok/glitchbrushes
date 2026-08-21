@@ -1,19 +1,21 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
   type DragEvent,
   type PointerEvent,
   type ReactNode,
+  type RefObject,
 } from 'react';
 import {
-  Clipboard,
   Copy,
-  Download,
+  ChevronDown,
   FileDown,
   FileUp,
   ImagePlus,
+  MoreHorizontal,
   Plus,
   RefreshCcw,
   Save,
@@ -22,7 +24,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import { imageBrushFxLevelAmount, imageBrushFxStageCopy } from '../imageBrush/performance';
+import { imageBrushFxLevelAmount } from '../imageBrush/performance';
 import {
   builtInImageBrushPresets,
   loadImageBrushPresets,
@@ -32,7 +34,6 @@ import {
 import {
   applyImageBrushGlitchAmount,
   applyImageBrushStyleKeepingEssentials,
-  describeCurrentImageBrush,
   imageBrushGlitchLevels,
 } from '../imageBrush/simple';
 import {
@@ -48,6 +49,7 @@ import {
   type ImageBrushSettings,
 } from '../imageBrush/types';
 import { formatBytes } from '../utils/geometry';
+import { performanceDiagnosticsEnabled } from '../utils/performance';
 import { helpSlug } from '../help/registry';
 import type { ControlHelpOption } from '../help/types';
 import { EffectIcon } from '../icons/effects';
@@ -60,10 +62,6 @@ import {
   supportsImageBrushStages,
 } from '../effects/sharedRegistry';
 import { decodeImageBrushFilesOffThread } from '../imageBrush/decode';
-import {
-  imageBrushLivePreviewMagnification,
-  imageBrushLivePreviewStampCount,
-} from '../imageBrush/livePreview';
 
 interface ProcessedBrushPreview {
   pixels: Uint8ClampedArray;
@@ -86,7 +84,6 @@ interface ProcessedBrushPreview {
 }
 
 interface ImageBrushPanelProps {
-  initialInterfaceLevel?: 'simple' | 'advanced';
   library: ImageBrushAsset[];
   activeAssetId: string | null;
   settings: ImageBrushSettings;
@@ -106,12 +103,9 @@ interface ImageBrushPanelProps {
   onSeedChange(seed: string): void;
   onPresetChange(id: string): void;
   onRandomize(scope: ImageBrushRandomizeScope): void;
-  randomizeNonce: number;
   randomizeLockSeed: boolean;
   onRandomizeLockSeedChange(locked: boolean): void;
   onOptimizeAsset(maximumDimension: number | null): void;
-  onDownloadProcessed(): void;
-  onCopyProcessed(): void;
   onTestStamp(): void;
   onTestTrail(): void;
   onCancelProcessing(): void;
@@ -166,6 +160,42 @@ const mutationRecipeOptions = [
   ['chroma-drift', 'Chroma Drift'],
   ['flow-field', 'Flow Field Displace'],
 ] as const;
+
+type ImageBrushTab = 'placement' | 'evolution' | 'fx';
+
+function useDismissiblePopover(
+  open: boolean,
+  setOpen: (open: boolean) => void,
+  triggerRef: RefObject<HTMLButtonElement | null>,
+  panelRef: RefObject<HTMLDivElement | null>,
+): void {
+  useEffect(() => {
+    if (!open) return;
+    const close = (restoreFocus: boolean) => {
+      setOpen(false);
+      if (restoreFocus) requestAnimationFrame(() => triggerRef.current?.focus());
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      close(true);
+    };
+    const onPointerDown = (event: globalThis.PointerEvent) => {
+      const target = event.target as Node;
+      if (panelRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      close(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('pointerdown', onPointerDown);
+    requestAnimationFrame(() =>
+      panelRef.current?.querySelector<HTMLElement>('button, select, input')?.focus(),
+    );
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [open, panelRef, setOpen, triggerRef]);
+}
 
 function drawPreview(
   canvas: HTMLCanvasElement | null,
@@ -232,12 +262,14 @@ function Toggle({
   onChange,
   disabled = false,
   helpId,
+  ariaLabel,
 }: {
   label: string;
   checked: boolean;
   onChange(value: boolean): void;
   disabled?: boolean;
   helpId?: string;
+  ariaLabel?: string;
 }) {
   const resolvedHelpId = helpId ?? `image-brush.${helpSlug(label || 'toggle')}`;
   return (
@@ -246,6 +278,7 @@ function Toggle({
         data-tooltip-id={resolvedHelpId}
         data-tooltip-label={label}
         type="checkbox"
+        aria-label={ariaLabel}
         checked={checked}
         disabled={disabled}
         onChange={(event) => onChange(event.target.checked)}
@@ -342,7 +375,6 @@ function mutationSummary(settings: ImageBrushSettings): [string, string] {
 }
 
 export function ImageBrushPanel({
-  initialInterfaceLevel,
   library,
   activeAssetId,
   settings,
@@ -362,12 +394,9 @@ export function ImageBrushPanel({
   onSeedChange,
   onPresetChange,
   onRandomize,
-  randomizeNonce,
   randomizeLockSeed,
   onRandomizeLockSeedChange,
   onOptimizeAsset,
-  onDownloadProcessed,
-  onCopyProcessed,
   onTestStamp,
   onTestTrail,
   onCancelProcessing,
@@ -378,14 +407,31 @@ export function ImageBrushPanel({
   const liveStrokePreviewRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const presetInputRef = useRef<HTMLInputElement>(null);
+  const tabsId = useId();
+  const sourceTriggerRef = useRef<HTMLButtonElement>(null);
+  const sourcePopoverRef = useRef<HTMLDivElement>(null);
+  const assetMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const assetMenuRef = useRef<HTMLDivElement>(null);
+  const styleMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const styleMenuRef = useRef<HTMLDivElement>(null);
+  const randomizeTriggerRef = useRef<HTMLButtonElement>(null);
+  const randomizeMenuRef = useRef<HTMLDivElement>(null);
   const [draggingFiles, setDraggingFiles] = useState(false);
+  const [sourcePickerOpen, setSourcePickerOpen] = useState(false);
+  const [assetMenuOpen, setAssetMenuOpen] = useState(false);
+  const [styleMenuOpen, setStyleMenuOpen] = useState(false);
+  const [randomizeMenuOpen, setRandomizeMenuOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<ImageBrushTab>(() => {
+    if (typeof sessionStorage === 'undefined') return 'placement';
+    const saved = sessionStorage.getItem('glitchbrushes:image-brush-tab');
+    return saved === 'evolution' || saved === 'fx' ? saved : 'placement';
+  });
   const [addEffect, setAddEffect] = useState<ImageBrushFxId>('slice');
-  const [contextAssetId, setContextAssetId] = useState<string | null>(null);
   const [optimizationSize, setOptimizationSize] = useState('auto');
   const [userPresets, setUserPresets] = useState<ImageBrushPreset[]>(() => loadImageBrushPresets());
+  const diagnosticsEnabled = performanceDiagnosticsEnabled();
   const allPresets = [...builtInImageBrushPresets, ...userPresets];
   const selectedPreset = allPresets.find((preset) => preset.id === activePresetId);
-  const currentSummary = describeCurrentImageBrush(active, settings);
   const mutationCopy = mutationSummary(settings);
   const requiredFxStages = effectiveImageBrushStages(settings.fxStage, settings.mutationMode);
   const addEffectDefinition = imageBrushFxDefinitions.find((item) => item.id === addEffect);
@@ -414,6 +460,21 @@ export function ImageBrushPanel({
           0,
           imageBrushGlitchLevels.findIndex((level) => level.id === settings.glitchAmount),
         );
+
+  useDismissiblePopover(sourcePickerOpen, setSourcePickerOpen, sourceTriggerRef, sourcePopoverRef);
+  useDismissiblePopover(assetMenuOpen, setAssetMenuOpen, assetMenuTriggerRef, assetMenuRef);
+  useDismissiblePopover(styleMenuOpen, setStyleMenuOpen, styleMenuTriggerRef, styleMenuRef);
+  useDismissiblePopover(
+    randomizeMenuOpen,
+    setRandomizeMenuOpen,
+    randomizeTriggerRef,
+    randomizeMenuRef,
+  );
+
+  useEffect(() => {
+    if (typeof sessionStorage === 'undefined') return;
+    sessionStorage.setItem('glitchbrushes:image-brush-tab', activeTab);
+  }, [activeTab]);
 
   useEffect(() => {
     drawPreview(previewRef.current, active?.pixels, active?.width ?? 1, active?.height ?? 1);
@@ -466,17 +527,6 @@ export function ImageBrushPanel({
     window.addEventListener('paste', paste);
     return () => window.removeEventListener('paste', paste);
   }, [addFiles]);
-
-  useEffect(() => {
-    if (!contextAssetId) return;
-    const close = () => setContextAssetId(null);
-    window.addEventListener('pointerdown', close, { once: true });
-    window.addEventListener('blur', close, { once: true });
-    return () => {
-      window.removeEventListener('pointerdown', close);
-      window.removeEventListener('blur', close);
-    };
-  }, [contextAssetId]);
 
   const update = <K extends keyof ImageBrushSettings>(key: K, value: ImageBrushSettings[K]) => {
     const affectsGlitch = new Set<keyof ImageBrushSettings>([
@@ -536,7 +586,7 @@ export function ImageBrushPanel({
   };
 
   const saveCurrentPreset = () => {
-    const name = window.prompt('Image Brush preset name:', 'My Image Brush');
+    const name = window.prompt('Style name:', 'My Image Brush');
     if (!name?.trim()) return;
     const next: ImageBrushPreset = {
       id: `image-brush-user-${Date.now()}`,
@@ -554,7 +604,7 @@ export function ImageBrushPanel({
   const renamePreset = () => {
     const current = userPresets.find((preset) => preset.id === activePresetId);
     if (!current) return;
-    const name = window.prompt('Rename preset:', current.name);
+    const name = window.prompt('Rename style:', current.name);
     if (!name?.trim()) return;
     const presets = userPresets.map((preset) =>
       preset.id === current.id ? { ...preset, name: name.trim() } : preset,
@@ -565,7 +615,7 @@ export function ImageBrushPanel({
 
   const deletePreset = () => {
     const current = userPresets.find((preset) => preset.id === activePresetId);
-    if (!current || !window.confirm(`Delete preset "${current.name}"?`)) return;
+    if (!current || !window.confirm(`Delete style "${current.name}"?`)) return;
     const presets = userPresets.filter((preset) => preset.id !== current.id);
     setUserPresets(presets);
     saveImageBrushPresets(presets);
@@ -575,7 +625,7 @@ export function ImageBrushPanel({
   const exportPreset = () => {
     const selected = allPresets.find((preset) => preset.id === activePresetId) ?? {
       id: 'custom',
-      name: 'Custom Image Brush',
+      name: 'Custom Image Brush Style',
       settings,
       rack,
       custom: true,
@@ -594,7 +644,7 @@ export function ImageBrushPanel({
     try {
       const parsed = JSON.parse(await file.text()) as ImageBrushPreset;
       if (!parsed?.settings || !Array.isArray(parsed.rack)) {
-        throw new Error('Invalid Image Brush preset JSON.');
+        throw new Error('Invalid Image Brush style JSON.');
       }
       const next = { ...parsed, id: `image-brush-user-${Date.now()}`, custom: true };
       const presets = [...userPresets, next];
@@ -602,7 +652,7 @@ export function ImageBrushPanel({
       saveImageBrushPresets(presets);
       applyPreset(next);
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : 'Preset import failed.');
+      onNotice(error instanceof Error ? error.message : 'Style import failed.');
     }
   };
 
@@ -677,12 +727,8 @@ export function ImageBrushPanel({
       onDrop={dropFiles}
     >
       <header className="image-brush-head">
-        <div>
-          <span>LOCAL RGBA STAMP ENGINE</span>
-          <strong>IMAGE BRUSH</strong>
-          <p>Repeat and mutate raster tips along a distance-sampled path.</p>
-        </div>
-        <EffectIcon id="image-brush" size={28} />
+        <strong>Image Brush</strong>
+        <EffectIcon id="image-brush" size={22} aria-hidden="true" />
       </header>
 
       {processing && progress && (
@@ -702,187 +748,321 @@ export function ImageBrushPanel({
         </div>
       )}
 
-      <section className="image-brush-compact-section image-brush-image-section">
+      <section className="image-brush-compact-section image-brush-source-section">
         <header>
-          <strong>IMAGE</strong>
-          <span>{library.length} loaded</span>
+          <strong>Source</strong>
+          <span>
+            {library.length} image{library.length === 1 ? '' : 's'}
+          </span>
         </header>
-        <div className="image-brush-active-image">
-          <div className="brush-checker">
+        <div className="image-brush-source-row">
+          <div className="brush-checker image-brush-source-thumbnail">
             <canvas
               ref={previewRef}
-              width={96}
-              height={76}
+              width={72}
+              height={58}
               aria-label="Active brush image preview"
             />
           </div>
-          <div>
+          <div className="image-brush-source-copy">
             <strong>{active?.name ?? 'No brush image'}</strong>
-            <span>
-              {active
-                ? `${active.width}×${active.height} · ${active.mimeType.replace('image/', '').toUpperCase()}`
-                : 'Add PNG, JPEG or WebP'}
-            </span>
-            <div>
-              <button
-                data-tooltip="Choose another local image file."
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <ImagePlus size={12} /> {active ? 'Replace / add' : 'Add image'}
+            <span>{active ? `${active.width}×${active.height}` : 'PNG, JPEG or WebP'}</span>
+          </div>
+          <button
+            ref={sourceTriggerRef}
+            className="image-brush-source-choose"
+            aria-expanded={sourcePickerOpen}
+            aria-haspopup="dialog"
+            onClick={() => setSourcePickerOpen((value) => !value)}
+          >
+            Choose
+          </button>
+          <button
+            ref={assetMenuTriggerRef}
+            className="icon-button"
+            aria-label="Source image actions"
+            aria-expanded={assetMenuOpen}
+            aria-haspopup="menu"
+            onClick={() => setAssetMenuOpen((value) => !value)}
+          >
+            <MoreHorizontal size={16} aria-hidden="true" />
+          </button>
+        </div>
+        {sourcePickerOpen && (
+          <div
+            ref={sourcePopoverRef}
+            className="image-brush-popover image-brush-source-popover"
+            role="dialog"
+            aria-label="Choose brush image"
+          >
+            <div className="image-brush-library-strip" aria-label="Brush image library">
+              {library.map((asset) => (
+                <button
+                  key={asset.id}
+                  className={`image-brush-library-select ${asset.id === activeAssetId ? 'active' : ''}`}
+                  aria-pressed={asset.id === activeAssetId}
+                  onClick={() => {
+                    onActiveAssetChange(asset.id);
+                    setSourcePickerOpen(false);
+                    requestAnimationFrame(() => sourceTriggerRef.current?.focus());
+                  }}
+                >
+                  <BrushThumbnail asset={asset} />
+                  <span>{asset.name}</span>
+                </button>
+              ))}
+            </div>
+            {!library.length && <p className="image-brush-empty">Preparing the astronaut demo…</p>}
+            <div className="image-brush-popover-actions">
+              <button onClick={() => fileInputRef.current?.click()}>
+                <ImagePlus size={13} aria-hidden="true" /> Add image
               </button>
               <button
-                data-tooltip="Remove the selected brush image without changing committed canvas strokes."
-                disabled={!active}
-                onClick={() => active && onRemoveAsset(active.id)}
+                className="danger"
+                disabled={!library.some((asset) => !asset.demo)}
+                onClick={onClearLibrary}
               >
-                <Trash2 size={12} /> Remove
+                Clear custom images
               </button>
             </div>
           </div>
-        </div>
-        <div className="image-brush-optimization">
-          <div>
-            <strong>Optimize Stamp Image</strong>
-            <span>
-              {active
-                ? `Original ${active.originalWidth}×${active.originalHeight} / ${formatBytes(originalBytes)} · working ${active.width}×${active.height} / ${formatBytes(workingBytes)}`
-                : 'Select an image to create a smaller editing buffer.'}
-            </span>
-            {active && optimizationImprovement > 1.01 && (
+        )}
+        {assetMenuOpen && (
+          <div
+            ref={assetMenuRef}
+            className="image-brush-popover image-brush-menu"
+            role="menu"
+            aria-label="Source image actions"
+          >
+            <button
+              role="menuitem"
+              disabled={!active}
+              onClick={() => active && duplicateAsset(active)}
+            >
+              <Copy size={13} aria-hidden="true" /> Duplicate image
+            </button>
+            <button
+              role="menuitem"
+              disabled={!active || Boolean(active?.demo)}
+              className="danger"
+              onClick={() => {
+                if (active && !active.demo) onRemoveAsset(active.id);
+                setAssetMenuOpen(false);
+              }}
+            >
+              <Trash2 size={13} aria-hidden="true" /> Remove image
+            </button>
+            <div className="menu-separator" />
+            <label className="image-brush-select">
+              <span>Working size</span>
+              <select
+                value={optimizationSize}
+                onChange={(event) => setOptimizationSize(event.target.value)}
+              >
+                <option value="auto">Automatic</option>
+                <option value="64">64 px</option>
+                <option value="128">128 px</option>
+                <option value="256">256 px</option>
+                <option value="512">512 px</option>
+                <option value="original">Restore original</option>
+              </select>
+            </label>
+            <button role="menuitem" disabled={!active} onClick={applyOptimization}>
+              Apply working size
+            </button>
+            {diagnosticsEnabled && active && (
               <small>
-                {optimizationImprovement.toFixed(1)}× less decoded stamp memory; the original upload
-                is preserved.
+                {formatBytes(originalBytes)} source · {formatBytes(workingBytes)} working ·{' '}
+                {optimizationImprovement.toFixed(1)}×
               </small>
             )}
           </div>
-          <label className="image-brush-select">
-            <span>
-              Working maximum
-              <HelpButton
-                helpId="image-brush.optimization"
-                label="Working maximum"
-                value={optimizationSize}
-                options={[
-                  {
-                    value: 'auto',
-                    label: 'Auto',
-                    description:
-                      'Chooses a power-of-two working size from the displayed stamp size while keeping the original upload.',
-                  },
-                  {
-                    value: '64',
-                    label: '64 px',
-                    description: 'Fastest editing buffer for small stamps and expensive FX.',
-                  },
-                  {
-                    value: '128',
-                    label: '128 px',
-                    description: 'Balanced working buffer for most repeated stamps.',
-                  },
-                  {
-                    value: '256',
-                    label: '256 px',
-                    description: 'More source detail with higher FX and transfer cost.',
-                  },
-                  {
-                    value: '512',
-                    label: '512 px',
-                    description: 'High-detail working tip for large displayed stamps.',
-                  },
-                  {
-                    value: 'original',
-                    label: 'Keep / restore original',
-                    description: 'Uses the preserved uploaded pixels as the working tip.',
-                  },
-                ]}
-              />
-            </span>
-            <select
-              value={optimizationSize}
-              onChange={(event) => setOptimizationSize(event.target.value)}
-            >
-              <option value="auto">Auto</option>
-              <option value="64">64 px</option>
-              <option value="128">128 px</option>
-              <option value="256">256 px</option>
-              <option value="512">512 px</option>
-              <option value="original">Keep / restore original</option>
-            </select>
-          </label>
-          <button disabled={!active} onClick={applyOptimization}>
-            Optimize Stamp Image
-          </button>
-        </div>
+        )}
         <input
           ref={fileInputRef}
           hidden
           multiple
           type="file"
           accept="image/png,image/jpeg,image/webp"
+          aria-label="Add brush images"
           onChange={(event) => {
             void addFiles([...(event.target.files ?? [])]);
             event.target.value = '';
           }}
         />
-        {library.length > 0 ? (
-          <div className="image-brush-library-strip" aria-label="Brush image library">
-            {library.map((asset) => (
-              <article
-                key={asset.id}
-                className={asset.id === activeAssetId ? 'active' : ''}
-                onContextMenu={(event) => {
-                  if (asset.demo) return;
-                  event.preventDefault();
-                  setContextAssetId(asset.id);
-                }}
-              >
-                <button
-                  className="image-brush-library-select"
-                  aria-label={`Select ${asset.name}`}
-                  data-tooltip={`Use “${asset.name}” as the repeated brush image.`}
-                  onClick={() => onActiveAssetChange(asset.id)}
-                >
-                  <BrushThumbnail asset={asset} />
-                  <span>{asset.name}</span>
-                </button>
-                {!asset.demo && (
-                  <button
-                    className="image-brush-library-remove"
-                    aria-label={`Remove ${asset.name}`}
-                    data-tooltip={`Remove “${asset.name}” from this project library.`}
-                    onClick={() => onRemoveAsset(asset.id)}
-                  >
-                    <X size={11} />
-                  </button>
-                )}
-                {!asset.demo && contextAssetId === asset.id && (
-                  <div className="image-brush-library-context" role="menu">
-                    <button
-                      role="menuitem"
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onClick={() => {
-                        setContextAssetId(null);
-                        onRemoveAsset(asset.id);
-                      }}
-                    >
-                      <Trash2 size={11} /> Remove image
-                    </button>
-                  </div>
-                )}
-              </article>
-            ))}
+      </section>
+
+      <section className="image-brush-compact-section image-brush-style-section">
+        <header>
+          <strong>Style</strong>
+          <span>{selectedPreset?.name ?? 'Custom'}</span>
+        </header>
+        <div className="image-brush-style-row">
+          <select
+            aria-label="Image Brush style"
+            data-help-id="image-brush.preset"
+            value={activePresetId}
+            onChange={(event) => {
+              if (event.target.value === 'custom') {
+                onPresetChange('custom');
+                return;
+              }
+              const preset = allPresets.find((item) => item.id === event.target.value);
+              if (preset) applyPreset(preset);
+            }}
+          >
+            <optgroup label="Built-in">
+              {builtInImageBrushPresets.map((preset) => (
+                <option value={preset.id} key={preset.id}>
+                  {preset.name}
+                </option>
+              ))}
+            </optgroup>
+            {userPresets.length > 0 && (
+              <optgroup label="My styles">
+                {userPresets.map((preset) => (
+                  <option value={preset.id} key={preset.id}>
+                    {preset.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            <optgroup label="Custom">
+              <option value="custom">Current custom settings</option>
+            </optgroup>
+          </select>
+          <div className="image-brush-split-button">
+            <button
+              className="image-brush-randomize-main"
+              data-tooltip="Creates a balanced variation while keeping Size, Spacing, Opacity and Orientation."
+              onClick={() => onRandomize('balanced')}
+            >
+              <Shuffle size={13} aria-hidden="true" /> Randomize brush
+            </button>
+            <button
+              ref={randomizeTriggerRef}
+              aria-label="More randomize options"
+              aria-haspopup="menu"
+              aria-expanded={randomizeMenuOpen}
+              onClick={() => setRandomizeMenuOpen((value) => !value)}
+            >
+              <ChevronDown size={13} aria-hidden="true" />
+            </button>
           </div>
-        ) : (
-          <div className="image-brush-empty">Preparing the astronaut demo image…</div>
-        )}
-        <div className="image-brush-library-actions">
-          <button onClick={() => fileInputRef.current?.click()}>
-            <Plus size={12} /> Add image
-          </button>
-          <button disabled={!library.some((asset) => !asset.demo)} onClick={onClearLibrary}>
-            <Trash2 size={12} /> Clear library
+          <button
+            ref={styleMenuTriggerRef}
+            className="icon-button"
+            aria-label="Style actions"
+            aria-haspopup="menu"
+            aria-expanded={styleMenuOpen}
+            onClick={() => setStyleMenuOpen((value) => !value)}
+          >
+            <MoreHorizontal size={16} aria-hidden="true" />
           </button>
         </div>
+        {randomizeMenuOpen && (
+          <div
+            ref={randomizeMenuRef}
+            className="image-brush-popover image-brush-menu image-brush-randomize-menu"
+            role="menu"
+            aria-label="Randomize brush"
+          >
+            <button role="menuitem" onClick={() => onRandomize('everything')}>
+              Randomize whole brush
+            </button>
+            <button role="menuitem" onClick={() => onRandomize('layout')}>
+              Randomize placement only
+            </button>
+            <button role="menuitem" onClick={() => onRandomize('mutation')}>
+              Randomize evolution only
+            </button>
+            <button role="menuitem" onClick={() => onRandomize('fx')}>
+              Randomize FX only
+            </button>
+            <button role="menuitem" onClick={() => onRandomize('wild')}>
+              <Zap size={12} aria-hidden="true" /> Wild variation
+            </button>
+            <div className="menu-separator" />
+            <Toggle
+              label="Lock recipe"
+              checked={randomizeLockSeed}
+              onChange={onRandomizeLockSeedChange}
+            />
+            <label className="image-brush-seed-inline">
+              <span>Repeatable result</span>
+              <input value={seed} onChange={(event) => onSeedChange(event.target.value)} />
+            </label>
+          </div>
+        )}
+        {styleMenuOpen && (
+          <div
+            ref={styleMenuRef}
+            className="image-brush-popover image-brush-menu image-brush-style-menu"
+            role="menu"
+            aria-label="Style actions"
+          >
+            <button role="menuitem" onClick={saveCurrentPreset}>
+              <Save size={13} aria-hidden="true" /> Save current as new style
+            </button>
+            <button
+              role="menuitem"
+              disabled={!userPresets.some((preset) => preset.id === activePresetId)}
+              onClick={renamePreset}
+            >
+              Rename current style
+            </button>
+            <button
+              role="menuitem"
+              className="danger"
+              disabled={!userPresets.some((preset) => preset.id === activePresetId)}
+              onClick={deletePreset}
+            >
+              Delete current style
+            </button>
+            <div className="menu-separator" />
+            <button role="menuitem" onClick={() => presetInputRef.current?.click()}>
+              <FileUp size={13} aria-hidden="true" /> Import style
+            </button>
+            <button role="menuitem" onClick={exportPreset}>
+              <FileDown size={13} aria-hidden="true" /> Export style
+            </button>
+          </div>
+        )}
+        <input
+          ref={presetInputRef}
+          hidden
+          type="file"
+          accept="application/json"
+          aria-label="Import Image Brush style"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void importPreset(file);
+            event.target.value = '';
+          }}
+        />
+      </section>
+
+      <section className="image-brush-compact-section image-brush-live-preview">
+        <header>
+          <strong>Preview</strong>
+          <span>{processedPreview ? 'Ready' : active ? 'Updating' : 'Image needed'}</span>
+        </header>
+        <div className="image-brush-live-preview-stage brush-checker">
+          <canvas
+            ref={liveStrokePreviewRef}
+            width={480}
+            height={168}
+            aria-label="Live Image Brush stroke preview"
+          />
+          {!active && <span>Choose an image to preview the brush.</span>}
+        </div>
+        {diagnosticsEnabled && processedPreview && (
+          <small>
+            {processedPreview.stroke.processingMs.toFixed(1)} ms ·{' '}
+            {processedPreview.diagnostics.cacheVariants} cached variant
+            {processedPreview.diagnostics.cacheVariants === 1 ? '' : 's'}
+          </small>
+        )}
       </section>
 
       <ImageBrushEssentialControls
@@ -905,160 +1085,92 @@ export function ImageBrushPanel({
         onGlitchAmountChange={setGlitchAmount}
       />
 
-      <section className="image-brush-compact-section">
-        <header>
-          <strong>STYLE</strong>
-          <span>{selectedPreset?.name ?? 'Custom'}</span>
-        </header>
-        <label className="image-brush-select">
-          <span>
-            Style preset
-            <HelpButton
-              helpId="image-brush.preset"
-              label="Style preset"
-              value={activePresetId}
-              options={[
-                {
-                  value: 'custom',
-                  label: 'Custom',
-                  description: 'Keeps the currently edited layout, mutation and Stamp FX settings.',
-                },
-                ...allPresets.map((preset) => ({
-                  value: preset.id,
-                  label: preset.name,
-                  description: `Loads ${preset.name} layout, mutation, performance and Stamp FX settings without replacing the selected image.`,
-                })),
-              ]}
-            />
-          </span>
-          <select
-            data-help-id="image-brush.preset"
-            value={activePresetId}
-            onChange={(event) => {
-              if (event.target.value === 'custom') {
-                onPresetChange('custom');
-                return;
-              }
-              const preset = allPresets.find((item) => item.id === event.target.value);
-              if (preset) applyPreset(preset);
-            }}
+      <div
+        className="image-brush-workflow-tabs"
+        role="tablist"
+        aria-label="Image Brush controls"
+        onKeyDown={(event) => {
+          if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+          event.preventDefault();
+          const tabs: ImageBrushTab[] = ['placement', 'evolution', 'fx'];
+          const index = tabs.indexOf(activeTab);
+          const next =
+            event.key === 'Home'
+              ? 0
+              : event.key === 'End'
+                ? tabs.length - 1
+                : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+          setActiveTab(tabs[next]!);
+          requestAnimationFrame(() =>
+            document.getElementById(`${tabsId}-tab-${tabs[next]}`)?.focus(),
+          );
+        }}
+      >
+        {(['placement', 'evolution', 'fx'] as const).map((tab) => (
+          <button
+            id={`${tabsId}-tab-${tab}`}
+            key={tab}
+            role="tab"
+            aria-selected={activeTab === tab}
+            aria-controls={`${tabsId}-panel-${tab}`}
+            tabIndex={activeTab === tab ? 0 : -1}
+            onClick={() => setActiveTab(tab)}
           >
-            <option value="custom">Custom</option>
-            {allPresets.map((preset) => (
-              <option value={preset.id} key={preset.id}>
-                {preset.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          className="image-brush-randomize-main"
-          data-tooltip="Creates a new style variation. Lock Recipe repeats the current seeded recipe."
-          onClick={() => onRandomize('everything')}
-        >
-          <Shuffle size={12} /> Randomize style
-        </button>
-        <div className="image-brush-randomize-controls">
-          <Toggle
-            label="Lock Recipe"
-            checked={randomizeLockSeed}
-            onChange={onRandomizeLockSeedChange}
-          />
-        </div>
-        <p className="image-brush-recipe-summary">
-          {settings.mutationMode.replaceAll('-', ' ')} · {enabledFx.length} FX ·{' '}
-          {settings.size < 64 ? 'small' : settings.size < 180 ? 'medium' : 'large'} stamps ·{' '}
-          {rgbAmount < 0.25 ? 'low' : rgbAmount < 0.7 ? 'medium' : 'high'} RGB drift · variation{' '}
-          {settings.effectVariation.toFixed(2)} · {estimatedCost.replace('-', ' ')} cost · seed{' '}
-          {seed} / nonce {randomizeNonce}
-        </p>
-      </section>
+            {tab === 'fx' ? 'FX' : `${tab[0]!.toUpperCase()}${tab.slice(1)}`}
+          </button>
+        ))}
+      </div>
 
-      <section className="image-brush-compact-section image-brush-live-preview">
+      <section
+        id={`${tabsId}-panel-evolution`}
+        className="image-brush-tab-panel image-brush-evolution-panel"
+        role="tabpanel"
+        aria-labelledby={`${tabsId}-tab-evolution`}
+        hidden={activeTab !== 'evolution'}
+      >
         <header>
-          <strong>LIVE STROKE PREVIEW</strong>
-          <span>
-            {processedPreview
-              ? `${processedPreview.quality} · ${processedPreview.stroke.stampCount} stamps · ${imageBrushLivePreviewMagnification}×`
-              : active
-                ? 'UPDATING'
-                : 'IMAGE NEEDED'}
-          </span>
-        </header>
-        <div className="image-brush-live-preview-stage brush-checker">
-          <canvas
-            ref={liveStrokePreviewRef}
-            width={480}
-            height={168}
-            aria-label="Live Image Brush stroke preview"
-          />
-          {!active && <span>Add or select an image to preview the complete brush stroke.</span>}
-        </div>
-        <p>
-          One bounded preview shows the current image, spacing, opacity, layout, mutation, Stamp FX,
-          alpha and blend settings together. It uses {imageBrushLivePreviewStampCount} enlarged
-          stamps with opened-up spacing ({imageBrushLivePreviewMagnification}×) for readability; the
-          canvas uses the exact Size and spacing. It renders off the main thread.
-        </p>
-        {processedPreview && (
-          <small>
-            {processedPreview.stroke.processingMs.toFixed(1)} ms ·{' '}
-            {processedPreview.diagnostics.cacheVariants} cached variant
-            {processedPreview.diagnostics.cacheVariants === 1 ? '' : 's'}
-          </small>
-        )}
-      </section>
-
-      <section className="image-brush-compact-section image-brush-mutation-main">
-        <header>
-          <strong>MUTATION</strong>
+          <strong>Evolution</strong>
           <span>{settings.mutationMode.replace('-', ' ')}</span>
         </header>
-        <SelectField
-          helpId="image-brush.mutation"
-          label="Mutation mode"
-          value={settings.mutationMode}
-          onChange={(value) => update('mutationMode', value)}
-          options={[
-            ['clean', 'Clean Repeat'],
-            ['fixed', 'Fixed Glitch'],
-            ['progressive', 'Progressive Decay'],
-            ['per-stamp', 'Random Per Stamp'],
-            ['evolving', 'Evolving Chain'],
-            ['random-stack', 'Random Effect Stack'],
-            ['alternating', 'Alternating Modes'],
-            ['stroke-gradient', 'Stroke Gradient'],
-            ['whole-trail', 'Whole Trail Processing'],
-          ]}
-        />
-        <div className="image-brush-mutation-summary">
-          <strong>{mutationCopy[0]}</strong>
-          <span>{mutationCopy[1]}</span>
-        </div>
+        <label className="image-brush-select">
+          <span>Evolution mode</span>
+          <select
+            value={settings.mutationMode}
+            onChange={(event) =>
+              update('mutationMode', event.target.value as ImageBrushSettings['mutationMode'])
+            }
+          >
+            <optgroup label="Basic">
+              <option value="clean">Clean Repeat</option>
+              <option value="fixed">Fixed Glitch</option>
+            </optgroup>
+            <optgroup label="Evolution">
+              <option value="progressive">Progressive Decay</option>
+              <option value="evolving">Evolving Chain</option>
+              <option value="stroke-gradient">Stroke Gradient</option>
+            </optgroup>
+            <optgroup label="Variation">
+              <option value="per-stamp">Random Per Stamp</option>
+              <option value="random-stack">Random Effect Stack</option>
+              <option value="alternating">Alternating Modes</option>
+            </optgroup>
+            <optgroup label="Trail">
+              <option value="whole-trail">Whole Trail Processing</option>
+            </optgroup>
+          </select>
+        </label>
+        <p className="image-brush-inline-note">{mutationCopy[0]}</p>
       </section>
 
-      <section className="image-brush-current">
+      <section
+        id={`${tabsId}-panel-fx`}
+        className="image-brush-tab-panel image-brush-fx-panel"
+        role="tabpanel"
+        aria-labelledby={`${tabsId}-tab-fx`}
+        hidden={activeTab !== 'fx'}
+      >
         <header>
-          <strong>CURRENT BRUSH</strong>
-          <span>{processing ? 'PROCESSING' : active ? 'READY' : 'IMAGE NEEDED'}</span>
-        </header>
-        {currentSummary.map((line) => (
-          <p key={line}>{line}</p>
-        ))}
-        <div>
-          <button disabled={!active || processing} onClick={onTestStamp}>
-            Test stamp
-          </button>
-          <button disabled={!active || processing} onClick={onTestTrail}>
-            Test trail
-          </button>
-          {processing && <button onClick={onCancelProcessing}>Cancel</button>}
-        </div>
-      </section>
-
-      <section className="image-brush-compact-section">
-        <header>
-          <strong>STAMP FX</strong>
+          <strong>FX</strong>
           <span>{rack.filter((item) => item.enabled).length} enabled</span>
         </header>
         <p className="image-brush-fx-summary">
@@ -1074,11 +1186,19 @@ export function ImageBrushPanel({
                 .join(' · ')
             : 'No Stamp FX. Clean Repeat keeps the uploaded image unchanged.'}
         </p>
-        <LazyAdvancedDetails
-          summary="Edit effect stack"
-          className="image-brush-fx-editor"
-          initiallyMounted={initialInterfaceLevel === 'advanced'}
-        >
+        <div className="image-brush-fx-editor">
+          <SelectField
+            helpId="image-brush.fx-stage"
+            label="Processing stage"
+            value={settings.fxStage}
+            onChange={(value) => update('fxStage', value)}
+            options={[
+              ['before', 'Brush Tip'],
+              ['each', 'Every Stamp'],
+              ['after', 'Whole Trail'],
+              ['before-after', 'Tip + Trail'],
+            ]}
+          />
           <div className="image-brush-add-fx">
             <label className="image-brush-select">
               <span>
@@ -1147,6 +1267,7 @@ export function ImageBrushPanel({
                     </span>
                     <Toggle
                       label=""
+                      ariaLabel={`${item.enabled ? 'Disable' : 'Enable'} ${definition.name}`}
                       checked={item.enabled && !unavailable}
                       disabled={unavailable}
                       onChange={(enabled) =>
@@ -1161,311 +1282,322 @@ export function ImageBrushPanel({
                       aria-label={`Remove ${definition.name}`}
                       onClick={() => updateRack(rack.filter((entry) => entry.id !== item.id))}
                     >
-                      <X size={11} />
+                      <X size={11} aria-hidden="true" />
                     </button>
                   </header>
-                  <div>
-                    {incompatible && (
-                      <p className="image-brush-compatibility-warning">
-                        Disabled: this effect supports{' '}
-                        {imageBrushStageLabel(definition.imageBrushStages)}, while the current
-                        workflow requires {imageBrushStageLabel(requiredFxStages)}.
-                      </p>
-                    )}
-                    <div className="image-brush-fx-levels">
-                      {Object.entries(imageBrushFxLevelAmount).map(([level, amount]) => (
+                  <details className="image-brush-fx-details">
+                    <summary>
+                      Amount {Math.round(item.amount * 100)}% · Mix {Math.round(item.mix * 100)}%
+                    </summary>
+                    <div>
+                      {incompatible && (
+                        <p className="image-brush-compatibility-warning">
+                          Disabled: this effect supports{' '}
+                          {imageBrushStageLabel(definition.imageBrushStages)}, while the current
+                          workflow requires {imageBrushStageLabel(requiredFxStages)}.
+                        </p>
+                      )}
+                      <div className="image-brush-fx-levels">
+                        {Object.entries(imageBrushFxLevelAmount).map(([level, amount]) => (
+                          <button
+                            key={level}
+                            onClick={() =>
+                              updateRack(
+                                rack.map((entry) =>
+                                  entry.id === item.id ? { ...entry, amount } : entry,
+                                ),
+                              )
+                            }
+                          >
+                            {level}
+                          </button>
+                        ))}
+                      </div>
+                      <SliderField
+                        label="Amount"
+                        value={item.amount}
+                        min={0.01}
+                        max={1}
+                        step={0.01}
+                        onChange={(amount) =>
+                          updateRack(
+                            rack.map((entry) =>
+                              entry.id === item.id ? { ...entry, amount } : entry,
+                            ),
+                          )
+                        }
+                      />
+                      <SliderField
+                        label="Mix"
+                        value={item.mix}
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        onChange={(mix) =>
+                          updateRack(
+                            rack.map((entry) => (entry.id === item.id ? { ...entry, mix } : entry)),
+                          )
+                        }
+                      />
+                      {item.effectId === 'pixel-embroidery' && (
+                        <div className="image-brush-experimental-fx-controls">
+                          <SliderField
+                            label="Grid Size"
+                            value={item.embroideryGridSize ?? 7}
+                            min={3}
+                            max={24}
+                            suffix=" px"
+                            onChange={(embroideryGridSize) =>
+                              updateRack(
+                                rack.map((entry) =>
+                                  entry.id === item.id ? { ...entry, embroideryGridSize } : entry,
+                                ),
+                              )
+                            }
+                          />
+                          <label className="image-brush-select">
+                            <span>Stitch Type</span>
+                            <select
+                              value={item.embroideryStitchType ?? 'cross-stitch'}
+                              onChange={(event) =>
+                                updateRack(
+                                  rack.map((entry) =>
+                                    entry.id === item.id
+                                      ? {
+                                          ...entry,
+                                          embroideryStitchType: event.target.value as NonNullable<
+                                            ImageBrushFxItem['embroideryStitchType']
+                                          >,
+                                        }
+                                      : entry,
+                                  ),
+                                )
+                              }
+                            >
+                              <option value="cross-stitch">Cross Stitch</option>
+                              <option value="diagonal-stitch">Diagonal Stitch</option>
+                              <option value="bead">Bead</option>
+                              <option value="square">Square</option>
+                            </select>
+                          </label>
+                          <SliderField
+                            label="Palette Levels"
+                            value={item.embroideryPaletteLevels ?? 8}
+                            min={2}
+                            max={32}
+                            onChange={(embroideryPaletteLevels) =>
+                              updateRack(
+                                rack.map((entry) =>
+                                  entry.id === item.id
+                                    ? { ...entry, embroideryPaletteLevels }
+                                    : entry,
+                                ),
+                              )
+                            }
+                          />
+                          <SliderField
+                            label="Thread Angle"
+                            value={item.embroideryThreadAngle ?? 0}
+                            min={-180}
+                            max={180}
+                            suffix="°"
+                            onChange={(embroideryThreadAngle) =>
+                              updateRack(
+                                rack.map((entry) =>
+                                  entry.id === item.id
+                                    ? { ...entry, embroideryThreadAngle }
+                                    : entry,
+                                ),
+                              )
+                            }
+                          />
+                          <SliderField
+                            label="Missing Stitches"
+                            value={item.embroideryMissingStitches ?? 0.08}
+                            min={0}
+                            max={0.8}
+                            step={0.01}
+                            onChange={(embroideryMissingStitches) =>
+                              updateRack(
+                                rack.map((entry) =>
+                                  entry.id === item.id
+                                    ? { ...entry, embroideryMissingStitches }
+                                    : entry,
+                                ),
+                              )
+                            }
+                          />
+                          <SliderField
+                            label="Thread Jitter"
+                            value={item.embroideryThreadJitter ?? 0.12}
+                            min={0}
+                            max={1}
+                            step={0.01}
+                            onChange={(embroideryThreadJitter) =>
+                              updateRack(
+                                rack.map((entry) =>
+                                  entry.id === item.id
+                                    ? { ...entry, embroideryThreadJitter }
+                                    : entry,
+                                ),
+                              )
+                            }
+                          />
+                          <SliderField
+                            label="Background Transparency"
+                            value={item.embroideryBackgroundTransparency ?? 0.9}
+                            min={0}
+                            max={1}
+                            step={0.01}
+                            onChange={(embroideryBackgroundTransparency) =>
+                              updateRack(
+                                rack.map((entry) =>
+                                  entry.id === item.id
+                                    ? { ...entry, embroideryBackgroundTransparency }
+                                    : entry,
+                                ),
+                              )
+                            }
+                          />
+                        </div>
+                      )}
+                      {item.effectId === 'xerox-decay' && (
+                        <div className="image-brush-experimental-fx-controls">
+                          <SliderField
+                            label="Threshold"
+                            value={item.xeroxThreshold ?? 0.54}
+                            min={0.05}
+                            max={0.95}
+                            step={0.01}
+                            onChange={(xeroxThreshold) =>
+                              updateRack(
+                                rack.map((entry) =>
+                                  entry.id === item.id ? { ...entry, xeroxThreshold } : entry,
+                                ),
+                              )
+                            }
+                          />
+                          <SliderField
+                            label="Toner Loss"
+                            value={item.xeroxTonerLoss ?? 0.28}
+                            min={0}
+                            max={1}
+                            step={0.01}
+                            onChange={(xeroxTonerLoss) =>
+                              updateRack(
+                                rack.map((entry) =>
+                                  entry.id === item.id ? { ...entry, xeroxTonerLoss } : entry,
+                                ),
+                              )
+                            }
+                          />
+                          <SliderField
+                            label="Speckle"
+                            value={item.xeroxSpeckle ?? 0.22}
+                            min={0}
+                            max={1}
+                            step={0.01}
+                            onChange={(xeroxSpeckle) =>
+                              updateRack(
+                                rack.map((entry) =>
+                                  entry.id === item.id ? { ...entry, xeroxSpeckle } : entry,
+                                ),
+                              )
+                            }
+                          />
+                          <SliderField
+                            label="Edge Erosion"
+                            value={item.xeroxEdgeErosion ?? 0.2}
+                            min={0}
+                            max={1}
+                            step={0.01}
+                            onChange={(xeroxEdgeErosion) =>
+                              updateRack(
+                                rack.map((entry) =>
+                                  entry.id === item.id ? { ...entry, xeroxEdgeErosion } : entry,
+                                ),
+                              )
+                            }
+                          />
+                          <SliderField
+                            label="Banding"
+                            value={item.xeroxBanding ?? 0.14}
+                            min={0}
+                            max={1}
+                            step={0.01}
+                            onChange={(xeroxBanding) =>
+                              updateRack(
+                                rack.map((entry) =>
+                                  entry.id === item.id ? { ...entry, xeroxBanding } : entry,
+                                ),
+                              )
+                            }
+                          />
+                          <SliderField
+                            label="Black Crush"
+                            value={item.xeroxBlackCrush ?? 0.36}
+                            min={0}
+                            max={1}
+                            step={0.01}
+                            onChange={(xeroxBlackCrush) =>
+                              updateRack(
+                                rack.map((entry) =>
+                                  entry.id === item.id ? { ...entry, xeroxBlackCrush } : entry,
+                                ),
+                              )
+                            }
+                          />
+                          <label className="image-brush-select">
+                            <span>Color Mode</span>
+                            <select
+                              value={item.xeroxColorMode ?? 'mono'}
+                              onChange={(event) =>
+                                updateRack(
+                                  rack.map((entry) =>
+                                    entry.id === item.id
+                                      ? {
+                                          ...entry,
+                                          xeroxColorMode: event.target.value as NonNullable<
+                                            ImageBrushFxItem['xeroxColorMode']
+                                          >,
+                                        }
+                                      : entry,
+                                  ),
+                                )
+                              }
+                            >
+                              <option value="mono">Mono</option>
+                              <option value="duotone">Duotone</option>
+                            </select>
+                          </label>
+                        </div>
+                      )}
+                      <div className="image-brush-fx-order">
                         <button
-                          key={level}
-                          onClick={() =>
-                            updateRack(
-                              rack.map((entry) =>
-                                entry.id === item.id ? { ...entry, amount } : entry,
-                              ),
-                            )
-                          }
+                          aria-label={`Move ${definition.name} earlier`}
+                          disabled={index === 0}
+                          onClick={() => {
+                            const next = [...rack];
+                            [next[index - 1], next[index]] = [next[index]!, next[index - 1]!];
+                            updateRack(next);
+                          }}
                         >
-                          {level}
+                          ↑
                         </button>
-                      ))}
-                    </div>
-                    <SliderField
-                      label="Amount"
-                      value={item.amount}
-                      min={0.01}
-                      max={1}
-                      step={0.01}
-                      onChange={(amount) =>
-                        updateRack(
-                          rack.map((entry) =>
-                            entry.id === item.id ? { ...entry, amount } : entry,
-                          ),
-                        )
-                      }
-                    />
-                    <SliderField
-                      label="Mix"
-                      value={item.mix}
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      onChange={(mix) =>
-                        updateRack(
-                          rack.map((entry) => (entry.id === item.id ? { ...entry, mix } : entry)),
-                        )
-                      }
-                    />
-                    {item.effectId === 'pixel-embroidery' && (
-                      <div className="image-brush-experimental-fx-controls">
-                        <SliderField
-                          label="Grid Size"
-                          value={item.embroideryGridSize ?? 7}
-                          min={3}
-                          max={24}
-                          suffix=" px"
-                          onChange={(embroideryGridSize) =>
-                            updateRack(
-                              rack.map((entry) =>
-                                entry.id === item.id ? { ...entry, embroideryGridSize } : entry,
-                              ),
-                            )
-                          }
-                        />
-                        <label className="image-brush-select">
-                          <span>Stitch Type</span>
-                          <select
-                            value={item.embroideryStitchType ?? 'cross-stitch'}
-                            onChange={(event) =>
-                              updateRack(
-                                rack.map((entry) =>
-                                  entry.id === item.id
-                                    ? {
-                                        ...entry,
-                                        embroideryStitchType: event.target.value as NonNullable<
-                                          ImageBrushFxItem['embroideryStitchType']
-                                        >,
-                                      }
-                                    : entry,
-                                ),
-                              )
-                            }
-                          >
-                            <option value="cross-stitch">Cross Stitch</option>
-                            <option value="diagonal-stitch">Diagonal Stitch</option>
-                            <option value="bead">Bead</option>
-                            <option value="square">Square</option>
-                          </select>
-                        </label>
-                        <SliderField
-                          label="Palette Levels"
-                          value={item.embroideryPaletteLevels ?? 8}
-                          min={2}
-                          max={32}
-                          onChange={(embroideryPaletteLevels) =>
-                            updateRack(
-                              rack.map((entry) =>
-                                entry.id === item.id
-                                  ? { ...entry, embroideryPaletteLevels }
-                                  : entry,
-                              ),
-                            )
-                          }
-                        />
-                        <SliderField
-                          label="Thread Angle"
-                          value={item.embroideryThreadAngle ?? 0}
-                          min={-180}
-                          max={180}
-                          suffix="°"
-                          onChange={(embroideryThreadAngle) =>
-                            updateRack(
-                              rack.map((entry) =>
-                                entry.id === item.id ? { ...entry, embroideryThreadAngle } : entry,
-                              ),
-                            )
-                          }
-                        />
-                        <SliderField
-                          label="Missing Stitches"
-                          value={item.embroideryMissingStitches ?? 0.08}
-                          min={0}
-                          max={0.8}
-                          step={0.01}
-                          onChange={(embroideryMissingStitches) =>
-                            updateRack(
-                              rack.map((entry) =>
-                                entry.id === item.id
-                                  ? { ...entry, embroideryMissingStitches }
-                                  : entry,
-                              ),
-                            )
-                          }
-                        />
-                        <SliderField
-                          label="Thread Jitter"
-                          value={item.embroideryThreadJitter ?? 0.12}
-                          min={0}
-                          max={1}
-                          step={0.01}
-                          onChange={(embroideryThreadJitter) =>
-                            updateRack(
-                              rack.map((entry) =>
-                                entry.id === item.id ? { ...entry, embroideryThreadJitter } : entry,
-                              ),
-                            )
-                          }
-                        />
-                        <SliderField
-                          label="Background Transparency"
-                          value={item.embroideryBackgroundTransparency ?? 0.9}
-                          min={0}
-                          max={1}
-                          step={0.01}
-                          onChange={(embroideryBackgroundTransparency) =>
-                            updateRack(
-                              rack.map((entry) =>
-                                entry.id === item.id
-                                  ? { ...entry, embroideryBackgroundTransparency }
-                                  : entry,
-                              ),
-                            )
-                          }
-                        />
+                        <button
+                          aria-label={`Move ${definition.name} later`}
+                          disabled={index === rack.length - 1}
+                          onClick={() => {
+                            const next = [...rack];
+                            [next[index], next[index + 1]] = [next[index + 1]!, next[index]!];
+                            updateRack(next);
+                          }}
+                        >
+                          ↓
+                        </button>
                       </div>
-                    )}
-                    {item.effectId === 'xerox-decay' && (
-                      <div className="image-brush-experimental-fx-controls">
-                        <SliderField
-                          label="Threshold"
-                          value={item.xeroxThreshold ?? 0.54}
-                          min={0.05}
-                          max={0.95}
-                          step={0.01}
-                          onChange={(xeroxThreshold) =>
-                            updateRack(
-                              rack.map((entry) =>
-                                entry.id === item.id ? { ...entry, xeroxThreshold } : entry,
-                              ),
-                            )
-                          }
-                        />
-                        <SliderField
-                          label="Toner Loss"
-                          value={item.xeroxTonerLoss ?? 0.28}
-                          min={0}
-                          max={1}
-                          step={0.01}
-                          onChange={(xeroxTonerLoss) =>
-                            updateRack(
-                              rack.map((entry) =>
-                                entry.id === item.id ? { ...entry, xeroxTonerLoss } : entry,
-                              ),
-                            )
-                          }
-                        />
-                        <SliderField
-                          label="Speckle"
-                          value={item.xeroxSpeckle ?? 0.22}
-                          min={0}
-                          max={1}
-                          step={0.01}
-                          onChange={(xeroxSpeckle) =>
-                            updateRack(
-                              rack.map((entry) =>
-                                entry.id === item.id ? { ...entry, xeroxSpeckle } : entry,
-                              ),
-                            )
-                          }
-                        />
-                        <SliderField
-                          label="Edge Erosion"
-                          value={item.xeroxEdgeErosion ?? 0.2}
-                          min={0}
-                          max={1}
-                          step={0.01}
-                          onChange={(xeroxEdgeErosion) =>
-                            updateRack(
-                              rack.map((entry) =>
-                                entry.id === item.id ? { ...entry, xeroxEdgeErosion } : entry,
-                              ),
-                            )
-                          }
-                        />
-                        <SliderField
-                          label="Banding"
-                          value={item.xeroxBanding ?? 0.14}
-                          min={0}
-                          max={1}
-                          step={0.01}
-                          onChange={(xeroxBanding) =>
-                            updateRack(
-                              rack.map((entry) =>
-                                entry.id === item.id ? { ...entry, xeroxBanding } : entry,
-                              ),
-                            )
-                          }
-                        />
-                        <SliderField
-                          label="Black Crush"
-                          value={item.xeroxBlackCrush ?? 0.36}
-                          min={0}
-                          max={1}
-                          step={0.01}
-                          onChange={(xeroxBlackCrush) =>
-                            updateRack(
-                              rack.map((entry) =>
-                                entry.id === item.id ? { ...entry, xeroxBlackCrush } : entry,
-                              ),
-                            )
-                          }
-                        />
-                        <label className="image-brush-select">
-                          <span>Color Mode</span>
-                          <select
-                            value={item.xeroxColorMode ?? 'mono'}
-                            onChange={(event) =>
-                              updateRack(
-                                rack.map((entry) =>
-                                  entry.id === item.id
-                                    ? {
-                                        ...entry,
-                                        xeroxColorMode: event.target.value as NonNullable<
-                                          ImageBrushFxItem['xeroxColorMode']
-                                        >,
-                                      }
-                                    : entry,
-                                ),
-                              )
-                            }
-                          >
-                            <option value="mono">Mono</option>
-                            <option value="duotone">Duotone</option>
-                          </select>
-                        </label>
-                      </div>
-                    )}
-                    <div className="image-brush-fx-order">
-                      <button
-                        disabled={index === 0}
-                        onClick={() => {
-                          const next = [...rack];
-                          [next[index - 1], next[index]] = [next[index]!, next[index - 1]!];
-                          updateRack(next);
-                        }}
-                      >
-                        ↑
-                      </button>
-                      <button
-                        disabled={index === rack.length - 1}
-                        onClick={() => {
-                          const next = [...rack];
-                          [next[index], next[index + 1]] = [next[index + 1]!, next[index]!];
-                          updateRack(next);
-                        }}
-                      >
-                        ↓
-                      </button>
                     </div>
-                  </div>
+                  </details>
                 </article>
               );
             })}
@@ -1473,15 +1605,31 @@ export function ImageBrushPanel({
               <div className="image-brush-empty">Add an effect to build a Stamp FX stack.</div>
             )}
           </div>
-        </LazyAdvancedDetails>
+          <button
+            className="image-brush-clear-fx"
+            disabled={!rack.length}
+            onClick={() => {
+              onRackChange([]);
+              onPresetChange('custom');
+              onNotice('Stamp FX cleared. The selected image was preserved.');
+            }}
+          >
+            <Trash2 size={12} aria-hidden="true" /> Clear FX
+          </button>
+        </div>
       </section>
 
-      <div className="image-brush-advanced-label">ADVANCED</div>
-
-      <LazyAdvancedDetails
-        summary="Stamp Layout"
-        initiallyMounted={initialInterfaceLevel === 'advanced'}
+      <section
+        id={`${tabsId}-panel-placement`}
+        className="image-brush-tab-panel image-brush-placement-panel"
+        role="tabpanel"
+        aria-labelledby={`${tabsId}-tab-placement`}
+        hidden={activeTab !== 'placement'}
       >
+        <header>
+          <strong>Placement</strong>
+          <span>{settings.mode.replace('-', ' ')}</span>
+        </header>
         <SelectField
           label="Brush mode"
           value={settings.mode}
@@ -1645,6 +1793,13 @@ export function ImageBrushPanel({
           <div
             className="image-brush-custom-anchor"
             data-tooltip="Drag here to set the point that attaches the image to the path."
+            role="slider"
+            tabIndex={0}
+            aria-label="Custom anchor position"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(settings.customAnchor.x * 100)}
+            aria-valuetext={`${Math.round(settings.customAnchor.x * 100)}% horizontal, ${Math.round(settings.customAnchor.y * 100)}% vertical`}
             onPointerDown={(event) => {
               event.currentTarget.setPointerCapture(event.pointerId);
               customAnchorPointer(event);
@@ -1652,6 +1807,21 @@ export function ImageBrushPanel({
             onPointerMove={(event) => {
               if (event.currentTarget.hasPointerCapture(event.pointerId))
                 customAnchorPointer(event);
+            }}
+            onKeyDown={(event) => {
+              const step = event.shiftKey ? 0.1 : 0.02;
+              const delta = {
+                ArrowLeft: [-step, 0],
+                ArrowRight: [step, 0],
+                ArrowUp: [0, -step],
+                ArrowDown: [0, step],
+              }[event.key];
+              if (!delta) return;
+              event.preventDefault();
+              update('customAnchor', {
+                x: Math.max(0, Math.min(1, settings.customAnchor.x + delta[0])),
+                y: Math.max(0, Math.min(1, settings.customAnchor.y + delta[1])),
+              });
             }}
           >
             <i
@@ -1668,33 +1838,10 @@ export function ImageBrushPanel({
             checked={settings.followDirection}
             onChange={(value) => update('followDirection', value)}
           />
-          <Toggle
-            label="Show stamp outline"
-            checked={settings.showOutline}
-            onChange={(value) => update('showOutline', value)}
-          />
         </div>
-      </LazyAdvancedDetails>
+      </section>
 
-      <LazyAdvancedDetails
-        summary="Mutation"
-        initiallyMounted={initialInterfaceLevel === 'advanced'}
-      >
-        <SelectField
-          helpId="image-brush.fx-stage"
-          label="Processing stage"
-          value={settings.fxStage}
-          onChange={(value) => update('fxStage', value)}
-          options={[
-            ['before', 'Brush Tip'],
-            ['each', 'Every Stamp'],
-            ['after', 'Whole Trail'],
-            ['before-after', 'Tip + Trail'],
-          ]}
-        />
-        <p className="image-brush-inline-note">
-          {imageBrushFxStageCopy[settings.fxStage].description}
-        </p>
+      <div className="image-brush-evolution-fields" hidden={activeTab !== 'evolution'}>
         {settings.mutationMode !== 'clean' && (
           <SliderField
             label="Mutation amount"
@@ -1769,11 +1916,6 @@ export function ImageBrushPanel({
               step={1}
               defaultValue={8}
               onChange={(value) => update('variantCount', value)}
-            />
-            <Toggle
-              label="Reset Each Stroke"
-              checked={settings.resetEachStroke}
-              onChange={(value) => update('resetEachStroke', value)}
             />
           </>
         )}
@@ -2080,18 +2222,6 @@ export function ImageBrushPanel({
               defaultValue={0.45}
               onChange={(value) => update('mutationAmount', value)}
             />
-            <SelectField
-              helpId="control.rendering-quality"
-              label="Processing Quality"
-              value={settings.renderingQuality}
-              onChange={(value) => update('renderingQuality', value)}
-              options={[
-                ['auto', 'Auto'],
-                ['realtime', 'Realtime'],
-                ['balanced', 'Balanced'],
-                ['high', 'High'],
-              ]}
-            />
           </>
         )}
         {settings.mutationMode === 'evolving' && (
@@ -2101,346 +2231,233 @@ export function ImageBrushPanel({
             onChange={(value) => update('continueBetweenStrokes', value)}
           />
         )}
-        <div className="image-brush-seed">
-          <label>
-            <span>SEED</span>
-            <input value={seed} onChange={(event) => onSeedChange(event.target.value)} />
-          </label>
+      </div>
+
+      <details className="image-brush-master-advanced">
+        <summary>Advanced</summary>
+        <div className="image-brush-master-advanced-body">
+          <LazyAdvancedDetails summary="Alpha and blending" initiallyMounted={false}>
+            <SelectField
+              label="Alpha mode"
+              value={settings.alphaMode}
+              onChange={(value) => update('alphaMode', value)}
+              options={[
+                ['preserve', 'Preserve Alpha'],
+                ['inside', 'Glitch Inside Alpha'],
+                ['bleed', 'Alpha Bleed'],
+                ['corrupt', 'Corrupt Alpha'],
+              ]}
+            />
+            {settings.alphaMode === 'bleed' && (
+              <SliderField
+                label="Bleed amount"
+                value={settings.bleedAmount}
+                min={1}
+                max={32}
+                suffix=" px"
+                defaultValue={4}
+                onChange={(value) => update('bleedAmount', value)}
+              />
+            )}
+            <SelectField
+              label="Blend mode"
+              value={settings.blendMode}
+              onChange={(value) => update('blendMode', value)}
+              options={[
+                ['normal', 'Normal'],
+                ['multiply', 'Multiply'],
+                ['screen', 'Screen'],
+                ['overlay', 'Overlay'],
+                ['difference', 'Difference'],
+                ['lighten', 'Lighten'],
+                ['darken', 'Darken'],
+                ['hard-light', 'Hard Light'],
+                ['color-dodge', 'Color Dodge'],
+                ['exclusion', 'Exclusion'],
+              ]}
+            />
+          </LazyAdvancedDetails>
+
+          <LazyAdvancedDetails summary="Source image settings" initiallyMounted={false}>
+            <Toggle
+              label="Trim transparent margins"
+              checked={settings.trimTransparent}
+              onChange={(value) => update('trimTransparent', value)}
+            />
+            {settings.trimTransparent && (
+              <SliderField
+                label="Alpha threshold"
+                value={settings.trimThreshold}
+                min={0}
+                max={64}
+                step={1}
+                defaultValue={2}
+                onChange={(value) => update('trimThreshold', value)}
+              />
+            )}
+          </LazyAdvancedDetails>
+
+          <LazyAdvancedDetails summary="Pressure" initiallyMounted={false}>
+            <div className="image-brush-toggle-grid">
+              <Toggle
+                label="Pressure → size"
+                checked={settings.pressureSize}
+                onChange={(value) => update('pressureSize', value)}
+              />
+              <Toggle
+                label="Pressure → opacity"
+                checked={settings.pressureOpacity}
+                onChange={(value) => update('pressureOpacity', value)}
+              />
+              <Toggle
+                label="Pressure → spacing"
+                checked={settings.pressureSpacing}
+                onChange={(value) => update('pressureSpacing', value)}
+              />
+            </div>
+            {settings.pressureSize && (
+              <SliderField
+                label="Minimum pressure size"
+                value={settings.minPressureSize}
+                min={0.02}
+                max={1}
+                step={0.01}
+                defaultValue={0.2}
+                onChange={(value) => update('minPressureSize', value)}
+              />
+            )}
+            {settings.pressureOpacity && (
+              <SliderField
+                label="Minimum pressure opacity"
+                value={settings.minPressureOpacity}
+                min={0.02}
+                max={1}
+                step={0.01}
+                defaultValue={0.2}
+                onChange={(value) => update('minPressureOpacity', value)}
+              />
+            )}
+          </LazyAdvancedDetails>
+
+          {diagnosticsEnabled && (
+            <LazyAdvancedDetails summary="Developer diagnostics" initiallyMounted={false}>
+              <SelectField
+                helpId="control.rendering-quality"
+                label="Rendering quality"
+                value={settings.renderingQuality}
+                onChange={(value) => update('renderingQuality', value)}
+                options={[
+                  ['auto', 'Auto'],
+                  ['realtime', 'Realtime'],
+                  ['balanced', 'Balanced'],
+                  ['high', 'High'],
+                ]}
+              />
+              <SliderField
+                label="Live stamps / frame"
+                value={settings.maxLiveStampsPerFrame}
+                min={1}
+                max={64}
+                step={1}
+                defaultValue={24}
+                onChange={(value) => update('maxLiveStampsPerFrame', value)}
+              />
+              <SliderField
+                label="Maximum generated stamps"
+                value={settings.maxGeneratedStamps}
+                min={100}
+                max={20000}
+                step={100}
+                defaultValue={5000}
+                onChange={(value) => update('maxGeneratedStamps', value)}
+              />
+              <SliderField
+                label="Maximum cached variants"
+                value={settings.maxCachedVariants}
+                min={1}
+                max={64}
+                step={1}
+                defaultValue={16}
+                onChange={(value) => update('maxCachedVariants', value)}
+              />
+              <div className="image-brush-diagnostic-actions">
+                <button disabled={!active || processing} onClick={onTestStamp}>
+                  Test stamp
+                </button>
+                <button disabled={!active || processing} onClick={onTestTrail}>
+                  Test trail
+                </button>
+                {processing && <button onClick={onCancelProcessing}>Cancel processing</button>}
+              </div>
+              <div className="image-brush-toggle-grid">
+                <Toggle
+                  label="Show stamp outline"
+                  checked={settings.showOutline}
+                  onChange={(value) => update('showOutline', value)}
+                />
+                <Toggle
+                  label="Preview before commit"
+                  checked={settings.previewStroke}
+                  onChange={(value) => update('previewStroke', value)}
+                />
+              </div>
+              {processedPreview && (
+                <dl className="image-brush-compact-diagnostics">
+                  <dt>Tip preview</dt>
+                  <dd>
+                    {processedPreview.quality} ·{' '}
+                    {processedPreview.diagnostics.processingMs.toFixed(1)} ms
+                  </dd>
+                  <dt>Difference</dt>
+                  <dd>{processedPreview.diagnostics.differencePercent.toFixed(2)}%</dd>
+                  <dt>Variants</dt>
+                  <dd>
+                    {processedPreview.diagnostics.cacheVariants} ·{' '}
+                    {formatBytes(processedPreview.diagnostics.cacheBytes)}
+                  </dd>
+                </dl>
+              )}
+              {performance && (
+                <dl className="image-brush-compact-diagnostics">
+                  <dt>Generated</dt>
+                  <dd>
+                    {performance.stampsGenerated} path · {performance.renderedStamps} rendered
+                  </dd>
+                  <dt>First feedback</dt>
+                  <dd>{performance.firstFeedbackMs.toFixed(1)} ms</dd>
+                  <dt>Live frame max</dt>
+                  <dd>{performance.maxLiveFrameMs.toFixed(1)} ms</dd>
+                  <dt>Pointer up → result</dt>
+                  <dd>{performance.pointerUpToResultMs.toFixed(1)} ms</dd>
+                  <dt>Adopt / layer / canvas</dt>
+                  <dd>
+                    {performance.resultAdoptionMs.toFixed(1)} /{' '}
+                    {performance.layerCommitMs.toFixed(1)} / {performance.canvasUploadMs.toFixed(1)}{' '}
+                    ms
+                  </dd>
+                  <dt>Worker transfer</dt>
+                  <dd>
+                    {formatBytes(performance.workerTransferOutBytes)} out ·{' '}
+                    {formatBytes(performance.workerTransferInBytes)} in
+                  </dd>
+                  <dt>React / Worker</dt>
+                  <dd>
+                    {performance.reactRenders} renders · {performance.workerJobsStarted} job(s)
+                  </dd>
+                  <dt>Full document</dt>
+                  <dd>{performance.fullDocumentCopies}</dd>
+                </dl>
+              )}
+            </LazyAdvancedDetails>
+          )}
           <button
-            onClick={() =>
-              onSeedChange(`${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`)
-            }
+            className="image-brush-reset-controls"
+            onClick={() => applyPreset(builtInImageBrushPresets[0]!)}
           >
-            <Shuffle size={12} />
-          </button>
-          <button
-            onClick={() =>
-              navigator.clipboard.writeText(seed).then(
-                () => onNotice('Image Brush seed copied.'),
-                () => onNotice('Clipboard API unavailable.'),
-              )
-            }
-          >
-            <Clipboard size={12} />
+            <RefreshCcw size={12} aria-hidden="true" /> Reset controls
           </button>
         </div>
-      </LazyAdvancedDetails>
-
-      <LazyAdvancedDetails
-        summary="Whole Trail FX"
-        initiallyMounted={initialInterfaceLevel === 'advanced'}
-      >
-        <p className="image-brush-inline-note">
-          Whole Trail and Tip + Trail process one connected local stroke region after placement.
-        </p>
-        <SelectField
-          helpId="image-brush.fx-stage"
-          label="Processing stage"
-          value={settings.fxStage}
-          onChange={(value) => update('fxStage', value)}
-          options={[
-            ['before', 'Brush Tip'],
-            ['each', 'Every Stamp'],
-            ['after', 'Whole Trail'],
-            ['before-after', 'Tip + Trail'],
-          ]}
-        />
-        <SliderField
-          label="Structural drift"
-          value={settings.structuralDrift}
-          min={0}
-          max={1}
-          step={0.01}
-          defaultValue={0.24}
-          onChange={(value) => update('structuralDrift', value)}
-        />
-      </LazyAdvancedDetails>
-
-      <LazyAdvancedDetails
-        summary="Alpha and Blending"
-        initiallyMounted={initialInterfaceLevel === 'advanced'}
-      >
-        <SelectField
-          label="Alpha mode"
-          value={settings.alphaMode}
-          onChange={(value) => update('alphaMode', value)}
-          options={[
-            ['preserve', 'Preserve Alpha'],
-            ['inside', 'Glitch Inside Alpha'],
-            ['bleed', 'Alpha Bleed'],
-            ['corrupt', 'Corrupt Alpha'],
-          ]}
-        />
-        {settings.alphaMode === 'bleed' && (
-          <SliderField
-            label="Bleed amount"
-            value={settings.bleedAmount}
-            min={1}
-            max={32}
-            suffix=" px"
-            defaultValue={4}
-            onChange={(value) => update('bleedAmount', value)}
-          />
-        )}
-        <SelectField
-          label="Blend mode"
-          value={settings.blendMode}
-          onChange={(value) => update('blendMode', value)}
-          options={[
-            ['normal', 'Normal'],
-            ['multiply', 'Multiply'],
-            ['screen', 'Screen'],
-            ['overlay', 'Overlay'],
-            ['difference', 'Difference'],
-            ['lighten', 'Lighten'],
-            ['darken', 'Darken'],
-            ['hard-light', 'Hard Light'],
-            ['color-dodge', 'Color Dodge'],
-            ['exclusion', 'Exclusion'],
-          ]}
-        />
-        <div className="image-brush-toggle-grid">
-          <Toggle
-            label="Trim transparent margins"
-            checked={settings.trimTransparent}
-            onChange={(value) => update('trimTransparent', value)}
-          />
-          <Toggle
-            label="Preview before commit"
-            checked={settings.previewStroke}
-            onChange={(value) => update('previewStroke', value)}
-          />
-        </div>
-        {settings.trimTransparent && (
-          <SliderField
-            label="Alpha threshold"
-            value={settings.trimThreshold}
-            min={0}
-            max={64}
-            step={1}
-            defaultValue={2}
-            onChange={(value) => update('trimThreshold', value)}
-          />
-        )}
-      </LazyAdvancedDetails>
-
-      <LazyAdvancedDetails
-        summary="Pressure"
-        initiallyMounted={initialInterfaceLevel === 'advanced'}
-      >
-        <div className="image-brush-toggle-grid">
-          <Toggle
-            label="Pressure → size"
-            checked={settings.pressureSize}
-            onChange={(value) => update('pressureSize', value)}
-          />
-          <Toggle
-            label="Pressure → opacity"
-            checked={settings.pressureOpacity}
-            onChange={(value) => update('pressureOpacity', value)}
-          />
-          <Toggle
-            label="Pressure → spacing"
-            checked={settings.pressureSpacing}
-            onChange={(value) => update('pressureSpacing', value)}
-          />
-        </div>
-        {settings.pressureSize && (
-          <SliderField
-            label="Minimum pressure size"
-            value={settings.minPressureSize}
-            min={0.02}
-            max={1}
-            step={0.01}
-            defaultValue={0.2}
-            onChange={(value) => update('minPressureSize', value)}
-          />
-        )}
-        {settings.pressureOpacity && (
-          <SliderField
-            label="Minimum pressure opacity"
-            value={settings.minPressureOpacity}
-            min={0.02}
-            max={1}
-            step={0.01}
-            defaultValue={0.2}
-            onChange={(value) => update('minPressureOpacity', value)}
-          />
-        )}
-      </LazyAdvancedDetails>
-
-      <LazyAdvancedDetails
-        summary="Performance"
-        initiallyMounted={initialInterfaceLevel === 'advanced'}
-      >
-        <SelectField
-          helpId="control.rendering-quality"
-          label="Rendering quality"
-          value={settings.renderingQuality}
-          onChange={(value) => update('renderingQuality', value)}
-          options={[
-            ['auto', 'Auto'],
-            ['realtime', 'Realtime'],
-            ['balanced', 'Balanced'],
-            ['high', 'High'],
-          ]}
-        />
-        <SliderField
-          label="Live stamps / frame"
-          value={settings.maxLiveStampsPerFrame}
-          min={1}
-          max={64}
-          step={1}
-          defaultValue={24}
-          onChange={(value) => update('maxLiveStampsPerFrame', value)}
-        />
-        <SliderField
-          label="Maximum generated stamps"
-          value={settings.maxGeneratedStamps}
-          min={100}
-          max={20000}
-          step={100}
-          defaultValue={5000}
-          onChange={(value) => update('maxGeneratedStamps', value)}
-        />
-        <SliderField
-          label="Maximum cached variants"
-          value={settings.maxCachedVariants}
-          min={1}
-          max={64}
-          step={1}
-          defaultValue={16}
-          onChange={(value) => update('maxCachedVariants', value)}
-        />
-        {(settings.mutationMode === 'evolving' || settings.mutationMode === 'progressive') && (
-          <SliderField
-            label="Evolving preview variants"
-            value={settings.maxLiveFxIterations}
-            min={1}
-            max={8}
-            step={1}
-            defaultValue={3}
-            onChange={(value) => update('maxLiveFxIterations', value)}
-          />
-        )}
-        {processedPreview && (
-          <dl className="image-brush-compact-diagnostics">
-            <dt>Tip preview</dt>
-            <dd>
-              {processedPreview.quality} · {processedPreview.diagnostics.processingMs.toFixed(1)} ms
-            </dd>
-            <dt>Difference</dt>
-            <dd>{processedPreview.diagnostics.differencePercent.toFixed(2)}%</dd>
-            <dt>Variants</dt>
-            <dd>
-              {processedPreview.diagnostics.cacheVariants} ·{' '}
-              {formatBytes(processedPreview.diagnostics.cacheBytes)}
-            </dd>
-          </dl>
-        )}
-        {performance && (
-          <dl className="image-brush-compact-diagnostics">
-            <dt>Generated</dt>
-            <dd>
-              {performance.stampsGenerated} path · {performance.renderedStamps} rendered
-            </dd>
-            <dt>First feedback</dt>
-            <dd>{performance.firstFeedbackMs.toFixed(1)} ms</dd>
-            <dt>Live frame max</dt>
-            <dd>{performance.maxLiveFrameMs.toFixed(1)} ms</dd>
-            <dt>Pointer up → result</dt>
-            <dd>{performance.pointerUpToResultMs.toFixed(1)} ms</dd>
-            <dt>Adopt / layer / canvas</dt>
-            <dd>
-              {performance.resultAdoptionMs.toFixed(1)} / {performance.layerCommitMs.toFixed(1)} /{' '}
-              {performance.canvasUploadMs.toFixed(1)} ms
-            </dd>
-            <dt>Worker transfer</dt>
-            <dd>
-              {formatBytes(performance.workerTransferOutBytes)} out ·{' '}
-              {formatBytes(performance.workerTransferInBytes)} in
-            </dd>
-            <dt>React / Worker</dt>
-            <dd>
-              {performance.reactRenders} renders · {performance.workerJobsStarted} job(s)
-            </dd>
-            <dt>Full document</dt>
-            <dd>{performance.fullDocumentCopies}</dd>
-          </dl>
-        )}
-      </LazyAdvancedDetails>
-
-      <LazyAdvancedDetails
-        summary="Library and Project"
-        initiallyMounted={initialInterfaceLevel === 'advanced'}
-      >
-        <div className="image-brush-library-project-actions">
-          <button disabled={!active} onClick={() => active && duplicateAsset(active)}>
-            <Copy size={12} /> Duplicate image
-          </button>
-          <button disabled={!active} onClick={onDownloadProcessed}>
-            <Download size={12} /> Download tip
-          </button>
-          <button disabled={!active} onClick={onCopyProcessed}>
-            <Clipboard size={12} /> Copy tip
-          </button>
-          <button onClick={saveCurrentPreset}>
-            <Save size={12} /> Save preset
-          </button>
-          <button
-            disabled={!userPresets.some((preset) => preset.id === activePresetId)}
-            onClick={renamePreset}
-          >
-            Rename preset
-          </button>
-          <button
-            disabled={!userPresets.some((preset) => preset.id === activePresetId)}
-            onClick={deletePreset}
-          >
-            Delete preset
-          </button>
-          <button onClick={exportPreset}>
-            <FileDown size={12} /> Export preset
-          </button>
-          <button onClick={() => presetInputRef.current?.click()}>
-            <FileUp size={12} /> Import preset
-          </button>
-          <input
-            ref={presetInputRef}
-            hidden
-            type="file"
-            accept="application/json"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void importPreset(file);
-              event.target.value = '';
-            }}
-          />
-        </div>
-        <div className="image-brush-randomizers">
-          <button onClick={() => onRandomize('layout')}>Randomize Layout</button>
-          <button onClick={() => onRandomize('mutation')}>Randomize Mutation</button>
-          <button onClick={() => onRandomize('fx')}>Randomize FX</button>
-          <button onClick={() => onRandomize('everything')}>
-            <Zap size={11} /> Randomize Everything
-          </button>
-        </div>
-      </LazyAdvancedDetails>
-
-      <footer className="image-brush-reset">
-        <button
-          onClick={() => {
-            onRackChange([]);
-            onPresetChange('custom');
-            onNotice('Stamp FX rack cleared. The selected image was preserved.');
-          }}
-        >
-          <Trash2 size={12} /> Clear FX
-        </button>
-        <button onClick={() => applyPreset(builtInImageBrushPresets[0]!)}>
-          <RefreshCcw size={12} /> Reset controls
-        </button>
-      </footer>
+      </details>
     </section>
   );
 }

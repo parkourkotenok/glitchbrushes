@@ -75,13 +75,17 @@ describe('production editor cleanup', () => {
     expect(layersDockSource).toContain('<LayerThumbnail');
   });
 
-  it('exposes upright and path-following orientation beside Simple spacing', () => {
+  it('keeps essentials style-safe and orders the Image Brush workflow clearly', () => {
     expect(imageBrushEssentialSource).toContain('Upright column');
     expect(imageBrushEssentialSource).toContain('Follow stroke');
     expect(imageBrushEssentialSource).toContain('label="Spacing"');
-    expect(imageBrushPanelSource.indexOf('<ImageBrushEssentialControls')).toBeLessThan(
-      imageBrushPanelSource.indexOf('<strong>STYLE</strong>'),
-    );
+    const source = imageBrushPanelSource.indexOf('<strong>Source</strong>');
+    const style = imageBrushPanelSource.indexOf('<strong>Style</strong>');
+    const preview = imageBrushPanelSource.indexOf('<strong>Preview</strong>');
+    const essentials = imageBrushPanelSource.indexOf('<ImageBrushEssentialControls');
+    expect(source).toBeLessThan(style);
+    expect(style).toBeLessThan(preview);
+    expect(preview).toBeLessThan(essentials);
     expect(imageBrushPanelSource).toContain('applyImageBrushStyleKeepingEssentials');
   });
 
@@ -92,13 +96,29 @@ describe('production editor cleanup', () => {
     expect(appSource).not.toContain('effectPreviewSource');
   });
 
-  it('ships one astronaut brush demo, one randomize action and persistent custom brushes', () => {
+  it('ships one astronaut brush demo, one balanced randomize entry point and persistent styles', () => {
     expect(imageBrushDecodeSource).toContain('/assets/image-brush-astronaut.png');
-    expect(imageBrushPanelSource.match(/Randomize style/g)).toHaveLength(1);
+    expect(imageBrushPanelSource.match(/className="image-brush-randomize-main"/g)).toHaveLength(1);
+    expect(imageBrushPanelSource).toContain("onRandomize('balanced')");
+    expect(imageBrushPanelSource).toContain('Save current as new style');
     expect(imageBrushPanelSource).not.toContain('New Variation');
     expect(imageBrushPanelSource).not.toContain('Demo images');
     expect(imageBrushStorageSource).toContain('indexedDB.open(databaseName, 1)');
     expect(appSource).toContain('saveImageBrushLibrary(customAssets)');
+  });
+
+  it('removes duplicate Image Brush production blocks and exposes persistent accessible tabs', () => {
+    expect(imageBrushPanelSource).not.toContain('CURRENT BRUSH');
+    expect(imageBrushPanelSource).not.toContain('Library and Project');
+    expect(imageBrushPanelSource).not.toContain('Download tip');
+    expect(imageBrushPanelSource).not.toContain('Copy tip');
+    expect(imageBrushPanelSource).toContain('role="tablist"');
+    expect(imageBrushPanelSource).toContain('role="tab"');
+    expect(imageBrushPanelSource).toContain('role="tabpanel"');
+    expect(imageBrushPanelSource).toContain(
+      "sessionStorage.setItem('glitchbrushes:image-brush-tab'",
+    );
+    expect(imageBrushPanelSource).toContain('diagnosticsEnabled &&');
   });
 
   it('renders Image Brush preview over the immutable source instead of prior brush strokes', () => {

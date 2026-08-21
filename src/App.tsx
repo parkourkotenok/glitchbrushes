@@ -3827,7 +3827,7 @@ function GlitchBrushesEditor({
         };
         const replayRack = replay.rack.map((item) => ({ ...item }));
         const styled =
-          scope === 'everything'
+          scope === 'balanced'
             ? applyImageBrushStyleKeepingEssentials(
                 imageBrushSettingsRef.current,
                 replaySettings,
@@ -3876,7 +3876,7 @@ function GlitchBrushesEditor({
           nextNonce,
         );
       }
-      if (scope === 'everything') {
+      if (scope === 'balanced') {
         randomized = applyImageBrushStyleKeepingEssentials(
           imageBrushSettingsRef.current,
           randomized.settings,
@@ -3976,59 +3976,6 @@ function GlitchBrushesEditor({
     },
     [clearImageBrushOverlay, drawLiveImageBrushStamps],
   );
-
-  const processedBrushCanvas = useCallback((): HTMLCanvasElement => {
-    const active = imageBrushLibraryRef.current.find(
-      (asset) => asset.id === activeImageBrushIdRef.current,
-    );
-    const preview = processedBrushPreview;
-    if (!active || !preview) throw new Error('No processed Image Brush is available.');
-    const canvas = document.createElement('canvas');
-    canvas.width = preview.width;
-    canvas.height = preview.height;
-    canvas
-      .getContext('2d')
-      ?.putImageData(new ImageData(preview.pixels, preview.width, preview.height), 0, 0);
-    return canvas;
-  }, [processedBrushPreview]);
-
-  const downloadProcessedBrush = useCallback(async () => {
-    try {
-      const active = imageBrushLibraryRef.current.find(
-        (asset) => asset.id === activeImageBrushIdRef.current,
-      );
-      const canvas = processedBrushCanvas();
-      const blob = await new Promise<Blob>((resolve, reject) =>
-        canvas.toBlob(
-          (value) =>
-            value ? resolve(value) : reject(new Error('Processed brush encoding failed.')),
-          'image/png',
-        ),
-      );
-      triggerDownload(blob, `${active?.name ?? 'image-brush'}-processed.png`);
-      setNotice('Processed Image Brush downloaded locally as transparent PNG.');
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'Processed brush download failed.');
-    }
-  }, [processedBrushCanvas]);
-
-  const copyProcessedBrush = useCallback(async () => {
-    try {
-      if (!('ClipboardItem' in window)) throw new Error('Clipboard image API is unavailable.');
-      const canvas = processedBrushCanvas();
-      const blob = await new Promise<Blob>((resolve, reject) =>
-        canvas.toBlob(
-          (value) =>
-            value ? resolve(value) : reject(new Error('Processed brush encoding failed.')),
-          'image/png',
-        ),
-      );
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-      setNotice('Processed transparent brush copied as PNG.');
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'Processed brush copy failed.');
-    }
-  }, [processedBrushCanvas]);
 
   const renderOriginalCanvas = useCallback((): HTMLCanvasElement => {
     const current = docRef.current;
@@ -4649,7 +4596,6 @@ function GlitchBrushesEditor({
             {activePanel === 'image-brush' && (
               <Suspense fallback={<PanelLoading />}>
                 <ImageBrushPanel
-                  initialInterfaceLevel={interfaceMode}
                   library={imageBrushLibrary}
                   activeAssetId={activeImageBrushId}
                   settings={imageBrushSettings}
@@ -4669,15 +4615,12 @@ function GlitchBrushesEditor({
                   onSeedChange={setImageBrushSeed}
                   onPresetChange={setImageBrushPresetId}
                   onRandomize={randomizeCurrentImageBrush}
-                  randomizeNonce={imageBrushVariationNonce}
                   randomizeLockSeed={imageBrushLockSeed}
                   onRandomizeLockSeedChange={(locked) => {
                     imageBrushLockedRandomizationRef.current = null;
                     setImageBrushLockSeed(locked);
                   }}
                   onOptimizeAsset={optimizeActiveImageBrush}
-                  onDownloadProcessed={() => void downloadProcessedBrush()}
-                  onCopyProcessed={() => void copyProcessedBrush()}
                   onTestStamp={() => testImageBrushOverlay('stamp')}
                   onTestTrail={() => testImageBrushOverlay('trail')}
                   onCancelProcessing={() => cancelImageBrushJob()}

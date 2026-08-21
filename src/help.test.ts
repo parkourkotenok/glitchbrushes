@@ -32,7 +32,7 @@ function createTestBrushAssets(count: number) {
 }
 
 function renderImageBrush(
-  level: 'simple' | 'advanced',
+  _level: 'simple' | 'advanced',
   settings = defaultImageBrushSettings,
   rack: ImageBrushFxItem[] = [],
 ) {
@@ -42,7 +42,6 @@ function renderImageBrush(
       HelpProvider,
       null,
       createElement(ImageBrushPanel, {
-        initialInterfaceLevel: level,
         library,
         activeAssetId: library[0]!.id,
         settings,
@@ -62,12 +61,9 @@ function renderImageBrush(
         onSeedChange() {},
         onPresetChange() {},
         onRandomize() {},
-        randomizeNonce: 0,
         randomizeLockSeed: false,
         onRandomizeLockSeedChange() {},
         onOptimizeAsset() {},
-        onDownloadProcessed() {},
-        onCopyProcessed() {},
         onTestStamp() {},
         onTestTrail() {},
         onCancelProcessing() {},
@@ -135,14 +131,15 @@ describe('contextual help', () => {
     expect(html).not.toContain('class="help-button"');
   });
 
-  it('keeps visible HelpButtons beside dropdowns only in the compact inspector', () => {
+  it('keeps compact dropdowns labelled without adding help buttons to every field', () => {
     const html = renderImageBrush('simple');
     const helpButtons = html.match(/class="help-button"/g) ?? [];
     const selects = html.match(/<select/g) ?? [];
     const essential =
       html.match(/data-testid="image-brush-essential"[\s\S]*?<\/section>/)?.[0] ?? '';
     const essentialSliders = essential.match(/type="range"/g) ?? [];
-    expect(helpButtons).toHaveLength(selects.length);
+    expect(helpButtons.length).toBeLessThan(selects.length);
+    expect(selects.length).toBeGreaterThan(5);
     expect(essentialSliders).toHaveLength(5);
     expect(html).not.toContain('Help: Size');
     expect(html).not.toContain('Help: Test one stamp');
@@ -208,26 +205,26 @@ describe('contextual help', () => {
     ).toBe(true);
   });
 
-  it('uses one compact inspector with essential controls and collapsible advanced controls', () => {
+  it('uses one compact workflow with essentials, tabs and one advanced disclosure', () => {
     const simple = renderImageBrush('simple');
     expect(simple).toContain('data-testid="image-brush-essential"');
-    expect(simple).toContain('CURRENT BRUSH');
+    expect(simple).not.toContain('CURRENT BRUSH');
     expect(simple).not.toContain('Maximum generated stamps');
     expect(simple).not.toContain('image-brush-style-cards');
     expect(simple).not.toContain('image-brush-interface-level');
-    expect(simple).toContain('LIVE STROKE PREVIEW');
+    expect(simple).toContain('Preview');
     expect(simple).toContain('Spacing');
     expect(simple).toContain('Upright column');
     expect(simple).toContain('Follow stroke');
     expect(simple).toContain('aria-label="Live Image Brush stroke preview"');
     expect(simple).not.toContain('WHAT THIS CONTROL CHANGES');
-    expect(simple.match(/<canvas/g) ?? []).toHaveLength(4);
+    expect(simple).toContain('role="tablist"');
+    expect(simple).toContain('aria-selected="true"');
+    expect(simple).toContain('<summary>Advanced</summary>');
+    expect(simple.match(/<canvas/g) ?? []).toHaveLength(2);
     const advanced = renderImageBrush('advanced');
-    expect(advanced).not.toBe(simple);
-    expect(advanced).toContain('Maximum generated stamps');
-    expect(advanced).toContain('Stamp Layout');
-    expect(advanced).toContain('<summary>Mutation</summary>');
-    expect(advanced).toContain('<summary>Performance</summary>');
+    expect(advanced).toBe(simple);
+    expect(advanced).not.toContain('Developer diagnostics');
   });
 
   it('hides controls that the active mode does not read', () => {
@@ -250,7 +247,7 @@ describe('contextual help', () => {
     });
     expect(active).toContain('X scatter');
     expect(active).toContain('Variant pool');
-    expect(active).toContain('Minimum pressure size');
+    expect(active).not.toContain('Minimum pressure size');
   });
 });
 

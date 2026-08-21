@@ -11,10 +11,18 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if not exist "node_modules\" (
-  echo Installing dependencies...
-  call npm install
-  if errorlevel 1 goto :failed
+if not exist "node_modules\.bin\vite.cmd" goto :install_dependencies
+goto :dependencies_ready
+
+:install_dependencies
+echo Installing or repairing dependencies...
+call npm install
+if errorlevel 1 goto :failed
+
+:dependencies_ready
+if not exist "node_modules\.bin\vite.cmd" (
+  echo [ERROR] Vite was not installed correctly.
+  goto :failed
 )
 
 echo Starting development Glitchbrushes at http://127.0.0.1:5173/

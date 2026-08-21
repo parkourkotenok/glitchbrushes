@@ -1,5 +1,9 @@
 # Agent Worklog
 
+## 2026-08-21 — Windows launcher dependency repair
+
+- `start-local.bat` and `start-dev.bat` now verify the actual local `tsc.cmd`/`vite.cmd` executables instead of treating any existing `node_modules` directory as a complete install. Missing or partial dependencies are repaired automatically with `npm install`, with an explicit error if the binaries are still unavailable.
+
 ## 2026-08-21 — Production post-stroke jank repair
 
 - Pixel revision отделена от document surface generation: обычный Effect/Retouch/Image Brush commit больше не запускает следующий full canvas sync или automatic fit. Surface generation меняется при replace/import/add-image, когда меняются dimensions/document/original identity.

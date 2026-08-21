@@ -1,6 +1,6 @@
 import type { Rectangle } from '../types';
 import { clamp } from '../utils/geometry';
-import type { ImageBrushSettings, StampPoint } from './types';
+import type { ImageBrushAssetMode, ImageBrushSettings, StampPoint } from './types';
 
 export interface ImageBrushBoundsAsset {
   id: string;
@@ -15,13 +15,17 @@ export function estimateImageBrushReadBounds(
   activeAssetId: string,
   documentWidth: number,
   documentHeight: number,
+  assetMode?: ImageBrushAssetMode,
 ): Rectangle {
   const active = assets.find((asset) => asset.id === activeAssetId) ?? assets[0];
   if (!active || !stamps.length || documentWidth <= 0 || documentHeight <= 0) {
     return { x: 0, y: 0, width: 1, height: 1 };
   }
   const relevantAssets =
-    settings.mode === 'sequence' || settings.mode === 'random-hose' ? assets : [active];
+    assetMode === 'all' ||
+    (!assetMode && (settings.mode === 'sequence' || settings.mode === 'random-hose'))
+      ? assets
+      : [active];
   const scaleJitter = 1 + Math.max(0, settings.scaleJitter);
   const padding = settings.alphaMode === 'bleed' ? Math.max(0, settings.bleedAmount) : 0;
   let maximumRadius = 1;

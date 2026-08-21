@@ -1,6 +1,9 @@
 /// <reference lib="webworker" />
 
-import { processImageBrushStroke } from '../imageBrush/engine';
+import {
+  prepareImageBrushLiveSourceVariants,
+  processImageBrushStroke,
+} from '../imageBrush/engine';
 import {
   createImageBrushLivePreviewBackground,
   createImageBrushLivePreviewLayout,
@@ -12,13 +15,17 @@ self.onmessage = (event: MessageEvent<ImageBrushPreviewRequest>) => {
   const request = event.data;
   const started = performance.now();
   try {
-    const original = new Uint8ClampedArray(request.pixels);
-    const input = resizeRgbaNearest(
-      original,
-      request.width,
-      request.height,
-      request.quality === 'draft' ? 64 : 256,
-    );
+    const inputs = request.assets.map((asset) => {
+      const resized = resizeRgbaNearest(
+        new Uint8ClampedArray(asset.pixels),
+        asset.width,
+        asset.height,
+        request.quality === 'draft' ? 64 : 256,
+      );
+      return { id: asset.id, ...resized };
+    });
+    const input = inputs.find((asset) => asset.id === request.assetId) ?? inputs[0];
+    if (!input) throw new Error('No Image Brush preview assets were supplied.');
     const livePreview = createImageBrushLivePreviewLayout(
       request.settings,
       request.quality,
@@ -41,15 +48,10 @@ self.onmessage = (event: MessageEvent<ImageBrushPreviewRequest>) => {
         height: livePreview.height,
         pixels: background,
         sourceBounds: { x: 0, y: 0, width: livePreview.width, height: livePreview.height },
-        assets: [
-          {
-            id: request.assetId,
-            width: input.width,
-            height: input.height,
-            pixels: input.pixels,
-          },
-        ],
+        assets: inputs,
         activeAssetId: request.assetId,
+        assetMode: request.assetMode,
+        assetOrder: request.assetOrder,
         stamps: livePreview.stamps,
         settings: livePreview.settings,
         rack: request.rack,
@@ -72,16 +74,29 @@ self.onmessage = (event: MessageEvent<ImageBrushPreviewRequest>) => {
         destination,
       );
     }
-    const variants = (
+    const renderedVariants = (
       rendered.previewVariants?.length
         ? rendered.previewVariants
         : [{ pixels: input.pixels.slice(), width: input.width, height: input.height }]
-    ).map((variant) => ({
-      ...variant,
-      contentWidth: input.width,
-      contentHeight: input.height,
-    }));
-    const primary = variants[0]!;
+    );
+    // One Worker and bounded tip variants preserve live overlay source order
+    // without scheduling a separate full preview trail for each asset.
+    const variants = prepareImageBrushLiveSourceVariants({
+      assets: inputs,
+      activeAssetId: request.assetId,
+      assetMode: request.assetMode,
+      assetOrder: request.assetOrder,
+      stamps: livePreview.stamps,
+      settings: livePreview.settings,
+      rack: request.rack,
+      seed: request.seed,
+      strokeId: request.strokeId,
+      evolutionOffset: request.evolutionOffset,
+      pixels: background,
+      width: livePreview.width,
+      height: livePreview.height,
+    });
+    const primary = renderedVariants[0]!;
     const comparison = compareTipPixels(
       background,
       livePreview.width,

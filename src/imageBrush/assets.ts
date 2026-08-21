@@ -3,11 +3,62 @@ import { clamp } from '../utils/geometry';
 import { normalizeImageBrushSettings } from './performance';
 import type {
   ImageBrushAsset,
+  ImageBrushAssetMode,
+  ImageBrushAssetOrder,
   ImageBrushFxId,
   ImageBrushProjectData,
   ImageBrushSettings,
   SerializedImageBrushAsset,
 } from './types';
+
+export interface ImageBrushAssetSelection {
+  mode: ImageBrushAssetMode;
+  order: ImageBrushAssetOrder;
+  enabledAssetIds: string[];
+}
+
+/**
+ * Keeps source selection out of ImageBrushSettings so applying a Style cannot
+ * accidentally change a project’s brush set.  A custom library starts with
+ * its custom images enabled; the bundled demo is opt-in once custom images exist.
+ */
+export function normalizeImageBrushAssetSelection(
+  library: Pick<ImageBrushAsset, 'id' | 'demo'>[],
+  activeAssetId: string | null,
+  selection: Partial<ImageBrushAssetSelection> | null | undefined,
+  legacyAllAssets = false,
+): ImageBrushAssetSelection {
+  const ids = new Set(library.map((asset) => asset.id));
+  const fallback = library.filter((asset) => !asset.demo);
+  const defaultIds = (fallback.length ? fallback : library).map((asset) => asset.id);
+  const supplied = Array.isArray(selection?.enabledAssetIds)
+    ? selection.enabledAssetIds.filter((id, index, list) => ids.has(id) && list.indexOf(id) === index)
+    : [];
+  const enabledAssetIds = legacyAllAssets
+    ? library.map((asset) => asset.id)
+    : supplied.length
+      ? supplied
+      : defaultIds;
+  if (!enabledAssetIds.length && activeAssetId && ids.has(activeAssetId)) {
+    enabledAssetIds.push(activeAssetId);
+  }
+  return {
+    mode: selection?.mode === 'all' ? 'all' : 'selected',
+    order: selection?.order === 'random' ? 'random' : 'cycle',
+    enabledAssetIds,
+  };
+}
+
+export function requiredImageBrushAssets<T extends Pick<ImageBrushAsset, 'id'>>(
+  library: T[],
+  activeAssetId: string | null,
+  selection: Pick<ImageBrushAssetSelection, 'mode' | 'enabledAssetIds'>,
+): T[] {
+  const active = library.find((asset) => asset.id === activeAssetId);
+  if (selection.mode !== 'all') return active ? [active] : [];
+  const enabled = new Set(selection.enabledAssetIds);
+  return library.filter((asset) => enabled.has(asset.id));
+}
 
 export function migrateImageBrushFxId(effectId: ImageBrushFxId): ImageBrushFxId {
   if (effectId === 'macroblock' || effectId === 'packet-loss') return 'block-corruption';
@@ -352,11 +403,15 @@ export function restoreImageBrushProject(project: ImageBrushProjectData): {
   seed: string;
   activePresetId: string;
   activeAssetId: string | null;
+  assetMode: ImageBrushAssetMode;
+  assetOrder: ImageBrushAssetOrder;
+  enabledAssetIds: string[];
   evolutionOffset: number;
   rack: ImageBrushProjectData['rack'];
   library: ImageBrushAsset[];
 } {
   if (project.version !== 1) throw new Error('Unsupported Image Brush project version.');
+  const legacyMode = project.settings.mode === 'sequence' || project.settings.mode === 'random-hose';
   const normalized = normalizeImageBrushSettings(project.settings);
   const settings: ImageBrushSettings = {
     ...normalized,
@@ -367,13 +422,31 @@ export function restoreImageBrushProject(project: ImageBrushProjectData): {
     gradientEnd: migrateImageBrushRecipe(normalized.gradientEnd),
   };
   const library = project.library.map((asset) => restoreImageBrushAsset(asset, settings));
+  const activeAssetId = library.some((asset) => asset.id === project.activeAssetId)
+    ? project.activeAssetId
+    : (library[0]?.id ?? null);
+  const selection = normalizeImageBrushAssetSelection(
+    library,
+    activeAssetId,
+    {
+      mode:
+        project.assetMode ?? (project.settings.mode === 'sequence' || project.settings.mode === 'random-hose'
+          ? 'all'
+          : 'selected'),
+      order:
+        project.assetOrder ?? (project.settings.mode === 'random-hose' ? 'random' : 'cycle'),
+      enabledAssetIds: project.enabledAssetIds,
+    },
+    legacyMode,
+  );
   return {
     settings,
     seed: project.seed,
     activePresetId: project.activePresetId,
-    activeAssetId: library.some((asset) => asset.id === project.activeAssetId)
-      ? project.activeAssetId
-      : (library[0]?.id ?? null),
+    activeAssetId,
+    assetMode: selection.mode,
+    assetOrder: selection.order,
+    enabledAssetIds: selection.enabledAssetIds,
     evolutionOffset: Math.max(0, project.evolutionOffset || 0),
     rack: project.rack.map((item) => ({
       ...item,

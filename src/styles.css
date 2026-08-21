@@ -4628,6 +4628,58 @@ kbd {
   text-overflow: ellipsis;
 }
 
+.image-brush-library-enabled {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: #aaa78f;
+  font-size: 7px;
+  cursor: pointer;
+}
+
+.image-brush-library-enabled input {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  accent-color: #c39a4d;
+}
+
+.image-brush-source-mode {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 8px 8px;
+  color: #86877e;
+  font-size: 8px;
+}
+
+.image-brush-source-mode > button,
+.image-brush-source-mode select {
+  min-height: 24px;
+  padding: 3px 7px;
+  border: 1px solid #393b35;
+  background: #1a1b18;
+  color: #bdbdb4;
+  font: inherit;
+}
+
+.image-brush-source-mode > button.active {
+  border-color: #a8884f;
+  background: #302918;
+  color: #f1d08a;
+}
+
+.image-brush-source-mode label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
 .image-brush-library-remove {
   position: absolute;
   top: 3px;

@@ -40,6 +40,8 @@ import {
   createImageBrushFx,
   imageBrushFxDefinitions,
   type ImageBrushAsset,
+  type ImageBrushAssetMode,
+  type ImageBrushAssetOrder,
   type ImageBrushFxId,
   type ImageBrushFxItem,
   type ImageBrushPreset,
@@ -70,6 +72,7 @@ interface ProcessedBrushPreview {
   quality: 'draft' | 'full';
   diagnostics: ImageBrushPreviewDiagnostics;
   variants: Array<{
+    assetId?: string;
     pixels: Uint8ClampedArray;
     width: number;
     height: number;
@@ -86,6 +89,9 @@ interface ProcessedBrushPreview {
 interface ImageBrushPanelProps {
   library: ImageBrushAsset[];
   activeAssetId: string | null;
+  assetMode?: ImageBrushAssetMode;
+  assetOrder?: ImageBrushAssetOrder;
+  enabledAssetIds?: string[];
   settings: ImageBrushSettings;
   rack: ImageBrushFxItem[];
   seed: string;
@@ -98,6 +104,9 @@ interface ImageBrushPanelProps {
   onRemoveAsset(id: string): void;
   onClearLibrary(): void;
   onActiveAssetChange(id: string | null): void;
+  onAssetModeChange?(mode: ImageBrushAssetMode): void;
+  onAssetOrderChange?(order: ImageBrushAssetOrder): void;
+  onEnabledAssetIdsChange?(ids: string[]): void;
   onSettingsChange(settings: ImageBrushSettings): void;
   onRackChange(rack: ImageBrushFxItem[]): void;
   onSeedChange(seed: string): void;
@@ -377,6 +386,9 @@ function mutationSummary(settings: ImageBrushSettings): [string, string] {
 export function ImageBrushPanel({
   library,
   activeAssetId,
+  assetMode = 'selected',
+  assetOrder = 'cycle',
+  enabledAssetIds = [],
   settings,
   rack,
   seed,
@@ -389,6 +401,9 @@ export function ImageBrushPanel({
   onRemoveAsset,
   onClearLibrary,
   onActiveAssetChange,
+  onAssetModeChange = () => undefined,
+  onAssetOrderChange = () => undefined,
+  onEnabledAssetIdsChange = () => undefined,
   onSettingsChange,
   onRackChange,
   onSeedChange,
@@ -403,6 +418,18 @@ export function ImageBrushPanel({
   onNotice,
 }: ImageBrushPanelProps) {
   const active = library.find((asset) => asset.id === activeAssetId) ?? null;
+  const enabledAssetSet = new Set(enabledAssetIds);
+  const toggleAssetEnabled = (assetId: string) => {
+    if (enabledAssetSet.has(assetId)) {
+      if (enabledAssetSet.size <= 1) {
+        onNotice('Keep at least one image enabled for All source mode.');
+        return;
+      }
+      onEnabledAssetIdsChange(enabledAssetIds.filter((id) => id !== assetId));
+      return;
+    }
+    onEnabledAssetIdsChange([...enabledAssetIds, assetId]);
+  };
   const previewRef = useRef<HTMLCanvasElement>(null);
   const liveStrokePreviewRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -788,6 +815,40 @@ export function ImageBrushPanel({
             <MoreHorizontal size={16} aria-hidden="true" />
           </button>
         </div>
+        <div className="image-brush-source-mode" role="radiogroup" aria-label="Image source mode">
+          <span>Use</span>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={assetMode === 'selected'}
+            className={assetMode === 'selected' ? 'active' : ''}
+            onClick={() => onAssetModeChange('selected')}
+          >
+            Selected
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={assetMode === 'all'}
+            className={assetMode === 'all' ? 'active' : ''}
+            onClick={() => onAssetModeChange('all')}
+          >
+            All
+          </button>
+          {assetMode === 'all' && (
+            <label>
+              <span>Order</span>
+              <select
+                aria-label="Image source order"
+                value={assetOrder}
+                onChange={(event) => onAssetOrderChange(event.target.value as ImageBrushAssetOrder)}
+              >
+                <option value="cycle">Cycle</option>
+                <option value="random">Random</option>
+              </select>
+            </label>
+          )}
+        </div>
         {sourcePickerOpen && (
           <div
             ref={sourcePopoverRef}
@@ -797,19 +858,32 @@ export function ImageBrushPanel({
           >
             <div className="image-brush-library-strip" aria-label="Brush image library">
               {library.map((asset) => (
-                <button
+                <article
                   key={asset.id}
-                  className={`image-brush-library-select ${asset.id === activeAssetId ? 'active' : ''}`}
-                  aria-pressed={asset.id === activeAssetId}
-                  onClick={() => {
-                    onActiveAssetChange(asset.id);
-                    setSourcePickerOpen(false);
-                    requestAnimationFrame(() => sourceTriggerRef.current?.focus());
-                  }}
+                  className={asset.id === activeAssetId ? 'active' : ''}
                 >
-                  <BrushThumbnail asset={asset} />
-                  <span>{asset.name}</span>
-                </button>
+                  <button
+                    className="image-brush-library-select"
+                    aria-pressed={asset.id === activeAssetId}
+                    onClick={() => {
+                      onActiveAssetChange(asset.id);
+                      setSourcePickerOpen(false);
+                      requestAnimationFrame(() => sourceTriggerRef.current?.focus());
+                    }}
+                  >
+                    <BrushThumbnail asset={asset} />
+                    <span>{asset.name}</span>
+                  </button>
+                  <label className="image-brush-library-enabled" title="Include in All source mode">
+                    <input
+                      type="checkbox"
+                      aria-label={`Enable ${asset.name} in All images`}
+                      checked={enabledAssetSet.has(asset.id)}
+                      onChange={() => toggleAssetEnabled(asset.id)}
+                    />
+                    <span>All</span>
+                  </label>
+                </article>
               ))}
             </div>
             {!library.length && <p className="image-brush-empty">Preparing the astronaut demo…</p>}

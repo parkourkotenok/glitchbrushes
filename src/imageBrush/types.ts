@@ -1,6 +1,9 @@
 import type { Point, Rectangle } from '../types';
 
 export type ImageBrushMode = 'stamp' | 'trail' | 'scatter' | 'sequence' | 'random-hose';
+/** Source selection is project state, deliberately separate from placement mode. */
+export type ImageBrushAssetMode = 'selected' | 'all';
+export type ImageBrushAssetOrder = 'cycle' | 'random';
 export type StampRotationMode =
   'fixed' | 'follow' | 'perpendicular' | 'random' | 'alternate' | 'spin';
 export type StampAnchor = 'center' | 'top' | 'bottom' | 'left' | 'right' | 'custom';
@@ -248,6 +251,10 @@ export interface ImageBrushProjectData {
   seed: string;
   activePresetId: string;
   activeAssetId: string | null;
+  /** Optional so v1 projects and older exported style JSON remain readable. */
+  assetMode?: ImageBrushAssetMode;
+  assetOrder?: ImageBrushAssetOrder;
+  enabledAssetIds?: string[];
   evolutionOffset: number;
   rack: ImageBrushFxItem[];
   library: SerializedImageBrushAsset[];
@@ -266,6 +273,8 @@ export interface ImageBrushProcessRequest {
     pixels: ArrayBuffer;
   }>;
   activeAssetId: string;
+  assetMode?: ImageBrushAssetMode;
+  assetOrder?: ImageBrushAssetOrder;
   stamps: StampPoint[];
   settings: ImageBrushSettings;
   rack: ImageBrushFxItem[];
@@ -285,6 +294,7 @@ export interface ImageBrushProcessResult {
   nextEvolutionOffset: number;
   metrics: ImageBrushPerformanceMetrics;
   previewVariants?: Array<{
+    assetId?: string;
     pixels: Uint8ClampedArray;
     width: number;
     height: number;
@@ -357,6 +367,7 @@ export interface ImageBrushPreviewResult {
   width: number;
   height: number;
   variants: Array<{
+    assetId?: string;
     pixels: Uint8ClampedArray;
     width: number;
     height: number;
@@ -378,9 +389,10 @@ export interface ImageBrushPreviewRequest {
   generation: number;
   quality: ImageBrushPreviewQuality;
   assetId: string;
-  pixels: ArrayBuffer;
-  width: number;
-  height: number;
+  /** Only the assets the current source selection can place are transferred. */
+  assets: Array<{ id: string; pixels: ArrayBuffer; width: number; height: number }>;
+  assetMode?: ImageBrushAssetMode;
+  assetOrder?: ImageBrushAssetOrder;
   backgroundPixels: ArrayBuffer;
   backgroundWidth: number;
   backgroundHeight: number;

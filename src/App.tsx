@@ -96,6 +96,8 @@ import { algorithmIconIds } from './icons/effects';
 import { countChangedPixels } from './mosh/engine';
 import {
   removeImageBrushAsset as removeImageBrushAssetFromLibrary,
+  normalizeImageBrushAssetSelection,
+  requiredImageBrushAssets,
   resizeRgba,
   optimizeImageBrushAsset,
   restoreImageBrushProject,
@@ -590,6 +592,12 @@ function GlitchBrushesEditor({
     setImageBrushLibrary,
     activeImageBrushId,
     setActiveImageBrushId,
+    imageBrushAssetMode,
+    setImageBrushAssetMode,
+    imageBrushAssetOrder,
+    setImageBrushAssetOrder,
+    enabledImageBrushAssetIds,
+    setEnabledImageBrushAssetIds,
     processedBrushPreview,
     setProcessedBrushPreview,
     imageBrushWorkerRef,
@@ -603,6 +611,9 @@ function GlitchBrushesEditor({
     imageBrushLibraryRef,
     imageBrushRackRef,
     activeImageBrushIdRef,
+    imageBrushAssetModeRef,
+    imageBrushAssetOrderRef,
+    enabledImageBrushAssetIdsRef,
     imageBrushEvolutionOffsetRef,
     pendingImageBrushEvolutionRef,
     imageBrushGhostSourceRef,
@@ -691,15 +702,22 @@ function GlitchBrushesEditor({
         : (astronaut?.id ?? library[0]?.id ?? null);
       const settings = stored?.settings ?? imageBrushSettingsRef.current;
       const rack = stored?.rack ?? imageBrushRackRef.current;
+      const selection = normalizeImageBrushAssetSelection(library, activeAssetId, stored);
 
       imageBrushLibraryRef.current = library;
       activeImageBrushIdRef.current = activeAssetId;
       imageBrushSettingsRef.current = settings;
       imageBrushRackRef.current = rack;
+      imageBrushAssetModeRef.current = selection.mode;
+      imageBrushAssetOrderRef.current = selection.order;
+      enabledImageBrushAssetIdsRef.current = selection.enabledAssetIds;
       setImageBrushLibrary(library);
       setActiveImageBrushId(activeAssetId);
       setImageBrushSettings(settings);
       setImageBrushRack(rack);
+      setImageBrushAssetMode(selection.mode);
+      setImageBrushAssetOrder(selection.order);
+      setEnabledImageBrushAssetIds(selection.enabledAssetIds);
       if (stored) {
         setImageBrushSeed(stored.seed);
         setImageBrushPresetId(stored.activePresetId);
@@ -718,6 +736,9 @@ function GlitchBrushesEditor({
       void saveImageBrushPreferences({
         version: 1,
         activeAssetId: activeImageBrushId,
+        assetMode: imageBrushAssetMode,
+        assetOrder: imageBrushAssetOrder,
+        enabledAssetIds: enabledImageBrushAssetIds,
         settings: imageBrushSettings,
         rack: imageBrushRack,
         seed: imageBrushSeed,
@@ -733,6 +754,9 @@ function GlitchBrushesEditor({
     return () => window.clearTimeout(timer);
   }, [
     activeImageBrushId,
+    enabledImageBrushAssetIds,
+    imageBrushAssetMode,
+    imageBrushAssetOrder,
     imageBrushLockSeed,
     imageBrushPresetId,
     imageBrushRack,
@@ -801,11 +825,15 @@ function GlitchBrushesEditor({
       ? JSON.stringify({
           tip: imageBrushFxCacheKey(active, imageBrushSettings, imageBrushRack, imageBrushSeed),
           stroke: imageBrushVisualSettingsKey,
+          source: [imageBrushAssetMode, imageBrushAssetOrder, enabledImageBrushAssetIds],
           backgroundVersion: imageBrushPreviewBackground.version,
         })
       : 'no-image-brush';
   }, [
     activeImageBrushId,
+    enabledImageBrushAssetIds,
+    imageBrushAssetMode,
+    imageBrushAssetOrder,
     imageBrushLibrary,
     imageBrushRack,
     imageBrushSeed,
@@ -859,7 +887,20 @@ function GlitchBrushesEditor({
     };
     const postPreview = (quality: 'draft' | 'full') => {
       if (!worker || generation !== imageBrushPreviewGenerationRef.current) return;
-      const pixels = active.pixels.slice().buffer;
+      const selection = normalizeImageBrushAssetSelection(imageBrushLibrary, active.id, {
+        mode: imageBrushAssetMode,
+        order: imageBrushAssetOrder,
+        enabledAssetIds: enabledImageBrushAssetIds,
+      });
+      const previewAssets = requiredImageBrushAssets(imageBrushLibrary, active.id, selection).map(
+        (asset) => ({
+          id: asset.id,
+          width: asset.width,
+          height: asset.height,
+          pixels: asset.pixels.slice().buffer,
+        }),
+      );
+      if (!previewAssets.length) return;
       const backgroundPixels = imageBrushPreviewBackground.pixels.slice().buffer;
       worker.postMessage(
         {
@@ -867,9 +908,9 @@ function GlitchBrushesEditor({
           generation,
           quality,
           assetId: active.id,
-          pixels,
-          width: active.width,
-          height: active.height,
+          assets: previewAssets,
+          assetMode: selection.mode,
+          assetOrder: selection.order,
           backgroundPixels,
           backgroundWidth: imageBrushPreviewBackground.width,
           backgroundHeight: imageBrushPreviewBackground.height,
@@ -887,7 +928,7 @@ function GlitchBrushesEditor({
               ? 0
               : imageBrushEvolutionOffsetRef.current,
         },
-        [pixels, backgroundPixels],
+        [...previewAssets.map((asset) => asset.pixels), backgroundPixels],
       );
     };
     const startPreview = () => {
@@ -1825,6 +1866,16 @@ function GlitchBrushesEditor({
       const sources = imageBrushGhostVariantsRef.current.length
         ? imageBrushGhostVariantsRef.current
         : [source];
+      const selection = normalizeImageBrushAssetSelection(
+        imageBrushLibraryRef.current,
+        active.id,
+        {
+          mode: imageBrushAssetModeRef.current,
+          order: imageBrushAssetOrderRef.current,
+          enabledAssetIds: enabledImageBrushAssetIdsRef.current,
+        },
+      );
+      const sourceAssets = requiredImageBrushAssets(imageBrushLibraryRef.current, active.id, selection);
       const copies = Math.max(1, Math.round(current.stampsPerStep));
       const baseAnchor = anchorPoint(current.anchor, current.customAnchor);
       const quality = resolveImageBrushQuality(
@@ -1834,7 +1885,7 @@ function GlitchBrushesEditor({
         stamps.length,
         imageBrushRackRef.current,
       );
-      const liveSources = quality === 'realtime' ? [sources[0] ?? source] : sources;
+      const liveSources = selection.mode === 'all' ? sources : quality === 'realtime' ? [sources[0] ?? source] : sources;
       context.save();
       context.imageSmoothingEnabled = quality !== 'realtime';
       try {
@@ -1843,6 +1894,12 @@ function GlitchBrushesEditor({
             const flatIndex = stamp.index * copies + copy;
             if (flatIndex >= current.maxGeneratedStamps) return;
             const random = createSeededRandom(`${imageBrushSeed}:${strokeId}:layout:${flatIndex}`);
+            const sourceIndex =
+              selection.mode === 'all' && selection.order === 'random'
+                ? random.int(0, Math.max(0, sourceAssets.length - 1))
+                : selection.mode === 'all'
+                  ? flatIndex % Math.max(1, sourceAssets.length)
+                  : 0;
             const scatterMultiplier =
               current.mode === 'scatter' || current.mode === 'random-hose' ? 1 : 0;
             const position = {
@@ -1857,7 +1914,7 @@ function GlitchBrushesEditor({
               ? current.minPressureSize + (1 - current.minPressureSize) * stamp.pressure
               : 1;
             const jitterScale = Math.max(0.08, 1 + (random.next() * 2 - 1) * current.scaleJitter);
-            const selectedSource = liveSources[flatIndex % liveSources.length] ?? source;
+            const selectedSource = liveSources[sourceIndex] ?? source;
             const scale =
               (current.size / Math.max(1, selectedSource.contentWidth)) *
               pressureSize *
@@ -1963,10 +2020,17 @@ function GlitchBrushesEditor({
       if (!additions.length) return;
       const next = [...current, ...additions];
       const nextActive = additions.at(-1)?.id ?? activeImageBrushIdRef.current;
+      const selection = normalizeImageBrushAssetSelection(next, nextActive, {
+        mode: imageBrushAssetModeRef.current,
+        order: imageBrushAssetOrderRef.current,
+        enabledAssetIds: [...enabledImageBrushAssetIdsRef.current, ...additions.map((asset) => asset.id)],
+      });
       imageBrushLibraryRef.current = next;
       activeImageBrushIdRef.current = nextActive;
+      enabledImageBrushAssetIdsRef.current = selection.enabledAssetIds;
       setImageBrushLibrary(next);
       setActiveImageBrushId(nextActive);
+      setEnabledImageBrushAssetIds(selection.enabledAssetIds);
       clearImageBrushAssetCaches();
     },
     [clearImageBrushAssetCaches],
@@ -1987,8 +2051,15 @@ function GlitchBrushesEditor({
       }
       imageBrushLibraryRef.current = removal.library;
       activeImageBrushIdRef.current = removal.activeAssetId;
+      const selection = normalizeImageBrushAssetSelection(removal.library, removal.activeAssetId, {
+        mode: imageBrushAssetModeRef.current,
+        order: imageBrushAssetOrderRef.current,
+        enabledAssetIds: enabledImageBrushAssetIdsRef.current,
+      });
+      enabledImageBrushAssetIdsRef.current = selection.enabledAssetIds;
       setImageBrushLibrary(removal.library);
       setActiveImageBrushId(removal.activeAssetId);
+      setEnabledImageBrushAssetIds(selection.enabledAssetIds);
       setNotice(
         `Brush image removed. ${removal.library.length ? `${removal.library.length} remain.` : 'The library is empty.'}`,
       );
@@ -2003,8 +2074,15 @@ function GlitchBrushesEditor({
     const nextActive = demos[0]?.id ?? null;
     imageBrushLibraryRef.current = demos;
     activeImageBrushIdRef.current = nextActive;
+    const selection = normalizeImageBrushAssetSelection(demos, nextActive, {
+      mode: imageBrushAssetModeRef.current,
+      order: imageBrushAssetOrderRef.current,
+      enabledAssetIds: enabledImageBrushAssetIdsRef.current,
+    });
+    enabledImageBrushAssetIdsRef.current = selection.enabledAssetIds;
     setImageBrushLibrary(demos);
     setActiveImageBrushId(nextActive);
+    setEnabledImageBrushAssetIds(selection.enabledAssetIds);
     clearImageBrushAssetCaches();
     setNotice(
       'Custom brush images cleared. The astronaut demo and document pixels were preserved.',
@@ -2189,10 +2267,13 @@ function GlitchBrushesEditor({
         setImageBrushStrokeNonce((nonce) => nonce + 1);
       };
 
-      const requiredAssets =
-        capturedSettings.mode === 'sequence' || capturedSettings.mode === 'random-hose'
-          ? assets
-          : [active];
+      const selection = normalizeImageBrushAssetSelection(assets, activeId, {
+        mode: imageBrushAssetModeRef.current,
+        order: imageBrushAssetOrderRef.current,
+        enabledAssetIds: enabledImageBrushAssetIdsRef.current,
+      });
+      const requiredAssets = requiredImageBrushAssets(assets, activeId, selection);
+      if (!requiredAssets.length) return;
       const sourceBounds = estimateImageBrushReadBounds(
         stroke.stamps,
         capturedSettings,
@@ -2200,6 +2281,7 @@ function GlitchBrushesEditor({
         activeId,
         current.width,
         current.height,
+        selection.mode,
       );
       const sourcePixels = processingSourcePixels(stroke.sourceLayerId, stroke.sourceMode);
       const documentPixels = cropRgbaRegion(sourcePixels, current.width, sourceBounds).buffer;
@@ -2228,6 +2310,8 @@ function GlitchBrushesEditor({
             sourceBounds,
             assets: workerAssets,
             activeAssetId: activeId,
+            assetMode: selection.mode,
+            assetOrder: selection.order,
             stamps: stroke.stamps,
             settings: capturedSettings,
             rack: capturedRack,
@@ -3889,6 +3973,30 @@ function GlitchBrushesEditor({
     setActiveImageBrushId(id);
   }, []);
 
+  const updateImageBrushAssetMode = useCallback((mode: 'selected' | 'all') => {
+    imageBrushAssetModeRef.current = mode;
+    setImageBrushAssetMode(mode);
+  }, []);
+
+  const updateImageBrushAssetOrder = useCallback((order: 'cycle' | 'random') => {
+    imageBrushAssetOrderRef.current = order;
+    setImageBrushAssetOrder(order);
+  }, []);
+
+  const updateEnabledImageBrushAssetIds = useCallback((ids: string[]) => {
+    const selection = normalizeImageBrushAssetSelection(
+      imageBrushLibraryRef.current,
+      activeImageBrushIdRef.current,
+      {
+        mode: imageBrushAssetModeRef.current,
+        order: imageBrushAssetOrderRef.current,
+        enabledAssetIds: ids,
+      },
+    );
+    enabledImageBrushAssetIdsRef.current = selection.enabledAssetIds;
+    setEnabledImageBrushAssetIds(selection.enabledAssetIds);
+  }, []);
+
   const randomizeCurrentImageBrush = useCallback(
     (scope: ImageBrushRandomizeScope, forceNewVariation = false) => {
       let nextNonce =
@@ -4133,6 +4241,9 @@ function GlitchBrushesEditor({
         seed: imageBrushSeed,
         activePresetId: imageBrushPresetId,
         activeAssetId: activeImageBrushId,
+        assetMode: imageBrushAssetMode,
+        assetOrder: imageBrushAssetOrder,
+        enabledAssetIds: enabledImageBrushAssetIds,
         evolutionOffset: imageBrushEvolutionOffsetRef.current,
         rack: imageBrushRack,
         library: imageBrushLibrary,
@@ -4226,6 +4337,14 @@ function GlitchBrushesEditor({
         setImageBrushRack(restored.rack);
         setImageBrushLibrary(restored.library);
         setActiveImageBrushId(restored.activeAssetId);
+        imageBrushLibraryRef.current = restored.library;
+        activeImageBrushIdRef.current = restored.activeAssetId;
+        setImageBrushAssetMode(restored.assetMode);
+        setImageBrushAssetOrder(restored.assetOrder);
+        setEnabledImageBrushAssetIds(restored.enabledAssetIds);
+        imageBrushAssetModeRef.current = restored.assetMode;
+        imageBrushAssetOrderRef.current = restored.assetOrder;
+        enabledImageBrushAssetIdsRef.current = restored.enabledAssetIds;
         imageBrushEvolutionOffsetRef.current = restored.evolutionOffset;
       }
       resetHistory();
@@ -4727,6 +4846,9 @@ function GlitchBrushesEditor({
                 <ImageBrushPanel
                   library={imageBrushLibrary}
                   activeAssetId={activeImageBrushId}
+                  assetMode={imageBrushAssetMode}
+                  assetOrder={imageBrushAssetOrder}
+                  enabledAssetIds={enabledImageBrushAssetIds}
                   settings={imageBrushSettings}
                   rack={imageBrushRack}
                   seed={imageBrushSeed}
@@ -4739,6 +4861,9 @@ function GlitchBrushesEditor({
                   onRemoveAsset={removeImageBrushAsset}
                   onClearLibrary={clearImageBrushLibrary}
                   onActiveAssetChange={selectImageBrushAsset}
+                  onAssetModeChange={updateImageBrushAssetMode}
+                  onAssetOrderChange={updateImageBrushAssetOrder}
+                  onEnabledAssetIdsChange={updateEnabledImageBrushAssetIds}
                   onSettingsChange={setImageBrushSettings}
                   onRackChange={setImageBrushRack}
                   onSeedChange={setImageBrushSeed}

@@ -1,5 +1,11 @@
 import { defaultImageBrushSettings } from './types';
-import type { ImageBrushAsset, ImageBrushFxItem, ImageBrushSettings } from './types';
+import type {
+  ImageBrushAsset,
+  ImageBrushAssetMode,
+  ImageBrushAssetOrder,
+  ImageBrushFxItem,
+  ImageBrushSettings,
+} from './types';
 
 const databaseName = 'glitch-brushes';
 const storeName = 'image-brush-state';
@@ -9,6 +15,9 @@ const preferencesKey = 'preferences-v1';
 export interface StoredImageBrushPreferences {
   version: 1;
   activeAssetId: string | null;
+  assetMode?: ImageBrushAssetMode;
+  assetOrder?: ImageBrushAssetOrder;
+  enabledAssetIds?: string[];
   settings: ImageBrushSettings;
   rack: ImageBrushFxItem[];
   seed: string;
@@ -94,13 +103,31 @@ export async function loadImageBrushState(): Promise<StoredImageBrushState | nul
     const library = Array.isArray(libraryValue)
       ? libraryValue.map(restoreAsset).filter((asset): asset is ImageBrushAsset => Boolean(asset))
       : [];
+    const legacySourceMode =
+      stored.settings?.mode === 'sequence' || stored.settings?.mode === 'random-hose'
+        ? stored.settings.mode
+        : null;
     return {
       version: 1,
       library,
       activeAssetId: typeof stored.activeAssetId === 'string' ? stored.activeAssetId : null,
+      assetMode: stored.assetMode === 'all' || legacySourceMode ? 'all' : 'selected',
+      assetOrder:
+        stored.assetOrder === 'random' || legacySourceMode === 'random-hose' ? 'random' : 'cycle',
+      enabledAssetIds: Array.isArray(stored.enabledAssetIds)
+        ? stored.enabledAssetIds.filter((id): id is string => typeof id === 'string')
+        : legacySourceMode
+          ? library.map((asset) => asset.id)
+          : [],
       settings: {
         ...defaultImageBrushSettings,
         ...(stored.settings ?? {}),
+        mode:
+          legacySourceMode === 'sequence'
+            ? 'trail'
+            : legacySourceMode === 'random-hose'
+              ? 'scatter'
+              : (stored.settings?.mode ?? defaultImageBrushSettings.mode),
         customAnchor: {
           ...defaultImageBrushSettings.customAnchor,
           ...(stored.settings?.customAnchor ?? {}),

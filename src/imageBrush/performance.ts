@@ -56,9 +56,13 @@ export function normalizeImageBrushSettings(
     (settings?.mutationMode as string | undefined) === 'stroke-feedback'
       ? 'evolving'
       : (settings?.mutationMode ?? defaultImageBrushSettings.mutationMode);
+  const legacyMode = settings?.mode;
   return {
     ...defaultImageBrushSettings,
     ...settings,
+    // Legacy source modes are migrated by project/storage import; placement
+    // remains their visual equivalent when styles are decoded independently.
+    mode: legacyMode === 'sequence' ? 'trail' : legacyMode === 'random-hose' ? 'scatter' : (legacyMode ?? defaultImageBrushSettings.mode),
     mutationMode,
     effectPool: Array.isArray(settings?.effectPool)
       ? settings.effectPool.filter((effectId) =>

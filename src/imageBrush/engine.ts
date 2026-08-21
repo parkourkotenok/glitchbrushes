@@ -67,6 +67,15 @@ interface RenderTimings {
   bufferCopyMs: number;
 }
 
+export interface ImageBrushLiveSourceVariant {
+  assetId: string;
+  pixels: Uint8ClampedArray;
+  width: number;
+  height: number;
+  contentWidth: number;
+  contentHeight: number;
+}
+
 function clockNow(): number {
   return typeof performance !== 'undefined' ? performance.now() : Date.now();
 }
@@ -1171,6 +1180,111 @@ function variantForStamp(
   return processed;
 }
 
+/**
+ * Builds one bounded, processed tip per transferred source inside the existing
+ * preview Worker. This intentionally does not create N trail renders: each
+ * asset reuses the stamp-variant pipeline and a representative deterministic
+ * placement, so the live overlay keeps the selected source order and FX rack.
+ */
+export function prepareImageBrushLiveSourceVariants(
+  request: Pick<
+    ImageBrushProcessRequest,
+    | 'activeAssetId'
+    | 'assetMode'
+    | 'assetOrder'
+    | 'stamps'
+    | 'settings'
+    | 'rack'
+    | 'seed'
+    | 'strokeId'
+    | 'evolutionOffset'
+  > & {
+    assets: Array<{ id: string; width: number; height: number; pixels: Uint8ClampedArray }>;
+    pixels: Uint8ClampedArray;
+    width: number;
+    height: number;
+  },
+): ImageBrushLiveSourceVariant[] {
+  const assets = request.assets
+    .map((asset) => ({ ...asset, pixels: new Uint8ClampedArray(asset.pixels) }))
+    .filter((asset) => asset.width > 0 && asset.height > 0);
+  if (!assets.length) return [];
+  const copies = Math.max(1, Math.round(request.settings.stampsPerStep));
+  const totalPlacements = Math.min(request.settings.maxGeneratedStamps, request.stamps.length * copies);
+  const useAllAssets = request.assetMode === 'all';
+  const order = request.assetOrder ?? 'cycle';
+  const placements = new Map<string, number>();
+  const scanLimit = Math.max(totalPlacements, assets.length * 24);
+  for (let flatIndex = 0; flatIndex < scanLimit && placements.size < assets.length; flatIndex += 1) {
+    const random = createSeededRandom(`${request.seed}:${request.strokeId}:layout:${flatIndex}`);
+    const asset = !useAllAssets
+      ? assets.find((candidate) => candidate.id === request.activeAssetId) ?? assets[0]!
+      : order === 'random'
+        ? random.pick(assets)
+        : assets[flatIndex % assets.length]!;
+    if (!placements.has(asset.id)) placements.set(asset.id, flatIndex);
+  }
+  const requiredFxStages = effectiveImageBrushStages(
+    request.settings.fxStage,
+    request.settings.mutationMode,
+  );
+  const compatibleRack = request.rack.filter((item) =>
+    supportsImageBrushStages(item.effectId, requiredFxStages),
+  );
+  const cleanCache = new Map<string, PreparedTip>();
+  const fixedCache = new Map<string, PreparedTip>();
+  const perStampCache = new Map<string, PreparedTip[]>();
+  const timings: RenderTimings = {
+    variantGenerationMs: 0,
+    fxProcessingMs: 0,
+    compositingMs: 0,
+    bufferCopyMs: 0,
+  };
+  return assets.map((asset, assetIndex) => {
+    const flatIndex = placements.get(asset.id) ?? totalPlacements + assetIndex;
+    const pathStamp = request.stamps[Math.min(request.stamps.length - 1, Math.floor(flatIndex / copies))] ?? {
+      position: { x: request.width / 2, y: request.height / 2 },
+      previousPosition: { x: request.width / 2, y: request.height / 2 },
+      direction: { x: 1, y: 0 },
+      speed: 0,
+      pressure: 1,
+      distance: 0,
+      index: 0,
+    };
+    const variant = variantForStamp(
+      asset,
+      pathStamp,
+      flatIndex,
+      Math.max(1, totalPlacements),
+      request.settings,
+      request.settings.fxStage === 'after' ||
+        request.settings.mutationMode === 'whole-trail' ||
+        request.settings.mutationMode === 'clean'
+        ? []
+        : compatibleRack,
+      request.seed,
+      `${request.strokeId}:${request.settings.fxStage}`,
+      request.evolutionOffset,
+      null,
+      request.pixels,
+      request.width,
+      request.height,
+      cleanCache,
+      fixedCache,
+      perStampCache,
+      timings,
+    );
+    return {
+      assetId: asset.id,
+      pixels: variant.pixels.slice(),
+      width: variant.width,
+      height: variant.height,
+      contentWidth: asset.width,
+      contentHeight: asset.height,
+    };
+  });
+}
+
 function stampBounds(
   position: Point,
   variantWidth: number,
@@ -1340,9 +1454,9 @@ export function processImageBrushStroke(
     throw new Error('Image Brush cropped source region does not match its declared bounds.');
   }
   const assetMap = new Map(request.assets.map((asset) => [asset.id, asset]));
-  const active = assetMap.get(request.activeAssetId);
-  if (!active) throw new Error('The active Image Brush asset is unavailable.');
   const assetList = request.assets.filter((asset) => asset.width > 0 && asset.height > 0);
+  const active = assetMap.get(request.activeAssetId) ?? assetList[0];
+  if (!active) throw new Error('No enabled Image Brush assets are available.');
   const timings: RenderTimings = {
     variantGenerationMs: 0,
     fxProcessingMs: 0,
@@ -1385,9 +1499,15 @@ export function processImageBrushStroke(
       const flatIndex = placementIndex;
       const random = createSeededRandom(`${request.seed}:${request.strokeId}:layout:${flatIndex}`);
       let asset = active;
-      if (request.settings.mode === 'sequence')
+      const useAllAssets =
+        request.assetMode === 'all' ||
+        (!request.assetMode &&
+          (request.settings.mode === 'sequence' || request.settings.mode === 'random-hose'));
+      const assetOrder = request.assetOrder ??
+        (request.settings.mode === 'random-hose' ? 'random' : 'cycle');
+      if (useAllAssets && assetOrder === 'cycle')
         asset = assetList[flatIndex % assetList.length] ?? active;
-      if (request.settings.mode === 'random-hose')
+      if (useAllAssets && assetOrder === 'random')
         asset = random.pick(assetList.length ? assetList : [active]);
       const scatterMultiplier =
         request.settings.mode === 'scatter' || request.settings.mode === 'random-hose' ? 1 : 0;

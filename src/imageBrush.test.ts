@@ -5,7 +5,9 @@ import {
   decodeEmbeddedRgbaDataUrl,
   disposeBrushResource,
   embeddedRgbaDataUrl,
+  normalizeImageBrushAssetSelection,
   optimizeImageBrushAsset,
+  requiredImageBrushAssets,
   restoreImageBrushProject,
   serializeImageBrushProject,
   transparentBounds,
@@ -31,6 +33,7 @@ import { shouldPostImageBrushProgress } from './imageBrush/progress';
 import {
   compositeRgbaPixel,
   imageBrushMutationStrength,
+  prepareImageBrushLiveSourceVariants,
   prepareBrushTip,
   processBrushTipFx,
   processImageBrushStroke,
@@ -177,6 +180,36 @@ function pixelDistance(first: Uint8ClampedArray, second: Uint8ClampedArray): num
 }
 
 describe('Image Brush assets and path placement', () => {
+  it('keeps project source selection independent, minimal, and demo-safe', () => {
+    const demo = createImageBrushAsset('Demo', 'demo.png', 'image/png', new Uint8ClampedArray([1, 2, 3, 255]), 1, 1, false, 0, { id: 'demo', demo: true });
+    const custom = createImageBrushAsset('Custom', 'custom.png', 'image/png', new Uint8ClampedArray([4, 5, 6, 255]), 1, 1, false, 0, { id: 'custom' });
+    const initial = normalizeImageBrushAssetSelection([demo, custom], custom.id, undefined);
+    expect(initial).toEqual({ mode: 'selected', order: 'cycle', enabledAssetIds: ['custom'] });
+    const all = normalizeImageBrushAssetSelection([demo, custom], custom.id, {
+      mode: 'all', order: 'random', enabledAssetIds: ['custom'],
+    });
+    expect(requiredImageBrushAssets([demo, custom], custom.id, all).map((asset) => asset.id)).toEqual(['custom']);
+    expect(requiredImageBrushAssets([demo, custom], custom.id, { ...all, mode: 'selected' })).toEqual([custom]);
+    expect(normalizeImageBrushAssetSelection([demo], demo.id, { mode: 'all', enabledAssetIds: [] }).enabledAssetIds).toEqual(['demo']);
+  });
+
+  it('migrates legacy sequence and random-hose into placement plus project source selection', () => {
+    const library = createTestBrushAssets(2);
+    const serialized = serializeImageBrushProject({
+      settings: { ...defaultImageBrushSettings, mode: 'sequence' },
+      seed: 'legacy', activePresetId: 'legacy', activeAssetId: library[0]!.id,
+      evolutionOffset: 0, rack: [], library,
+    });
+    const sequence = restoreImageBrushProject(serialized);
+    expect(sequence.settings.mode).toBe('trail');
+    expect(sequence.assetMode).toBe('all');
+    expect(sequence.assetOrder).toBe('cycle');
+    expect(sequence.enabledAssetIds).toEqual(library.map((asset) => asset.id));
+    const hose = restoreImageBrushProject({ ...serialized, settings: { ...serialized.settings, mode: 'random-hose' } });
+    expect(hose.settings.mode).toBe('scatter');
+    expect(hose.assetMode).toBe('all');
+    expect(hose.assetOrder).toBe('random');
+  });
   it('finds and crops transparent bounds without losing visible alpha', () => {
     const pixels = new Uint8ClampedArray(6 * 5 * 4);
     pixels.set([10, 20, 30, 3], (2 * 6 + 1) * 4);
@@ -260,6 +293,73 @@ describe('Image Brush processing', () => {
   const rack: ImageBrushFxItem[] = [
     { id: 'rgb', effectId: 'rgb-split', enabled: true, amount: 0.5, mix: 1 },
   ];
+
+  it('uses enabled assets only and keeps cycle/random byte deterministic per seed, stroke, and flat index', () => {
+    const red = createImageBrushAsset('Red', 'red.png', 'image/png', new Uint8ClampedArray([255, 0, 0, 255]), 1, 1, false, 0, { id: 'red' });
+    const green = createImageBrushAsset('Green', 'green.png', 'image/png', new Uint8ClampedArray([0, 255, 0, 255]), 1, 1, false, 0, { id: 'green' });
+    const blue = createImageBrushAsset('Blue', 'blue.png', 'image/png', new Uint8ClampedArray([0, 0, 255, 255]), 1, 1, false, 0, { id: 'blue' });
+    const request = strokeRequest('clean', []);
+    request.assets = [red, green];
+    request.activeAssetId = red.id;
+    request.settings = { ...request.settings, size: 4, pressureSize: false, spacing: 10, rotationMode: 'fixed' };
+    const selected = processImageBrushStroke({ ...request, assetMode: 'selected', assetOrder: 'cycle' });
+    const cycle = processImageBrushStroke({ ...request, assetMode: 'all', assetOrder: 'cycle' });
+    expect(selected.pixels).not.toEqual(cycle.pixels);
+    expect(cycle.pixels.some((value, index) => index % 4 === 1 && value === 255)).toBe(true);
+    const randomRequest = { ...request, assets: [red, green, blue], assetMode: 'all' as const, assetOrder: 'random' as const };
+    const first = processImageBrushStroke(randomRequest);
+    const second = processImageBrushStroke(randomRequest);
+    expect(second.pixels).toEqual(first.pixels);
+    expect(processImageBrushStroke({ ...randomRequest, strokeId: 'stroke-2' }).pixels).not.toEqual(first.pixels);
+  });
+
+  it('builds processed, asset-order-aligned live sources for All Cycle and All Random', () => {
+    const source = (id: string, red: number) => {
+      const pixels = new Uint8ClampedArray(8 * 8 * 4);
+      for (let index = 0; index < 64; index += 1) {
+        pixels.set([red, (index * 29) % 255, 255 - red, 255], index * 4);
+      }
+      return createImageBrushAsset(id, `${id}.png`, 'image/png', pixels, 8, 8, false, 0, { id });
+    };
+    const assets = [source('red', 220), source('blue', 30)];
+    const request = strokeRequest('fixed', [
+      { ...createImageBrushFx('pixel-embroidery'), amount: 0.9 },
+    ]);
+    const input = {
+      assets,
+      activeAssetId: assets[0]!.id,
+      stamps: request.stamps,
+      settings: { ...request.settings, mutationMode: 'fixed' as const, fxStage: 'before' as const },
+      rack: request.rack,
+      seed: request.seed,
+      strokeId: request.strokeId,
+      evolutionOffset: 0,
+      pixels: new Uint8ClampedArray(80 * 40 * 4),
+      width: 80,
+      height: 40,
+    };
+    for (const assetOrder of ['cycle', 'random'] as const) {
+      const variants = prepareImageBrushLiveSourceVariants({
+        ...input,
+        assetMode: 'all',
+        assetOrder,
+      });
+      expect(variants.map((variant) => variant.assetId)).toEqual(assets.map((asset) => asset.id));
+      for (const [index, variant] of variants.entries()) {
+        const clean = prepareBrushTip(assets[index]!.pixels, 8, 8, 'preserve', 0);
+        expect(pixelDistance(variant.pixels, clean.pixels)).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('expands read bounds for every enabled All source but not the inactive library', () => {
+    const small = { id: 'small', width: 2, height: 2 };
+    const large = { id: 'large', width: 80, height: 160 };
+    const stamps = strokeRequest('clean', []).stamps;
+    const selected = estimateImageBrushReadBounds(stamps, { ...defaultImageBrushSettings, size: 40 }, [small, large], small.id, 200, 100, 'selected');
+    const all = estimateImageBrushReadBounds(stamps, { ...defaultImageBrushSettings, size: 40 }, [small, large], small.id, 200, 100, 'all');
+    expect(all.width).toBeGreaterThan(selected.width);
+  });
 
   it('builds a bounded live preview stroke that responds to layout controls', () => {
     const compact = createImageBrushLivePreviewLayout(

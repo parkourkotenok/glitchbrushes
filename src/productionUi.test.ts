@@ -89,6 +89,20 @@ describe('production editor cleanup', () => {
     expect(imageBrushPanelSource).toContain('applyImageBrushStyleKeepingEssentials');
   });
 
+  it('exposes independent Selected/All source controls without making them Style settings', () => {
+    expect(imageBrushPanelSource).toContain('aria-label="Image source mode"');
+    expect(imageBrushPanelSource).toContain('Selected');
+    expect(imageBrushPanelSource).toContain('All');
+    expect(imageBrushPanelSource).toContain('assetMode === \'all\'');
+    expect(imageBrushPanelSource).toContain('>Order<');
+    expect(imageBrushPanelSource).toContain('value="cycle"');
+    expect(imageBrushPanelSource).toContain('value="random"');
+    expect(imageBrushPanelSource).toContain('Enable ${asset.name} in All images');
+    expect(imageBrushPanelSource).toContain('Keep at least one image enabled');
+    expect(appSource).toContain('enabledImageBrushAssetIds');
+    expect(appSource).toContain('requiredImageBrushAssets');
+  });
+
   it('uses pre-rendered landscape effect previews that never read the open document', () => {
     expect(effectPreviewSource).toContain('/assets/effect-previews/original.webp');
     expect(effectPreviewSource).toContain('PRE-RENDERED DEMO');

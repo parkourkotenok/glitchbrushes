@@ -3,6 +3,8 @@ import { MoshJobGate } from '../mosh/transaction';
 import {
   defaultImageBrushSettings,
   type ImageBrushAsset,
+  type ImageBrushAssetMode,
+  type ImageBrushAssetOrder,
   type ImageBrushFxItem,
   type ImageBrushPerformanceSnapshot,
   type ImageBrushPreviewResult,
@@ -59,6 +61,9 @@ export function useImageBrush() {
   const [imageBrushStrokeNonce, setImageBrushStrokeNonce] = useState(0);
   const [imageBrushLibrary, setImageBrushLibrary] = useState<ImageBrushAsset[]>([]);
   const [activeImageBrushId, setActiveImageBrushId] = useState<string | null>(null);
+  const [imageBrushAssetMode, setImageBrushAssetMode] = useState<ImageBrushAssetMode>('selected');
+  const [imageBrushAssetOrder, setImageBrushAssetOrder] = useState<ImageBrushAssetOrder>('cycle');
+  const [enabledImageBrushAssetIds, setEnabledImageBrushAssetIds] = useState<string[]>([]);
   const [processedBrushPreview, setProcessedBrushPreview] =
     useState<ImageBrushPreviewResult | null>(null);
   const imageBrushWorkerRef = useRef<Worker | null>(null);
@@ -77,6 +82,9 @@ export function useImageBrush() {
   const imageBrushLibraryRef = useRef(imageBrushLibrary);
   const imageBrushRackRef = useRef(imageBrushRack);
   const activeImageBrushIdRef = useRef(activeImageBrushId);
+  const imageBrushAssetModeRef = useRef(imageBrushAssetMode);
+  const imageBrushAssetOrderRef = useRef(imageBrushAssetOrder);
+  const enabledImageBrushAssetIdsRef = useRef(enabledImageBrushAssetIds);
   const imageBrushEvolutionOffsetRef = useRef(0);
   const pendingImageBrushEvolutionRef = useRef<number | null>(null);
   const imageBrushGhostSourceRef = useRef<ImageBrushGhostVariant | null>(null);
@@ -99,6 +107,15 @@ export function useImageBrush() {
   useEffect(() => {
     activeImageBrushIdRef.current = activeImageBrushId;
   }, [activeImageBrushId]);
+  useEffect(() => {
+    imageBrushAssetModeRef.current = imageBrushAssetMode;
+  }, [imageBrushAssetMode]);
+  useEffect(() => {
+    imageBrushAssetOrderRef.current = imageBrushAssetOrder;
+  }, [imageBrushAssetOrder]);
+  useEffect(() => {
+    enabledImageBrushAssetIdsRef.current = enabledImageBrushAssetIds;
+  }, [enabledImageBrushAssetIds]);
 
   return {
     imageBrushProcessing,
@@ -125,6 +142,12 @@ export function useImageBrush() {
     setImageBrushLibrary,
     activeImageBrushId,
     setActiveImageBrushId,
+    imageBrushAssetMode,
+    setImageBrushAssetMode,
+    imageBrushAssetOrder,
+    setImageBrushAssetOrder,
+    enabledImageBrushAssetIds,
+    setEnabledImageBrushAssetIds,
     processedBrushPreview,
     setProcessedBrushPreview,
     imageBrushWorkerRef,
@@ -138,6 +161,9 @@ export function useImageBrush() {
     imageBrushLibraryRef,
     imageBrushRackRef,
     activeImageBrushIdRef,
+    imageBrushAssetModeRef,
+    imageBrushAssetOrderRef,
+    enabledImageBrushAssetIdsRef,
     imageBrushEvolutionOffsetRef,
     pendingImageBrushEvolutionRef,
     imageBrushGhostSourceRef,

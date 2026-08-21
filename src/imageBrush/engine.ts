@@ -245,16 +245,22 @@ function applyXeroxDecay(
   const blackCrush = clamp(item.xeroxBlackCrush ?? 0.36, 0, 1) * amount;
   const duotone = item.xeroxColorMode === 'duotone';
   const seedValue = createSeededRandom(`${seed}:xerox-decay`).int(1, 0x7fffffff);
-  const lumaAt = (x: number, y: number) => {
-    const sx = clamp(x, 0, width - 1);
-    const sy = clamp(y, 0, height - 1);
-    const offset = (sy * width + sx) * 4;
-    return input[offset]! * 0.299 + input[offset + 1]! * 0.587 + input[offset + 2]! * 0.114;
-  };
+  // Xerox uses every pixel's luminance five times. Cache it once so progressive
+  // variant pools do not repeatedly decode the same RGB triplets on the worker.
+  const luminance = new Float64Array(width * height);
+  for (let pixel = 0; pixel < luminance.length; pixel += 1) {
+    const offset = pixel * 4;
+    luminance[pixel] =
+      input[offset]! * 0.299 + input[offset + 1]! * 0.587 + input[offset + 2]! * 0.114;
+  }
   for (let y = 0; y < height; y += 1) {
     const band = imageFxNoise(seedValue, 0, Math.floor(y / 2), 7) < banding * 0.22;
+    const row = y * width;
+    const rowAbove = Math.max(0, y - 1) * width;
+    const rowBelow = Math.min(height - 1, y + 1) * width;
     for (let x = 0; x < width; x += 1) {
-      const offset = (y * width + x) * 4;
+      const pixel = row + x;
+      const offset = pixel * 4;
       const alpha = input[offset + 3]!;
       if (alpha === 0) {
         output[offset] = 0;
@@ -263,13 +269,13 @@ function applyXeroxDecay(
         output[offset + 3] = 0;
         continue;
       }
-      const luminosity = lumaAt(x, y);
+      const luminosity = luminance[pixel]!;
       const edgeMagnitude =
         Math.max(
-          Math.abs(luminosity - lumaAt(x - 1, y)),
-          Math.abs(luminosity - lumaAt(x + 1, y)),
-          Math.abs(luminosity - lumaAt(x, y - 1)),
-          Math.abs(luminosity - lumaAt(x, y + 1)),
+          Math.abs(luminosity - luminance[row + Math.max(0, x - 1)]!),
+          Math.abs(luminosity - luminance[row + Math.min(width - 1, x + 1)]!),
+          Math.abs(luminosity - luminance[rowAbove + x]!),
+          Math.abs(luminosity - luminance[rowBelow + x]!),
         ) / 255;
       const noise = imageFxNoise(seedValue, x, y, 11);
       const tonerMissing = noise < tonerLoss * (0.25 + luminosity / 340);

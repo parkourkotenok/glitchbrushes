@@ -21,6 +21,8 @@ export interface StoredImageBrushPreferences {
   settings: ImageBrushSettings;
   rack: ImageBrushFxItem[];
   seed: string;
+  /** Style identity; activePresetId is kept for pre-Style-first stored preferences. */
+  activeStyleId?: string;
   activePresetId: string;
   variationNonce: number;
   lockSeed: boolean;
@@ -135,6 +137,12 @@ export async function loadImageBrushState(): Promise<StoredImageBrushState | nul
       },
       rack: Array.isArray(stored.rack) ? stored.rack : [],
       seed: typeof stored.seed === 'string' ? stored.seed : 'stamp-4F21',
+      activeStyleId:
+        typeof stored.activeStyleId === 'string'
+          ? stored.activeStyleId
+          : typeof stored.activePresetId === 'string'
+            ? stored.activePresetId
+            : 'clean-repeat',
       activePresetId:
         typeof stored.activePresetId === 'string' ? stored.activePresetId : 'clean-repeat',
       variationNonce: Number.isFinite(stored.variationNonce) ? stored.variationNonce : 0,

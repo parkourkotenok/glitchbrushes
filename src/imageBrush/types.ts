@@ -249,6 +249,11 @@ export interface ImageBrushProjectData {
   version: 1;
   settings: ImageBrushSettings;
   seed: string;
+  /**
+   * The displayed Style is intentionally independent from its current essential overrides.
+   * `activePresetId` remains in exported projects for readers written before Style-first UI.
+   */
+  activeStyleId?: string;
   activePresetId: string;
   activeAssetId: string | null;
   /** Optional so v1 projects and older exported style JSON remain readable. */

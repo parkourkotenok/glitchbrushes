@@ -389,9 +389,14 @@ export function restoreImageBrushAsset(
 export function serializeImageBrushProject(
   data: Omit<ImageBrushProjectData, 'version' | 'library'> & { library: ImageBrushAsset[] },
 ): ImageBrushProjectData {
+  const activeStyleId =
+    typeof data.activeStyleId === 'string' ? data.activeStyleId : data.activePresetId;
   return {
     ...data,
     version: 1,
+    activeStyleId,
+    // Keep this exact legacy key for old project readers.
+    activePresetId: activeStyleId,
     settings: { ...data.settings, customAnchor: { ...data.settings.customAnchor } },
     rack: data.rack.map((item) => ({ ...item })),
     library: data.library.map(serializeImageBrushAsset),
@@ -401,7 +406,7 @@ export function serializeImageBrushProject(
 export function restoreImageBrushProject(project: ImageBrushProjectData): {
   settings: ImageBrushSettings;
   seed: string;
-  activePresetId: string;
+  activeStyleId: string;
   activeAssetId: string | null;
   assetMode: ImageBrushAssetMode;
   assetOrder: ImageBrushAssetOrder;
@@ -442,7 +447,14 @@ export function restoreImageBrushProject(project: ImageBrushProjectData): {
   return {
     settings,
     seed: project.seed,
-    activePresetId: project.activePresetId,
+    // Projects saved before Style identity only have activePresetId. Keep accepting it so a
+    // size or opacity override does not turn an old project's selected Style into Custom.
+    activeStyleId:
+      typeof project.activeStyleId === 'string'
+        ? project.activeStyleId
+        : typeof project.activePresetId === 'string'
+          ? project.activePresetId
+          : 'clean-repeat',
     activeAssetId,
     assetMode: selection.mode,
     assetOrder: selection.order,

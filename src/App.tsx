@@ -129,7 +129,10 @@ import {
   randomizeImageBrush,
   type ImageBrushRandomizeScope,
 } from './imageBrush/presets';
-import { applyImageBrushStyleKeepingEssentials } from './imageBrush/simple';
+import {
+  applyImageBrushStyleKeepingEssentials,
+  imageBrushStyleHistoryLabel,
+} from './imageBrush/simple';
 import {
   type ImageBrushAsset,
   type ImageBrushProcessResult,
@@ -584,8 +587,8 @@ function GlitchBrushesEditor({
     setImageBrushVariationNonce,
     imageBrushLockSeed,
     setImageBrushLockSeed,
-    imageBrushPresetId,
-    setImageBrushPresetId,
+    activeImageBrushStyleId,
+    setActiveImageBrushStyleId,
     imageBrushStrokeNonce,
     setImageBrushStrokeNonce,
     imageBrushLibrary,
@@ -720,7 +723,7 @@ function GlitchBrushesEditor({
       setEnabledImageBrushAssetIds(selection.enabledAssetIds);
       if (stored) {
         setImageBrushSeed(stored.seed);
-        setImageBrushPresetId(stored.activePresetId);
+        setActiveImageBrushStyleId(stored.activeStyleId ?? stored.activePresetId);
         setImageBrushVariationNonce(stored.variationNonce);
         setImageBrushLockSeed(stored.lockSeed);
       }
@@ -742,7 +745,8 @@ function GlitchBrushesEditor({
         settings: imageBrushSettings,
         rack: imageBrushRack,
         seed: imageBrushSeed,
-        activePresetId: imageBrushPresetId,
+        activeStyleId: activeImageBrushStyleId,
+        activePresetId: activeImageBrushStyleId,
         variationNonce: imageBrushVariationNonce,
         lockSeed: imageBrushLockSeed,
       }).catch(() => {
@@ -758,7 +762,7 @@ function GlitchBrushesEditor({
     imageBrushAssetMode,
     imageBrushAssetOrder,
     imageBrushLockSeed,
-    imageBrushPresetId,
+    activeImageBrushStyleId,
     imageBrushRack,
     imageBrushSeed,
     imageBrushSettings,
@@ -2103,9 +2107,10 @@ function GlitchBrushesEditor({
         customAnchor: { ...imageBrushSettingsRef.current.customAnchor },
       };
       const capturedRack = imageBrushRack.map((item) => ({ ...item }));
-      const capturedPresetName =
-        builtInImageBrushPresets.find((preset) => preset.id === imageBrushPresetId)?.name ??
-        (imageBrushPresetId === 'custom' ? 'Custom' : 'User Preset');
+      const capturedPresetName = imageBrushStyleHistoryLabel(
+        activeImageBrushStyleId,
+        builtInImageBrushPresets,
+      );
       const preview = capturedSettings.previewStroke || applyModeRef.current === 'preview';
       const jobId = `image-brush-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const worker = new Worker(new URL('./workers/imageBrush.worker.ts', import.meta.url), {
@@ -2333,7 +2338,7 @@ function GlitchBrushesEditor({
       cancelImageBrushJob,
       clearImageBrushOverlay,
       commitCurrentBufferToActiveLayer,
-      imageBrushPresetId,
+      activeImageBrushStyleId,
       imageBrushRack,
       imageBrushSeed,
       processingSourcePixels,
@@ -4022,7 +4027,7 @@ function GlitchBrushesEditor({
             : { settings: replaySettings, rack: replayRack };
         setImageBrushSettings(styled.settings);
         setImageBrushRack(styled.rack);
-        setImageBrushPresetId('custom');
+        setActiveImageBrushStyleId('custom');
         setNotice(
           `Image Brush reproduced the locked ${scope} recipe with seed ${imageBrushSeed}, variation ${nextNonce}.`,
         );
@@ -4082,7 +4087,7 @@ function GlitchBrushesEditor({
       setImageBrushVariationNonce(nextNonce);
       setImageBrushSettings(randomized.settings);
       setImageBrushRack(randomized.rack);
-      setImageBrushPresetId('custom');
+      setActiveImageBrushStyleId('custom');
       setNotice(
         `Image Brush ${scope} recipe generated with seed ${imageBrushSeed}, variation ${nextNonce}. ` +
           `${randomized.rack.length} FX and multiple meaningful settings changed; the selected image and History were unchanged.`,
@@ -4239,7 +4244,8 @@ function GlitchBrushesEditor({
       imageBrush: serializeImageBrushProject({
         settings: imageBrushSettings,
         seed: imageBrushSeed,
-        activePresetId: imageBrushPresetId,
+        activeStyleId: activeImageBrushStyleId,
+        activePresetId: activeImageBrushStyleId,
         activeAssetId: activeImageBrushId,
         assetMode: imageBrushAssetMode,
         assetOrder: imageBrushAssetOrder,
@@ -4333,7 +4339,7 @@ function GlitchBrushesEditor({
         const restored = restoreImageBrushProject(project.imageBrush);
         setImageBrushSettings(restored.settings);
         setImageBrushSeed(restored.seed);
-        setImageBrushPresetId(restored.activePresetId);
+        setActiveImageBrushStyleId(restored.activeStyleId);
         setImageBrushRack(restored.rack);
         setImageBrushLibrary(restored.library);
         setActiveImageBrushId(restored.activeAssetId);
@@ -4852,7 +4858,7 @@ function GlitchBrushesEditor({
                   settings={imageBrushSettings}
                   rack={imageBrushRack}
                   seed={imageBrushSeed}
-                  activePresetId={imageBrushPresetId}
+                  activeStyleId={activeImageBrushStyleId}
                   processedPreview={processedBrushPreview}
                   processing={imageBrushProcessing}
                   progress={imageBrushProgress}
@@ -4867,7 +4873,7 @@ function GlitchBrushesEditor({
                   onSettingsChange={setImageBrushSettings}
                   onRackChange={setImageBrushRack}
                   onSeedChange={setImageBrushSeed}
-                  onPresetChange={setImageBrushPresetId}
+                  onStyleChange={setActiveImageBrushStyleId}
                   onRandomize={randomizeCurrentImageBrush}
                   randomizeLockSeed={imageBrushLockSeed}
                   onRandomizeLockSeedChange={(locked) => {

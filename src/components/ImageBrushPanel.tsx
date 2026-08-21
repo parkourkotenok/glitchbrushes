@@ -35,6 +35,7 @@ import {
   applyImageBrushGlitchAmount,
   applyImageBrushStyleKeepingEssentials,
   imageBrushGlitchLevels,
+  isImageBrushEssentialSetting,
 } from '../imageBrush/simple';
 import {
   createImageBrushFx,
@@ -95,7 +96,7 @@ interface ImageBrushPanelProps {
   settings: ImageBrushSettings;
   rack: ImageBrushFxItem[];
   seed: string;
-  activePresetId: string;
+  activeStyleId: string;
   processedPreview: ProcessedBrushPreview | null;
   processing: boolean;
   progress: ImageBrushProgress | null;
@@ -110,7 +111,7 @@ interface ImageBrushPanelProps {
   onSettingsChange(settings: ImageBrushSettings): void;
   onRackChange(rack: ImageBrushFxItem[]): void;
   onSeedChange(seed: string): void;
-  onPresetChange(id: string): void;
+  onStyleChange(id: string): void;
   onRandomize(scope: ImageBrushRandomizeScope): void;
   randomizeLockSeed: boolean;
   onRandomizeLockSeedChange(locked: boolean): void;
@@ -392,7 +393,7 @@ export function ImageBrushPanel({
   settings,
   rack,
   seed,
-  activePresetId,
+  activeStyleId,
   processedPreview,
   processing,
   progress,
@@ -407,7 +408,7 @@ export function ImageBrushPanel({
   onSettingsChange,
   onRackChange,
   onSeedChange,
-  onPresetChange,
+  onStyleChange,
   onRandomize,
   randomizeLockSeed,
   onRandomizeLockSeedChange,
@@ -458,7 +459,7 @@ export function ImageBrushPanel({
   const [userPresets, setUserPresets] = useState<ImageBrushPreset[]>(() => loadImageBrushPresets());
   const diagnosticsEnabled = performanceDiagnosticsEnabled();
   const allPresets = [...builtInImageBrushPresets, ...userPresets];
-  const selectedPreset = allPresets.find((preset) => preset.id === activePresetId);
+  const selectedPreset = allPresets.find((preset) => preset.id === activeStyleId);
   const mutationCopy = mutationSummary(settings);
   const requiredFxStages = effectiveImageBrushStages(settings.fxStage, settings.mutationMode);
   const addEffectDefinition = imageBrushFxDefinitions.find((item) => item.id === addEffect);
@@ -575,7 +576,9 @@ export function ImageBrushPanel({
       [key]: value,
       glitchAmount: affectsGlitch ? 'custom' : settings.glitchAmount,
     });
-    onPresetChange('custom');
+    // Essentials are current-use overrides. Style-owned controls are the only route that
+    // intentionally changes the identity shown in the Style row and History.
+    if (!isImageBrushEssentialSetting(key)) onStyleChange('custom');
   };
 
   const setGlitchAmount = (index: number) => {
@@ -583,7 +586,7 @@ export function ImageBrushPanel({
       imageBrushGlitchLevels[
         Math.max(0, Math.min(imageBrushGlitchLevels.length - 1, Math.round(index)))
       ]!;
-    const next = applyImageBrushGlitchAmount(settings, rack, level.id, activePresetId);
+    const next = applyImageBrushGlitchAmount(settings, rack, level.id, activeStyleId);
     onSettingsChange(next.settings);
     onRackChange(next.rack);
   };
@@ -593,7 +596,7 @@ export function ImageBrushPanel({
     if (settings.glitchAmount !== 'custom') {
       onSettingsChange({ ...settings, glitchAmount: 'custom' });
     }
-    onPresetChange('custom');
+    onStyleChange('custom');
   };
 
   const applyPreset = (preset: ImageBrushPreset) => {
@@ -608,7 +611,7 @@ export function ImageBrushPanel({
     );
     onSettingsChange(styled.settings);
     onRackChange(styled.rack);
-    onPresetChange(preset.id);
+    onStyleChange(preset.id);
     onNotice(`${preset.name} loaded. Essential size, spacing, opacity and orientation were kept.`);
   };
 
@@ -625,11 +628,11 @@ export function ImageBrushPanel({
     const presets = [...userPresets, next];
     setUserPresets(presets);
     saveImageBrushPresets(presets);
-    onPresetChange(next.id);
+    onStyleChange(next.id);
   };
 
   const renamePreset = () => {
-    const current = userPresets.find((preset) => preset.id === activePresetId);
+    const current = userPresets.find((preset) => preset.id === activeStyleId);
     if (!current) return;
     const name = window.prompt('Rename style:', current.name);
     if (!name?.trim()) return;
@@ -641,16 +644,16 @@ export function ImageBrushPanel({
   };
 
   const deletePreset = () => {
-    const current = userPresets.find((preset) => preset.id === activePresetId);
+    const current = userPresets.find((preset) => preset.id === activeStyleId);
     if (!current || !window.confirm(`Delete style "${current.name}"?`)) return;
     const presets = userPresets.filter((preset) => preset.id !== current.id);
     setUserPresets(presets);
     saveImageBrushPresets(presets);
-    onPresetChange('custom');
+    onStyleChange('custom');
   };
 
   const exportPreset = () => {
-    const selected = allPresets.find((preset) => preset.id === activePresetId) ?? {
+    const selected = allPresets.find((preset) => preset.id === activeStyleId) ?? {
       id: 'custom',
       name: 'Custom Image Brush Style',
       settings,
@@ -973,10 +976,10 @@ export function ImageBrushPanel({
           <select
             aria-label="Image Brush style"
             data-help-id="image-brush.preset"
-            value={activePresetId}
+            value={activeStyleId}
             onChange={(event) => {
               if (event.target.value === 'custom') {
-                onPresetChange('custom');
+                onStyleChange('custom');
                 return;
               }
               const preset = allPresets.find((item) => item.id === event.target.value);
@@ -1006,10 +1009,10 @@ export function ImageBrushPanel({
           <div className="image-brush-split-button">
             <button
               className="image-brush-randomize-main"
-              data-tooltip="Creates a balanced variation while keeping Size, Spacing, Opacity and Orientation."
+              data-tooltip="Randomizes the recipe while keeping the image source, Size, Spacing, Opacity and Orientation."
               onClick={() => onRandomize('balanced')}
             >
-              <Shuffle size={13} aria-hidden="true" /> Randomize brush
+              <Shuffle size={13} aria-hidden="true" /> Randomize Style
             </button>
             <button
               ref={randomizeTriggerRef}
@@ -1078,7 +1081,7 @@ export function ImageBrushPanel({
             </button>
             <button
               role="menuitem"
-              disabled={!userPresets.some((preset) => preset.id === activePresetId)}
+              disabled={!userPresets.some((preset) => preset.id === activeStyleId)}
               onClick={renamePreset}
             >
               Rename current style
@@ -1086,7 +1089,7 @@ export function ImageBrushPanel({
             <button
               role="menuitem"
               className="danger"
-              disabled={!userPresets.some((preset) => preset.id === activePresetId)}
+              disabled={!userPresets.some((preset) => preset.id === activeStyleId)}
               onClick={deletePreset}
             >
               Delete current style
@@ -1152,7 +1155,6 @@ export function ImageBrushPanel({
             flipXChance: 0,
             flipYChance: 0,
           });
-          onPresetChange('custom');
         }}
         onGlitchAmountChange={setGlitchAmount}
       />
@@ -1682,7 +1684,7 @@ export function ImageBrushPanel({
             disabled={!rack.length}
             onClick={() => {
               onRackChange([]);
-              onPresetChange('custom');
+              onStyleChange('custom');
               onNotice('Stamp FX cleared. The selected image was preserved.');
             }}
           >

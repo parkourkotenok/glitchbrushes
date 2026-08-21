@@ -65,6 +65,8 @@ import {
   applyImageBrushGlitchAmount,
   applyImageBrushStyleKeepingEssentials,
   describeCurrentImageBrush,
+  imageBrushStyleHistoryLabel,
+  isImageBrushEssentialSetting,
   preserveImageBrushEssentialControls,
 } from './imageBrush/simple';
 import {
@@ -1011,6 +1013,30 @@ describe('Image Brush presets, project and history contracts', () => {
     expect(progressive).not.toEqual(clean);
   });
 
+  it('keeps Style identity through every Essential override and marks only recipe controls Custom', () => {
+    for (const key of [
+      'size',
+      'spacing',
+      'spacingUnit',
+      'opacity',
+      'angle',
+      'rotationMode',
+      'followDirection',
+      'randomRotation',
+      'rotationJitter',
+      'glitchAmount',
+    ] as const) {
+      expect(isImageBrushEssentialSetting(key)).toBe(true);
+    }
+    for (const key of ['mode', 'mutationMode', 'fxStage', 'alphaMode', 'bleedAmount'] as const) {
+      expect(isImageBrushEssentialSetting(key)).toBe(false);
+    }
+    expect(imageBrushStyleHistoryLabel('mosh-flow-trail', builtInImageBrushPresets)).toBe(
+      'MOSH Flow Trail',
+    );
+    expect(imageBrushStyleHistoryLabel('user-style-42', [])).toBe('Saved Style (user-style-42)');
+  });
+
   it('seeded randomizers never replace or delete the image', () => {
     const first = randomizeImageBrush(defaultImageBrushSettings, [], 'same', 'everything');
     const second = randomizeImageBrush(defaultImageBrushSettings, [], 'same', 'everything');
@@ -1070,6 +1096,26 @@ describe('Image Brush presets, project and history contracts', () => {
     expect(restored.library).toHaveLength(2);
     expect(restored.activeAssetId).toBe(library[1]!.id);
     expect(restored.library[0]!.originalPixels).toEqual(library[0]!.originalPixels);
+  });
+
+  it('writes explicit Style identity while opening legacy projects through activePresetId', () => {
+    const library = createTestBrushAssets(1);
+    const serialized = serializeImageBrushProject({
+      settings: { ...defaultImageBrushSettings, size: 222, opacity: 0.43 },
+      seed: 'style-identity',
+      activeStyleId: 'mosh-flow-trail',
+      activePresetId: 'custom',
+      activeAssetId: library[0]!.id,
+      evolutionOffset: 0,
+      rack: [],
+      library,
+    });
+    expect(serialized.activeStyleId).toBe('mosh-flow-trail');
+    expect(serialized.activePresetId).toBe('mosh-flow-trail');
+    expect(restoreImageBrushProject(serialized).activeStyleId).toBe('mosh-flow-trail');
+
+    const legacy = { ...serialized, activeStyleId: undefined, activePresetId: 'glitched-repeat' };
+    expect(restoreImageBrushProject(legacy).activeStyleId).toBe('glitched-repeat');
   });
 
   it('one committed stroke is one exact undo/redo action while cancel adds none', () => {

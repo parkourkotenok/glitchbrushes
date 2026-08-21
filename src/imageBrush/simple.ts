@@ -126,6 +126,37 @@ const levelIndex: Record<Exclude<ImageBrushGlitchAmount, 'custom'>, number> = {
   extreme: 5,
 };
 
+/** Controls in Essentials are per-use overrides, never evidence that a Style is Custom. */
+export const imageBrushEssentialSettingKeys = [
+  'size',
+  'spacing',
+  'spacingUnit',
+  'opacity',
+  'angle',
+  'rotationMode',
+  'followDirection',
+  'randomRotation',
+  'rotationJitter',
+  'glitchAmount',
+] as const satisfies readonly (keyof ImageBrushSettings)[];
+
+const imageBrushEssentialSettingKeySet = new Set<keyof ImageBrushSettings>(
+  imageBrushEssentialSettingKeys,
+);
+
+export function isImageBrushEssentialSetting(key: keyof ImageBrushSettings): boolean {
+  return imageBrushEssentialSettingKeySet.has(key);
+}
+
+export function imageBrushStyleHistoryLabel(
+  activeStyleId: string,
+  styles: readonly Pick<ImageBrushPreset, 'id' | 'name'>[],
+): string {
+  const style = styles.find((candidate) => candidate.id === activeStyleId);
+  if (style) return style.name;
+  return activeStyleId === 'custom' ? 'Custom' : `Saved Style (${activeStyleId})`;
+}
+
 const effectCurves: Record<ImageBrushFxId, readonly number[]> = {
   slice: [0.01, 0.18, 0.36, 0.58, 0.79, 0.96],
   macroblock: [0.01, 0.14, 0.31, 0.52, 0.72, 0.9],

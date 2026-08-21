@@ -57,7 +57,9 @@ export function useImageBrush() {
   const [imageBrushSeed, setImageBrushSeed] = useState('stamp-4F21');
   const [imageBrushVariationNonce, setImageBrushVariationNonce] = useState(0);
   const [imageBrushLockSeed, setImageBrushLockSeed] = useState(false);
-  const [imageBrushPresetId, setImageBrushPresetId] = useState('clean-repeat');
+  // This is identity, not a deep comparison against mutable brush settings. Essentials may
+  // override a Style while its name remains meaningful in the UI and History.
+  const [activeImageBrushStyleId, setActiveImageBrushStyleId] = useState('clean-repeat');
   const [imageBrushStrokeNonce, setImageBrushStrokeNonce] = useState(0);
   const [imageBrushLibrary, setImageBrushLibrary] = useState<ImageBrushAsset[]>([]);
   const [activeImageBrushId, setActiveImageBrushId] = useState<string | null>(null);
@@ -134,8 +136,8 @@ export function useImageBrush() {
     setImageBrushVariationNonce,
     imageBrushLockSeed,
     setImageBrushLockSeed,
-    imageBrushPresetId,
-    setImageBrushPresetId,
+    activeImageBrushStyleId,
+    setActiveImageBrushStyleId,
     imageBrushStrokeNonce,
     setImageBrushStrokeNonce,
     imageBrushLibrary,

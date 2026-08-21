@@ -89,7 +89,7 @@ export function EffectPanel(props: EffectPanelProps) {
     <div className="effect-inspector">
       <section className="inspector-section effect-choice-section">
         <div className="inspector-section-heading">
-          <h2>Effect</h2>
+          <h2>Choose a recipe</h2>
           <div className="compact-menu" ref={menuRootRef}>
             <button
               ref={menuTriggerRef}

@@ -1026,8 +1026,15 @@ select {
 
 .inspector-tabs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   border-bottom: 1px solid var(--line);
+}
+
+.brushes-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-bottom: 1px solid var(--line);
+  background: #151514;
 }
 
 .interface-mode {
@@ -1121,7 +1128,8 @@ select {
   line-height: 1.45;
 }
 
-.inspector-tabs button {
+.inspector-tabs button,
+.brushes-tabs button {
   position: relative;
   height: 39px;
   border: 0;
@@ -1137,16 +1145,19 @@ select {
   text-transform: uppercase;
 }
 
-.inspector-tabs button:last-child {
+.inspector-tabs button:last-child,
+.brushes-tabs button:last-child {
   border-right: 0;
 }
 
-.inspector-tabs button.active {
+.inspector-tabs button.active,
+.brushes-tabs button.active {
   background: #20201e;
   color: #d5d3cd;
 }
 
-.inspector-tabs button.active::after {
+.inspector-tabs button.active::after,
+.brushes-tabs button.active::after {
   position: absolute;
   right: 22px;
   bottom: -1px;

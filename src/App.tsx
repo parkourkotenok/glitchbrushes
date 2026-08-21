@@ -24,7 +24,7 @@ import { TopBar } from './components/TopBar';
 import { HistoryPopover } from './components/HistoryPopover';
 import { ToolRail } from './components/ToolRail';
 import { CanvasWorkspace } from './components/CanvasWorkspace';
-import { InspectorTabs } from './components/InspectorTabs';
+import { BrushesTabs, InspectorTabs } from './components/InspectorTabs';
 import { EffectPanel } from './components/EffectPanel';
 import { RetouchPanel } from './components/RetouchPanel';
 import { LayersDock } from './components/LayersDock';
@@ -41,7 +41,7 @@ import { migrateAlgorithmSelection } from './glitchAlgorithms/migration';
 import { deriveAdvancedBrushOverlays } from './glitchAlgorithms/advancedBrushConfig';
 import { randomizeEffectSettings, resetEffectSettings } from './components/effectControlRegistry';
 import type { BrushProgress } from './brush/engine';
-import type { RetouchProgress } from './retouch/types';
+import type { RetouchProgress, RetouchTool } from './retouch/types';
 import { isRetouchTool } from './retouch/tools';
 import { structuralWriteBounds } from './glitchAlgorithms/structuralUtils';
 import { createPatch } from './history/PatchHistory';
@@ -61,6 +61,11 @@ import { useExport } from './hooks/useExport';
 import { useProject } from './hooks/useProject';
 import { useViewport } from './hooks/useViewport';
 import { useEditor } from './hooks/useEditor';
+import {
+  normalizeInspectorPanel,
+  type InspectorPanelId,
+  type InspectorWorkspace,
+} from './workspaceNavigation';
 import { usePixelState } from './hooks/usePixelState';
 import { useNotice } from './hooks/useNotice';
 import { finalizePatches, rowPatchesBefore } from './layers/patches';
@@ -259,33 +264,47 @@ function decodeDocumentOffThread(
 
 type SiteSurface = 'landing' | 'glitch-brushes';
 
-function readSiteState(): { surface: SiteSurface; interfaceMode: InterfaceMode } {
+function readSiteState(): {
+  surface: SiteSurface;
+  interfaceMode: InterfaceMode;
+  panel: InspectorPanelId;
+} {
   const params = new URLSearchParams(window.location.search);
   return {
     surface: params.get('tool') === 'glitch-brushes' ? 'glitch-brushes' : 'landing',
     interfaceMode: params.get('controls') === 'advanced' ? 'advanced' : 'simple',
+    panel: normalizeInspectorPanel(params.get('panel') ?? params.get('activePanel')),
   };
 }
 
-function writeSiteState(surface: SiteSurface, interfaceMode: InterfaceMode): void {
+function writeSiteState(
+  surface: SiteSurface,
+  interfaceMode: InterfaceMode,
+  panel: InspectorPanelId,
+): void {
   const url = new URL(window.location.href);
   if (surface === 'glitch-brushes') url.searchParams.set('tool', 'glitch-brushes');
   else url.searchParams.delete('tool');
   if (surface === 'glitch-brushes') url.searchParams.set('controls', interfaceMode);
   else url.searchParams.delete('controls');
-  window.history.pushState({ surface, interfaceMode }, '', url);
+  if (surface === 'glitch-brushes') url.searchParams.set('panel', panel);
+  else url.searchParams.delete('panel');
+  url.searchParams.delete('activePanel');
+  window.history.pushState({ surface, interfaceMode, panel }, '', url);
 }
 
 export function App() {
   const initial = useMemo(readSiteState, []);
   const [surface, setSurface] = useState<SiteSurface>(initial.surface);
   const [interfaceMode, setInterfaceMode] = useState<InterfaceMode>(initial.interfaceMode);
+  const [navigationPanel, setNavigationPanel] = useState<InspectorPanelId>(initial.panel);
 
   useEffect(() => {
     const syncFromUrl = () => {
       const next = readSiteState();
       setSurface(next.surface);
       setInterfaceMode(next.interfaceMode);
+      setNavigationPanel(next.panel);
     };
     window.addEventListener('popstate', syncFromUrl);
     return () => window.removeEventListener('popstate', syncFromUrl);
@@ -295,7 +314,7 @@ export function App() {
     return (
       <LandingScreen
         onEnter={() => {
-          writeSiteState('glitch-brushes', interfaceMode);
+          writeSiteState('glitch-brushes', interfaceMode, navigationPanel);
           setSurface('glitch-brushes');
         }}
       />
@@ -305,12 +324,17 @@ export function App() {
   return (
     <GlitchBrushesEditor
       interfaceMode={interfaceMode}
+      initialPanel={navigationPanel}
       onInterfaceModeChange={(next) => {
-        writeSiteState('glitch-brushes', next);
+        writeSiteState('glitch-brushes', next, navigationPanel);
         setInterfaceMode(next);
       }}
+      onPanelChange={(next) => {
+        writeSiteState('glitch-brushes', interfaceMode, next);
+        setNavigationPanel(next);
+      }}
       onExit={() => {
-        writeSiteState('landing', interfaceMode);
+        writeSiteState('landing', interfaceMode, navigationPanel);
         setSurface('landing');
       }}
     />
@@ -319,13 +343,17 @@ export function App() {
 
 interface GlitchBrushesEditorProps {
   interfaceMode: InterfaceMode;
+  initialPanel: InspectorPanelId;
   onInterfaceModeChange(value: InterfaceMode): void;
+  onPanelChange(value: InspectorPanelId): void;
   onExit(): void;
 }
 
 function GlitchBrushesEditor({
   interfaceMode,
+  initialPanel,
   onInterfaceModeChange,
+  onPanelChange,
   onExit,
 }: GlitchBrushesEditorProps) {
   const renderStartedAt = typeof performance === 'undefined' ? 0 : performance.now();
@@ -442,7 +470,27 @@ function GlitchBrushesEditor({
     setActivePanel,
     shortcutsOpen,
     setShortcutsOpen,
-  } = useEditor();
+    activeWorkspace,
+    setActiveWorkspace,
+    activeBrushesPanel,
+  } = useEditor(initialPanel);
+  useEffect(() => {
+    setActivePanel(initialPanel);
+  }, [initialPanel, setActivePanel]);
+  const selectPanel = useCallback(
+    (panel: InspectorPanelId) => {
+      setActivePanel(panel);
+      onPanelChange(panel);
+    },
+    [onPanelChange, setActivePanel],
+  );
+  const selectWorkspace = useCallback(
+    (workspace: InspectorWorkspace) => {
+      setActiveWorkspace(workspace);
+      onPanelChange(workspace === 'image-brush' ? 'image-brush' : activeBrushesPanel);
+    },
+    [activeBrushesPanel, onPanelChange, setActiveWorkspace],
+  );
   const {
     selectedByte,
     setSelectedByte,
@@ -453,6 +501,10 @@ function GlitchBrushesEditor({
   } = usePixelState();
   const { notice, setNotice } = useNotice();
   const [originalLayerSelected, setOriginalLayerSelected] = useState(false);
+  const [lastRetouchTool, setLastRetouchTool] = useState<RetouchTool>('smudge');
+  useEffect(() => {
+    if (isRetouchTool(tool)) setLastRetouchTool(tool);
+  }, [tool]);
   const originalLayerSelectedRef = useRef(false);
   const [sampleAllLayers, setSampleAllLayersState] = useState(false);
   const sampleAllLayersRef = useRef(false);
@@ -583,6 +635,32 @@ function GlitchBrushesEditor({
   const imageBrushMountedRef = useRef(true);
   const imageBrushStorageHydratedRef = useRef(false);
   const imageBrushStorageWarningRef = useRef(false);
+  const inspectorScrollRef = useRef<HTMLDivElement>(null);
+  const inspectorScrollPositionsRef = useRef<Record<InspectorPanelId, number>>({
+    effect: 0,
+    retouch: 0,
+    mosh: 0,
+    'image-brush': 0,
+  });
+  const previousInspectorPanelRef = useRef<InspectorPanelId>(activePanel);
+  const [moshPanelMounted, setMoshPanelMounted] = useState(activePanel === 'mosh');
+  const [imageBrushPanelMounted, setImageBrushPanelMounted] = useState(
+    activePanel === 'image-brush',
+  );
+
+  useEffect(() => {
+    if (activePanel === 'mosh') setMoshPanelMounted(true);
+    if (activePanel === 'image-brush') setImageBrushPanelMounted(true);
+  }, [activePanel]);
+
+  useLayoutEffect(() => {
+    const scroll = inspectorScrollRef.current;
+    if (!scroll) return;
+    const previous = previousInspectorPanelRef.current;
+    inspectorScrollPositionsRef.current[previous] = scroll.scrollTop;
+    scroll.scrollTop = inspectorScrollPositionsRef.current[activePanel];
+    previousInspectorPanelRef.current = activePanel;
+  }, [activePanel]);
 
   useEffect(() => {
     imageBrushMountedRef.current = true;
@@ -738,7 +816,6 @@ function GlitchBrushesEditor({
   useEffect(() => {
     imageBrushPreviewWorkerRef.current?.terminate();
     imageBrushPreviewWorkerRef.current = null;
-    if (activePanel !== 'image-brush') return;
     const active = imageBrushLibrary.find((asset) => asset.id === activeImageBrushId);
     if (!active) {
       setProcessedBrushPreview(null);
@@ -848,7 +925,7 @@ function GlitchBrushesEditor({
       worker?.terminate();
       if (imageBrushPreviewWorkerRef.current === worker) imageBrushPreviewWorkerRef.current = null;
     };
-  }, [activePanel, imageBrushPreviewKey]);
+  }, [imageBrushPreviewKey]);
 
   const doc = docRef.current;
   const history = historyRef.current;
@@ -4247,26 +4324,26 @@ function GlitchBrushesEditor({
       else if (action === 'redo') redo();
       else if (action === 'brush') {
         setTool('brush');
-        setActivePanel('effect');
+        selectPanel('effect');
       } else if (action === 'hand') setTool('hand');
       else if (action === 'restore') {
         setTool('restore');
-        setActivePanel('retouch');
+        selectPanel('retouch');
       } else if (action === 'smudge') {
         setTool('smudge');
-        setActivePanel('retouch');
+        selectPanel('retouch');
       } else if (action === 'finger') {
         setTool('finger');
-        setActivePanel('retouch');
+        selectPanel('retouch');
       } else if (action === 'blur-retouch') {
         setTool('blur');
-        setActivePanel('retouch');
+        selectPanel('retouch');
       } else if (action === 'sharpen') {
         setTool('sharpen');
-        setActivePanel('retouch');
+        selectPanel('retouch');
       } else if (action === 'eraser') {
         setTool('eraser');
-        setActivePanel('retouch');
+        selectPanel('retouch');
       } else if (action === 'glitch') randomGlitch();
       else if (action === 'fit') fitToScreen();
       else if (action === 'zoom-100') setZoom(1);
@@ -4408,7 +4485,7 @@ function GlitchBrushesEditor({
         <ToolRail
           tool={tool}
           onSelectTool={setTool}
-          onSelectPanel={setActivePanel}
+          onSelectPanel={selectPanel}
           onRandomGlitch={randomGlitch}
           onFitToScreen={fitToScreen}
           onZoom100={() => setZoom(1)}
@@ -4465,18 +4542,48 @@ function GlitchBrushesEditor({
 
         <aside className="inspector">
           <InspectorTabs
-            activePanel={activePanel}
-            onSelect={(panel) => {
-              setActivePanel(panel);
-              if (panel === 'effect' || panel === 'image-brush') setTool('brush');
-              if (panel === 'retouch' && !isRetouchTool(tool)) setTool('smudge');
+            activeWorkspace={activeWorkspace}
+            onSelect={(workspace) => {
+              selectWorkspace(workspace);
+              if (workspace === 'image-brush' || activeBrushesPanel === 'effect') setTool('brush');
+              if (
+                workspace === 'brushes' &&
+                activeBrushesPanel === 'retouch' &&
+                !isRetouchTool(tool)
+              ) {
+                setTool(lastRetouchTool);
+              }
             }}
           />
 
-          <InterfaceModeSwitch value={interfaceMode} onChange={onInterfaceModeChange} />
+          <div className="inspector-navigation">
+            <InterfaceModeSwitch value={interfaceMode} onChange={onInterfaceModeChange} />
 
-          <div className="inspector-scroll">
-            {activePanel === 'effect' && (
+            {activeWorkspace === 'brushes' && (
+              <BrushesTabs
+                activePanel={activeBrushesPanel}
+                onSelect={(panel) => {
+                  selectPanel(panel);
+                  if (panel === 'effect') setTool('brush');
+                  if (panel === 'retouch' && !isRetouchTool(tool)) setTool(lastRetouchTool);
+                }}
+              />
+            )}
+          </div>
+
+          <div className="inspector-scroll" ref={inspectorScrollRef}>
+            <div
+              id="workspace-panel-brushes"
+              role="tabpanel"
+              aria-labelledby="workspace-tab-brushes"
+              hidden={activeWorkspace !== 'brushes'}
+            >
+            <section
+              id="brushes-panel-effect"
+              role="tabpanel"
+              aria-labelledby="brushes-tab-effect"
+              hidden={activePanel !== 'effect'}
+            >
               <EffectPanel
                 algorithm={algorithm}
                 algorithms={algorithms}
@@ -4526,20 +4633,34 @@ function GlitchBrushesEditor({
                   );
                 }}
               />
-            )}
+            </section>
 
-            {activePanel === 'retouch' && isRetouchTool(tool) && (
+            <section
+              id="brushes-panel-retouch"
+              role="tabpanel"
+              aria-labelledby="brushes-tab-retouch"
+              hidden={activePanel !== 'retouch'}
+            >
               <RetouchPanel
-                tool={tool}
-                onToolChange={setTool}
+                tool={isRetouchTool(tool) ? tool : lastRetouchTool}
+                onToolChange={(next) => {
+                  setLastRetouchTool(next);
+                  setTool(next);
+                }}
                 brush={brush}
                 onUpdateBrush={updateBrush}
                 retouchSettings={retouchSettings}
                 onRetouchSettingsChange={setRetouchSettings}
               />
-            )}
+            </section>
 
-            {activePanel === 'mosh' && (
+            {moshPanelMounted && (
+            <section
+              id="brushes-panel-mosh"
+              role="tabpanel"
+              aria-labelledby="brushes-tab-mosh"
+              hidden={activePanel !== 'mosh'}
+            >
               <Suspense fallback={<PanelLoading />}>
                 <MoshLab
                   interfaceMode={interfaceMode}
@@ -4591,9 +4712,17 @@ function GlitchBrushesEditor({
                   }}
                 />
               </Suspense>
+            </section>
             )}
+            </div>
 
-            {activePanel === 'image-brush' && (
+            {imageBrushPanelMounted && (
+            <section
+              id="workspace-panel-image-brush"
+              role="tabpanel"
+              aria-labelledby="workspace-tab-image-brush"
+              hidden={activeWorkspace !== 'image-brush'}
+            >
               <Suspense fallback={<PanelLoading />}>
                 <ImageBrushPanel
                   library={imageBrushLibrary}
@@ -4627,6 +4756,7 @@ function GlitchBrushesEditor({
                   onNotice={setNotice}
                 />
               </Suspense>
+            </section>
             )}
           </div>
           <LayersDock

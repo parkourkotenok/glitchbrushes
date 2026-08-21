@@ -1112,7 +1112,7 @@ export function MoshLab({
       <div className="mosh-lab-head">
         <div>
           <span className="eyebrow">ADVANCED MULTI-PASS WORKSPACE</span>
-          <strong>MOSH LAB</strong>
+          <strong>Mosh</strong>
           <p>Static-image Motion Mosh and signal processing rack.</p>
         </div>
         <EffectIcon id="motion-field" size={25} />

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { GlitchAlgorithm } from '../types';
 import { EffectIcon, algorithmIconIds } from '../icons/effects';
-import { EffectPreviewStage, effectPreviewAssetUrl } from './EffectPreviewStage';
+import { EffectPreviewStage } from './EffectPreviewStage';
 import { sharedEffectForAlgorithm } from '../effects/sharedRegistry';
 
 interface EffectPickerProps {
@@ -66,6 +66,7 @@ export function EffectPicker({
               <strong>
                 {item.name}
                 {meta && <em className="meta-effect-badge">META</em>}
+                {item.experimental && <em className="new-effect-badge">NEW</em>}
               </strong>
               <small>{descriptions[item.id]}</small>
             </span>
@@ -84,6 +85,7 @@ export function EffectPicker({
       >
         <EffectIcon id={algorithmIconIds[value.id]} size={19} />
         <span>{value.name}</span>
+        {value.experimental && <em className="new-effect-badge">NEW</em>}
         <span aria-hidden="true">⌄</span>
       </button>
       {open && (
@@ -100,12 +102,17 @@ export function EffectPicker({
                     ? 'low'
                     : 'medium')
               ).toUpperCase()}
+              experimental={previewItem.experimental}
             />
           </div>
           <div className="effect-picker-options" role="listbox" aria-label="Effects">
             {renderGroup(
+              'NEW / EXPERIMENTAL',
+              items.filter((item) => item.experimental),
+            )}
+            {renderGroup(
               'ADVANCED BRUSH EFFECTS',
-              items.filter((item) => item.family === 'advanced-brush'),
+              items.filter((item) => item.family === 'advanced-brush' && !item.experimental),
             )}
             {renderGroup(
               'STRUCTURAL GLITCH STAMPS',
@@ -113,6 +120,7 @@ export function EffectPicker({
                 (item) =>
                   item.family !== 'pixel' &&
                   item.family !== 'advanced-brush' &&
+                  !item.experimental &&
                   item.id !== 'structural-mixed',
               ),
             )}

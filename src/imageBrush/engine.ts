@@ -121,6 +121,204 @@ function mixBuffers(
   return output;
 }
 
+function imageFxNoise(seed: number, x: number, y: number, salt = 0): number {
+  let value = Math.imul(x + 374761393, 668265263) ^ Math.imul(y + 1442695041, 2246822519);
+  value ^= Math.imul(seed + salt * 3266489917, 1597334677);
+  value = Math.imul(value ^ (value >>> 13), 1274126177);
+  return ((value ^ (value >>> 16)) >>> 0) / 4294967296;
+}
+
+function applyPixelEmbroidery(
+  input: Uint8ClampedArray,
+  width: number,
+  height: number,
+  item: ImageBrushFxItem,
+  seed: string,
+): Uint8ClampedArray {
+  const output = input.slice();
+  const amount = clamp(item.amount, 0.01, 1);
+  const grid = clamp(Math.round(item.embroideryGridSize ?? 7), 3, 24);
+  const paletteLevels = clamp(Math.round(item.embroideryPaletteLevels ?? 8), 2, 32);
+  const paletteStep = 255 / Math.max(1, paletteLevels - 1);
+  const missing = clamp((item.embroideryMissingStitches ?? 0.08) * amount, 0, 0.8);
+  const jitter = clamp(item.embroideryThreadJitter ?? 0.12, 0, 1) * grid * 0.32;
+  const backgroundTransparency = clamp(item.embroideryBackgroundTransparency ?? 0.9, 0, 1);
+  const angle = ((item.embroideryThreadAngle ?? 0) * Math.PI) / 180;
+  const cosine = Math.cos(angle);
+  const sine = Math.sin(angle);
+  const stitchType = item.embroideryStitchType ?? 'cross-stitch';
+  const seedValue = createSeededRandom(`${seed}:pixel-embroidery`).int(1, 0x7fffffff);
+  for (let cellY = 0; cellY < height; cellY += grid) {
+    for (let cellX = 0; cellX < width; cellX += grid) {
+      let red = 0;
+      let green = 0;
+      let blue = 0;
+      let alpha = 0;
+      let samples = 0;
+      const right = Math.min(width, cellX + grid);
+      const bottom = Math.min(height, cellY + grid);
+      for (let y = cellY; y < bottom; y += 1) {
+        for (let x = cellX; x < right; x += 1) {
+          const offset = (y * width + x) * 4;
+          if (input[offset + 3] === 0) continue;
+          red += input[offset]!;
+          green += input[offset + 1]!;
+          blue += input[offset + 2]!;
+          alpha += input[offset + 3]!;
+          samples += 1;
+        }
+      }
+      if (!samples) continue;
+      const quantize = (value: number) =>
+        Math.round(Math.round(value / samples / paletteStep) * paletteStep);
+      const cellColor = [quantize(red), quantize(green), quantize(blue)] as const;
+      const averageAlpha = alpha / samples;
+      const omitted = imageFxNoise(seedValue, cellX, cellY, 1) < missing;
+      const centerX =
+        (cellX + right - 1) / 2 + (imageFxNoise(seedValue, cellX, cellY, 2) - 0.5) * jitter;
+      const centerY =
+        (cellY + bottom - 1) / 2 + (imageFxNoise(seedValue, cellX, cellY, 3) - 0.5) * jitter;
+      const radius = grid * (0.3 + amount * 0.16);
+      const thickness = Math.max(0.7, grid * (0.08 + amount * 0.055));
+      for (let y = cellY; y < bottom; y += 1) {
+        for (let x = cellX; x < right; x += 1) {
+          const offset = (y * width + x) * 4;
+          const sourceAlpha = input[offset + 3]!;
+          if (sourceAlpha === 0) {
+            output[offset] = 0;
+            output[offset + 1] = 0;
+            output[offset + 2] = 0;
+            output[offset + 3] = 0;
+            continue;
+          }
+          const dx = x - centerX;
+          const dy = y - centerY;
+          const u = dx * cosine + dy * sine;
+          const v = -dx * sine + dy * cosine;
+          let inside = false;
+          if (stitchType === 'cross-stitch') {
+            inside =
+              Math.min(Math.abs(u - v), Math.abs(u + v)) <= thickness &&
+              Math.max(Math.abs(u), Math.abs(v)) <= radius;
+          } else if (stitchType === 'diagonal-stitch') {
+            inside = Math.abs(v) <= thickness && Math.abs(u) <= radius;
+          } else if (stitchType === 'bead') {
+            inside = Math.hypot(u, v) <= radius;
+          } else {
+            inside = Math.max(Math.abs(u), Math.abs(v)) <= radius;
+          }
+          const stitch = inside && !omitted;
+          const retainedAlpha = sourceAlpha * (1 - backgroundTransparency * amount);
+          output[offset + 3] = Math.round(
+            stitch ? Math.min(sourceAlpha, averageAlpha) : retainedAlpha,
+          );
+          if (stitch) {
+            output[offset] = cellColor[0];
+            output[offset + 1] = cellColor[1];
+            output[offset + 2] = cellColor[2];
+          } else if (output[offset + 3] === 0) {
+            output[offset] = 0;
+            output[offset + 1] = 0;
+            output[offset + 2] = 0;
+          }
+        }
+      }
+    }
+  }
+  return output;
+}
+
+function applyXeroxDecay(
+  input: Uint8ClampedArray,
+  width: number,
+  height: number,
+  item: ImageBrushFxItem,
+  seed: string,
+): Uint8ClampedArray {
+  const output = input.slice();
+  const amount = clamp(item.amount, 0.01, 1);
+  const threshold = clamp(item.xeroxThreshold ?? 0.54, 0.05, 0.95) * 255;
+  const tonerLoss = clamp(item.xeroxTonerLoss ?? 0.28, 0, 1) * amount;
+  const speckle = clamp(item.xeroxSpeckle ?? 0.22, 0, 1) * amount;
+  const erosion = clamp(item.xeroxEdgeErosion ?? 0.2, 0, 1) * amount;
+  const banding = clamp(item.xeroxBanding ?? 0.14, 0, 1) * amount;
+  const blackCrush = clamp(item.xeroxBlackCrush ?? 0.36, 0, 1) * amount;
+  const duotone = item.xeroxColorMode === 'duotone';
+  const seedValue = createSeededRandom(`${seed}:xerox-decay`).int(1, 0x7fffffff);
+  const lumaAt = (x: number, y: number) => {
+    const sx = clamp(x, 0, width - 1);
+    const sy = clamp(y, 0, height - 1);
+    const offset = (sy * width + sx) * 4;
+    return input[offset]! * 0.299 + input[offset + 1]! * 0.587 + input[offset + 2]! * 0.114;
+  };
+  for (let y = 0; y < height; y += 1) {
+    const band = imageFxNoise(seedValue, 0, Math.floor(y / 2), 7) < banding * 0.22;
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 4;
+      const alpha = input[offset + 3]!;
+      if (alpha === 0) {
+        output[offset] = 0;
+        output[offset + 1] = 0;
+        output[offset + 2] = 0;
+        output[offset + 3] = 0;
+        continue;
+      }
+      const luminosity = lumaAt(x, y);
+      const edgeMagnitude =
+        Math.max(
+          Math.abs(luminosity - lumaAt(x - 1, y)),
+          Math.abs(luminosity - lumaAt(x + 1, y)),
+          Math.abs(luminosity - lumaAt(x, y - 1)),
+          Math.abs(luminosity - lumaAt(x, y + 1)),
+        ) / 255;
+      const noise = imageFxNoise(seedValue, x, y, 11);
+      const tonerMissing = noise < tonerLoss * (0.25 + luminosity / 340);
+      const eroded =
+        edgeMagnitude > 0.08 && imageFxNoise(seedValue, x, y, 13) < erosion * edgeMagnitude;
+      const fleck = imageFxNoise(seedValue, x, y, 17) < speckle * 0.24;
+      const cutoff = threshold + (imageFxNoise(seedValue, x, y, 19) - 0.5) * speckle * 110;
+      let tone = luminosity < cutoff ? 0 : 255;
+      if (luminosity < threshold * (1 + blackCrush * 0.45)) tone *= 1 - blackCrush;
+      if (tonerMissing || eroded || band) tone = 255;
+      if (fleck) tone = tone < 128 ? 255 : 0;
+      const blend = clamp(0.28 + amount * 0.72, 0, 1);
+      if (duotone) {
+        const ratio = tone / 255;
+        const dark = [25, 18, 38];
+        const light = [232, 211, 174];
+        for (let channel = 0; channel < 3; channel += 1) {
+          const colored = dark[channel]! * (1 - ratio) + light[channel]! * ratio;
+          output[offset + channel] = Math.round(
+            input[offset + channel]! * (1 - blend) + colored * blend,
+          );
+        }
+      } else {
+        for (let channel = 0; channel < 3; channel += 1) {
+          output[offset + channel] = Math.round(
+            input[offset + channel]! * (1 - blend) + tone * blend,
+          );
+        }
+      }
+      output[offset + 3] = alpha;
+    }
+  }
+  return output;
+}
+
+function applyNativeImageBrushFx(
+  input: Uint8ClampedArray,
+  width: number,
+  height: number,
+  item: ImageBrushFxItem,
+  seed: string,
+): Uint8ClampedArray | null {
+  if (item.effectId === 'pixel-embroidery') {
+    return applyPixelEmbroidery(input, width, height, item, seed);
+  }
+  if (item.effectId === 'xerox-decay') return applyXeroxDecay(input, width, height, item, seed);
+  return null;
+}
+
 function applyStructuralFx(
   input: Uint8ClampedArray,
   width: number,
@@ -298,13 +496,16 @@ function enforceAlpha(
   height: number,
   mode: StampAlphaMode,
   bleedAmount: number,
+  preserveReducedAlpha = false,
 ): Uint8ClampedArray {
   const output = processed.slice();
   if (mode === 'corrupt') return output;
   if (mode === 'preserve' || mode === 'inside') {
     for (let pixel = 0; pixel < sourceAlpha.length; pixel += 1) {
       const offset = pixel * 4;
-      output[offset + 3] = sourceAlpha[pixel]!;
+      output[offset + 3] = preserveReducedAlpha
+        ? Math.min(output[offset + 3]!, sourceAlpha[pixel]!)
+        : sourceAlpha[pixel]!;
       if (sourceAlpha[pixel] === 0) {
         output[offset] = 0;
         output[offset + 1] = 0;
@@ -353,24 +554,33 @@ export function processPreparedTipFx(
   for (const item of rack) {
     if (!item.enabled || !effectCanRun(item.effectId, prepared.width, prepared.height)) continue;
     const before = output;
+    const native = applyNativeImageBrushFx(
+      before,
+      prepared.width,
+      prepared.height,
+      item,
+      `${seed}:${item.id}`,
+    );
     const structural = sharedEffectForImageBrush(item.effectId)?.algorithmId;
-    const processed = structural
-      ? applyStructuralFx(
-          before,
-          prepared.width,
-          prepared.height,
-          item,
-          `${seed}:${item.id}`,
-          context.direction,
-        )
-      : applyMoshFx(
-          before,
-          prepared.width,
-          prepared.height,
-          item,
-          `${seed}:${item.id}`,
-          context.direction,
-        );
+    const processed =
+      native ??
+      (structural
+        ? applyStructuralFx(
+            before,
+            prepared.width,
+            prepared.height,
+            item,
+            `${seed}:${item.id}`,
+            context.direction,
+          )
+        : applyMoshFx(
+            before,
+            prepared.width,
+            prepared.height,
+            item,
+            `${seed}:${item.id}`,
+            context.direction,
+          ));
     output = mixBuffers(before, processed, item.mix);
   }
   output = enforceAlpha(
@@ -381,6 +591,7 @@ export function processPreparedTipFx(
     prepared.height,
     settings.alphaMode,
     settings.bleedAmount,
+    rack.some((item) => item.enabled && item.effectId === 'pixel-embroidery'),
   );
   return { ...prepared, pixels: output };
 }
@@ -584,6 +795,7 @@ function proceduralRack(
     const coherentRandom =
       random.next() * (1 - settings.visualCoherence) + 0.5 * settings.visualCoherence;
     return {
+      ...base,
       id: `${mode}-${effectId}-${index}`,
       effectId,
       enabled: true,
@@ -609,6 +821,7 @@ function recipeRack(
   const base = rack.find((item) => item.effectId === recipe);
   return [
     {
+      ...base,
       id: `recipe-${recipe}`,
       effectId: recipe,
       enabled: true,

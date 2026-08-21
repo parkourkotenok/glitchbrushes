@@ -437,7 +437,10 @@ export function randomizeImageBrush(
   if (effects) {
     const requiredStages = effectiveImageBrushStages(output.fxStage, output.mutationMode);
     const effectIds: ImageBrushFxId[] = imageBrushFxDefinitions
-      .filter((definition) => supportsImageBrushStages(definition.id, requiredStages))
+      .filter(
+        (definition) =>
+          !definition.experimental && supportsImageBrushStages(definition.id, requiredStages),
+      )
       .map((definition) => definition.id);
     const count = random.int(1, wild ? 4 : 2);
     nextRack = Array.from({ length: count }, (_, index) => {

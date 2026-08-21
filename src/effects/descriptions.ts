@@ -31,6 +31,14 @@ export const algorithmDescriptions: Record<AlgorithmId, string> = {
     'Samples an explicit on-canvas source region and paints fragmented, repeated corrupt clones.',
   'line-freeze-brush':
     'Freezes and repeats structured rows, columns, or stroke-aligned lines through the painted area.',
+  'mirror-fold-brush':
+    'Reflects sampled pixels across a local axis derived from the stroke direction.',
+  'halftone-collapse-brush':
+    'Collapses a directional luminance-driven dot grid toward the painted stroke axis.',
+  'raster-loom-brush':
+    'Weaves alternating forward and backward resampled strips along the stroke direction.',
+  'contour-crawl-brush':
+    'Detects local image contours and repeats those lines along the painted movement vector.',
   'byte-noise': 'Mutates individual R, G, B, and optional alpha bytes under the brush mask.',
   'channel-shift': 'Reads RGB channels from offset coordinates to tear color planes apart.',
   'byte-swap': 'Reorders channels or exchanges values with neighboring pixels.',

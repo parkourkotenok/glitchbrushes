@@ -1,7 +1,7 @@
 import type { GlitchAlgorithm, GlitchContext, GlitchResult, Rectangle } from '../types';
 import { clamp, mirrorCoordinate, pixelToByteOffset } from '../utils/geometry';
 import { createSeededRandom } from '../utils/prng';
-import { clipRectangle } from './structuralUtils';
+import { clipRectangle, extractRegion, type RegionSnapshot } from './structuralUtils';
 
 function result(bounds: Rectangle, touchedPixels: number): GlitchResult {
   return { bounds: { ...bounds }, touchedPixels };
@@ -105,6 +105,53 @@ function blendChannel(
   else if (mode === 'difference') blended = Math.abs(current - incoming);
   else if (mode === 'lighten') blended = Math.max(current, incoming);
   return clamp(Math.round(current * (1 - amount) + blended * amount), 0, 255);
+}
+
+function strokeFrame(context: GlitchContext, fallbackAngle: number) {
+  let dx = context.movement?.x ?? 0;
+  let dy = context.movement?.y ?? 0;
+  const length = Math.hypot(dx, dy);
+  if (length < 0.001) {
+    const angle = (fallbackAngle * Math.PI) / 180;
+    dx = Math.cos(angle);
+    dy = Math.sin(angle);
+  } else {
+    dx /= length;
+    dy /= length;
+  }
+  return { tangentX: dx, tangentY: dy, normalX: -dy, normalY: dx };
+}
+
+function sampleSnapshot(
+  snapshot: RegionSnapshot,
+  x: number,
+  y: number,
+  channel: number,
+  edgeMode: 'clamp' | 'mirror' | 'wrap' = 'clamp',
+): number {
+  const localWidth = snapshot.bounds.width;
+  const localHeight = snapshot.bounds.height;
+  let localX = Math.round(x) - snapshot.bounds.x;
+  let localY = Math.round(y) - snapshot.bounds.y;
+  if (edgeMode === 'wrap') {
+    localX = ((localX % localWidth) + localWidth) % localWidth;
+    localY = ((localY % localHeight) + localHeight) % localHeight;
+  } else if (edgeMode === 'mirror') {
+    localX = mirrorCoordinate(localX, localWidth);
+    localY = mirrorCoordinate(localY, localHeight);
+  } else {
+    localX = clamp(localX, 0, localWidth - 1);
+    localY = clamp(localY, 0, localHeight - 1);
+  }
+  return snapshot.data[(localY * localWidth + localX) * 4 + channel]!;
+}
+
+function snapshotLuma(snapshot: RegionSnapshot, x: number, y: number): number {
+  return (
+    sampleSnapshot(snapshot, x, y, 0) * 0.299 +
+    sampleSnapshot(snapshot, x, y, 1) * 0.587 +
+    sampleSnapshot(snapshot, x, y, 2) * 0.114
+  );
 }
 
 const pixelSortBrush: GlitchAlgorithm = {
@@ -706,6 +753,349 @@ const lineFreezeBrush: GlitchAlgorithm = {
   },
 };
 
+const mirrorFoldBrush: GlitchAlgorithm = {
+  id: 'mirror-fold-brush',
+  name: 'Mirror Fold',
+  family: 'advanced-brush',
+  experimental: true,
+  apply(context) {
+    const { settings, width, height } = context;
+    const bounds = clipRectangle(context.writeBounds ?? context.bounds, width, height);
+    if (!bounds.width || !bounds.height) return result(bounds, 0);
+    const snapshot = extractRegion(context.pixels, width, height, bounds);
+    const frame = strokeFrame(context, settings.mirrorFoldFallbackAngle);
+    const axisTangentX = settings.mirrorFoldAxis === 'stroke' ? frame.tangentX : frame.normalX;
+    const axisTangentY = settings.mirrorFoldAxis === 'stroke' ? frame.tangentY : frame.normalY;
+    const axisNormalX = -axisTangentY;
+    const axisNormalY = axisTangentX;
+    const centerX = context.bounds.x + context.bounds.width / 2;
+    const centerY = context.bounds.y + context.bounds.height / 2;
+    const repetitions = clamp(Math.round(settings.mirrorFoldRepetitions), 1, 3);
+    const random = createSeededRandom(`${context.seed}:mirror-fold`);
+    const slipDirection = random.next() < 0.5 ? -1 : 1;
+    const maximumDistance = Math.max(1, Math.hypot(bounds.width, bounds.height) * 0.5);
+    let touched = 0;
+    for (let y = bounds.y; y < bounds.y + bounds.height; y += 1) {
+      for (let x = bounds.x; x < bounds.x + bounds.width; x += 1) {
+        const influence = influenceAt(context, x, y);
+        if (influence <= 0.01) continue;
+        const relativeX = x - centerX;
+        const relativeY = y - centerY;
+        const along = relativeX * axisTangentX + relativeY * axisTangentY;
+        const normal =
+          relativeX * axisNormalX + relativeY * axisNormalY - settings.mirrorFoldOffset;
+        if (settings.mirrorFoldSide === 'left' && normal > 0) continue;
+        if (settings.mirrorFoldSide === 'right' && normal < 0) continue;
+        const destination = pixelToByteOffset(x, y, width);
+        const falloff =
+          1 - settings.mirrorFoldFalloff * clamp(Math.abs(normal) / maximumDistance, 0, 1);
+        const amount = clamp(influence * settings.mirrorFoldMix * falloff, 0, 1);
+        for (let channel = 0; channel < 3; channel += 1) {
+          let accumulated = 0;
+          for (let repetition = 0; repetition < repetitions; repetition += 1) {
+            const repeatOffset =
+              (repetition - (repetitions - 1) / 2) * settings.mirrorFoldOffset * 0.75;
+            const reflectedNormal = -normal + repeatOffset;
+            const channelSlip = (channel - 1) * settings.mirrorFoldRgbSlip * slipDirection;
+            const sourceX =
+              centerX +
+              axisTangentX * (along + channelSlip) +
+              axisNormalX * (reflectedNormal + settings.mirrorFoldOffset);
+            const sourceY =
+              centerY +
+              axisTangentY * (along + channelSlip) +
+              axisNormalY * (reflectedNormal + settings.mirrorFoldOffset);
+            accumulated += sampleSnapshot(
+              snapshot,
+              sourceX,
+              sourceY,
+              channel,
+              settings.mirrorFoldEdgeMode,
+            );
+          }
+          context.pixels[destination + channel] = blendChannel(
+            snapshot.data[
+              ((y - snapshot.bounds.y) * snapshot.bounds.width + x - snapshot.bounds.x) * 4 +
+                channel
+            ]!,
+            accumulated / repetitions,
+            amount,
+          );
+        }
+        touched += 1;
+      }
+    }
+    return result(bounds, touched);
+  },
+};
+
+const halftoneCollapseBrush: GlitchAlgorithm = {
+  id: 'halftone-collapse-brush',
+  name: 'Halftone Collapse',
+  family: 'advanced-brush',
+  experimental: true,
+  apply(context) {
+    const { settings, width, height } = context;
+    const bounds = clipRectangle(context.writeBounds ?? context.bounds, width, height);
+    if (!bounds.width || !bounds.height) return result(bounds, 0);
+    const snapshot = extractRegion(context.pixels, width, height, bounds);
+    const baseFrame = strokeFrame(context, settings.halftoneFallbackAngle);
+    let tangentX = baseFrame.tangentX;
+    let tangentY = baseFrame.tangentY;
+    if (settings.halftoneGridAngle === 'perpendicular') {
+      tangentX = baseFrame.normalX;
+      tangentY = baseFrame.normalY;
+    } else if (settings.halftoneGridAngle === 'fixed') {
+      const angle = (settings.halftoneFallbackAngle * Math.PI) / 180;
+      tangentX = Math.cos(angle);
+      tangentY = Math.sin(angle);
+    }
+    const normalX = -tangentY;
+    const normalY = tangentX;
+    const centerX = context.bounds.x + context.bounds.width / 2;
+    const centerY = context.bounds.y + context.bounds.height / 2;
+    const cell = clamp(Math.round(settings.halftoneCellSize), 3, 48);
+    const seedValue = createSeededRandom(`${context.seed}:halftone-collapse`).int(1, 0x7fffffff);
+    const movementShift = Math.min(
+      cell,
+      Math.hypot(context.movement?.x ?? 0, context.movement?.y ?? 0) * 0.2,
+    );
+    let touched = 0;
+    for (let y = bounds.y; y < bounds.y + bounds.height; y += 1) {
+      for (let x = bounds.x; x < bounds.x + bounds.width; x += 1) {
+        const influence = influenceAt(context, x, y);
+        if (influence <= 0.01) continue;
+        const relativeX = x - centerX;
+        const relativeY = y - centerY;
+        const u = relativeX * tangentX + relativeY * tangentY - movementShift;
+        const v = relativeX * normalX + relativeY * normalY;
+        const cellU = Math.round(u / cell);
+        const cellV = Math.round(v / cell);
+        const randomDrift = (scalarNoise(cellU, cellV, seedValue) - 0.5) * settings.halftoneDrift;
+        const centerU = cellU * cell + movementShift + randomDrift;
+        const centerV =
+          cellV * cell * (1 - clamp(settings.halftoneCollapse, 0, 1) * 0.78) + randomDrift * 0.25;
+        const sourceX = centerX + tangentX * centerU + normalX * centerV;
+        const sourceY = centerY + tangentY * centerU + normalY * centerV;
+        const luminosity = snapshotLuma(snapshot, sourceX, sourceY) / 255;
+        const radius =
+          cell *
+          clamp(
+            0.08 +
+              (1 - luminosity) * 0.38 +
+              settings.halftoneDotGain * 0.24 +
+              context.pressure * 0.08,
+            0.08,
+            0.58,
+          );
+        const localU = u - centerU;
+        const localV = v - centerV;
+        const distance =
+          settings.halftoneShape === 'square'
+            ? Math.max(Math.abs(localU), Math.abs(localV))
+            : Math.hypot(localU, localV);
+        const coverage = clamp(radius - distance + 1.25, 0, 1);
+        const destination = pixelToByteOffset(x, y, width);
+        const amount = clamp(influence * context.strength * context.pressure, 0, 1);
+        for (let channel = 0; channel < 3; channel += 1) {
+          const original =
+            snapshot.data[((y - bounds.y) * bounds.width + x - bounds.x) * 4 + channel]!;
+          const background =
+            original * settings.halftoneBackgroundMix + 255 * (1 - settings.halftoneBackgroundMix);
+          const channelOffset =
+            settings.halftoneColorMode === 'rgb'
+              ? (channel - 1) * settings.halftoneChannelOffset
+              : 0;
+          const dotColor =
+            settings.halftoneColorMode === 'rgb'
+              ? sampleSnapshot(
+                  snapshot,
+                  sourceX + tangentX * channelOffset,
+                  sourceY + tangentY * channelOffset,
+                  channel,
+                )
+              : luminosity * 255;
+          const incoming = background * (1 - coverage) + dotColor * coverage;
+          context.pixels[destination + channel] = blendChannel(original, incoming, amount);
+        }
+        touched += 1;
+      }
+    }
+    return result(bounds, touched);
+  },
+};
+
+const rasterLoomBrush: GlitchAlgorithm = {
+  id: 'raster-loom-brush',
+  name: 'Raster Loom',
+  family: 'advanced-brush',
+  experimental: true,
+  apply(context) {
+    const { settings, width, height } = context;
+    const bounds = clipRectangle(context.writeBounds ?? context.bounds, width, height);
+    if (!bounds.width || !bounds.height) return result(bounds, 0);
+    const snapshot = extractRegion(context.pixels, width, height, bounds);
+    const frame = strokeFrame(context, settings.rasterLoomFallbackAngle);
+    const stripCoordinateX =
+      settings.rasterLoomDirection === 'stroke' ? frame.normalX : frame.tangentX;
+    const stripCoordinateY =
+      settings.rasterLoomDirection === 'stroke' ? frame.normalY : frame.tangentY;
+    const centerX = context.bounds.x + context.bounds.width / 2;
+    const centerY = context.bounds.y + context.bounds.height / 2;
+    const stripWidth = clamp(Math.round(settings.rasterLoomStripWidth), 2, 64);
+    const gap = clamp(Math.round(settings.rasterLoomGap), 0, stripWidth - 1);
+    const period = stripWidth + gap;
+    const alternation = clamp(Math.round(settings.rasterLoomAlternation), 1, 6);
+    const phase = createSeededRandom(`${context.seed}:raster-loom`).next() * period;
+    let touched = 0;
+    for (let y = bounds.y; y < bounds.y + bounds.height; y += 1) {
+      for (let x = bounds.x; x < bounds.x + bounds.width; x += 1) {
+        const influence = influenceAt(context, x, y);
+        if (influence <= 0.01) continue;
+        const coordinate =
+          (x - centerX) * stripCoordinateX + (y - centerY) * stripCoordinateY + phase;
+        const wrapped = ((coordinate % period) + period) % period;
+        if (wrapped >= stripWidth) continue;
+        const band = Math.floor(coordinate / period);
+        const direction = Math.floor(Math.abs(band) / alternation) % 2 === 0 ? 1 : -1;
+        const edgeDistance = Math.min(wrapped, stripWidth - wrapped);
+        const edgeBlend = clamp(
+          edgeDistance / Math.max(0.5, settings.rasterLoomEdgeSoftness * stripWidth),
+          0,
+          1,
+        );
+        const shift = direction * settings.rasterLoomSourceOffset;
+        const destination = pixelToByteOffset(x, y, width);
+        const amount = clamp(influence * settings.rasterLoomMix * edgeBlend, 0, 1);
+        for (let channel = 0; channel < 3; channel += 1) {
+          const slip = (channel - 1) * settings.rasterLoomRgbSlip * direction;
+          const sampled = sampleSnapshot(
+            snapshot,
+            x + frame.tangentX * shift + stripCoordinateX * slip,
+            y + frame.tangentY * shift + stripCoordinateY * slip,
+            channel,
+            'mirror',
+          );
+          const woven = clamp(
+            sampled * (1 + direction * settings.rasterLoomWeaveDepth * 0.12),
+            0,
+            255,
+          );
+          context.pixels[destination + channel] = blendChannel(
+            snapshot.data[((y - bounds.y) * bounds.width + x - bounds.x) * 4 + channel]!,
+            woven,
+            amount,
+          );
+        }
+        touched += 1;
+      }
+    }
+    return result(bounds, touched);
+  },
+};
+
+const contourCrawlBrush: GlitchAlgorithm = {
+  id: 'contour-crawl-brush',
+  name: 'Contour Crawl',
+  family: 'advanced-brush',
+  experimental: true,
+  apply(context) {
+    const { settings, width, height } = context;
+    const bounds = clipRectangle(context.writeBounds ?? context.bounds, width, height);
+    if (!bounds.width || !bounds.height) return result(bounds, 0);
+    const snapshot = extractRegion(context.pixels, width, height, bounds);
+    const frame = strokeFrame(context, settings.contourCrawlFallbackAngle);
+    const edge = new Float32Array(bounds.width * bounds.height);
+    for (let localY = 0; localY < bounds.height; localY += 1) {
+      const y = bounds.y + localY;
+      for (let localX = 0; localX < bounds.width; localX += 1) {
+        const x = bounds.x + localX;
+        const gx =
+          -snapshotLuma(snapshot, x - 1, y - 1) +
+          snapshotLuma(snapshot, x + 1, y - 1) -
+          snapshotLuma(snapshot, x - 1, y) * 2 +
+          snapshotLuma(snapshot, x + 1, y) * 2 -
+          snapshotLuma(snapshot, x - 1, y + 1) +
+          snapshotLuma(snapshot, x + 1, y + 1);
+        const gy =
+          -snapshotLuma(snapshot, x - 1, y - 1) -
+          snapshotLuma(snapshot, x, y - 1) * 2 -
+          snapshotLuma(snapshot, x + 1, y - 1) +
+          snapshotLuma(snapshot, x - 1, y + 1) +
+          snapshotLuma(snapshot, x, y + 1) * 2 +
+          snapshotLuma(snapshot, x + 1, y + 1);
+        edge[localY * bounds.width + localX] = Math.min(255, Math.hypot(gx, gy) / 4);
+      }
+    }
+    const edgeAt = (x: number, y: number) => {
+      const localX = clamp(Math.round(x) - bounds.x, 0, bounds.width - 1);
+      const localY = clamp(Math.round(y) - bounds.y, 0, bounds.height - 1);
+      return edge[localY * bounds.width + localX]!;
+    };
+    const repeats = clamp(Math.round(settings.contourCrawlRepeatCount), 1, 8);
+    const lineWidth = clamp(Math.round(settings.contourCrawlLineWidth), 1, 8);
+    const seedValue = createSeededRandom(`${context.seed}:contour-crawl`).int(1, 0x7fffffff);
+    let touched = 0;
+    for (let y = bounds.y; y < bounds.y + bounds.height; y += 1) {
+      for (let x = bounds.x; x < bounds.x + bounds.width; x += 1) {
+        const influence = influenceAt(context, x, y);
+        if (influence <= 0.01) continue;
+        const destination = pixelToByteOffset(x, y, width);
+        let changed = false;
+        for (let repetition = 1; repetition <= repeats; repetition += 1) {
+          const progress = repetition / repeats;
+          const distance = progress * settings.contourCrawlLength;
+          const signedDrift =
+            (scalarNoise(repetition, Math.floor((x + y) / 8), seedValue) - 0.5) *
+            2 *
+            settings.contourCrawlSideDrift *
+            progress;
+          const sourceX = x - frame.tangentX * distance - frame.normalX * signedDrift;
+          const sourceY = y - frame.tangentY * distance - frame.normalY * signedDrift;
+          let magnitude = 0;
+          for (let line = -lineWidth; line <= lineWidth; line += 1) {
+            magnitude = Math.max(
+              magnitude,
+              edgeAt(sourceX + frame.normalX * line, sourceY + frame.normalY * line),
+            );
+          }
+          if (magnitude < settings.contourCrawlEdgeThreshold) continue;
+          const edgeAmount = clamp(
+            (magnitude - settings.contourCrawlEdgeThreshold) /
+              Math.max(1, 255 - settings.contourCrawlEdgeThreshold),
+            0,
+            1,
+          );
+          const decay = Math.pow(clamp(settings.contourCrawlDecay, 0, 1), repetition - 1);
+          const amount = clamp(influence * settings.contourCrawlMix * edgeAmount * decay, 0, 1);
+          for (let channel = 0; channel < 3; channel += 1) {
+            const split = (channel - 1) * settings.contourCrawlRgbSplit;
+            let sampled = sampleSnapshot(
+              snapshot,
+              sourceX + frame.normalX * split,
+              sourceY + frame.normalY * split,
+              channel,
+              'mirror',
+            );
+            if (settings.contourCrawlEdgePolarity === 'dark') sampled *= 0.35;
+            else if (settings.contourCrawlEdgePolarity === 'light') {
+              sampled = 255 - (255 - sampled) * 0.35;
+            }
+            context.pixels[destination + channel] = blendChannel(
+              context.pixels[destination + channel]!,
+              sampled,
+              amount,
+            );
+          }
+          changed = true;
+        }
+        if (changed) touched += 1;
+      }
+    }
+    return result(bounds, touched);
+  },
+};
+
 export const advancedBrushAlgorithms: GlitchAlgorithm[] = [
   pixelSortBrush,
   feedbackBrush,
@@ -713,6 +1103,10 @@ export const advancedBrushAlgorithms: GlitchAlgorithm[] = [
   flowMoshBrush,
   cloneCorruptionBrush,
   lineFreezeBrush,
+  mirrorFoldBrush,
+  halftoneCollapseBrush,
+  rasterLoomBrush,
+  contourCrawlBrush,
 ];
 
 export const advancedBrushEffectIds = advancedBrushAlgorithms.map(
@@ -724,4 +1118,8 @@ export const advancedBrushEffectIds = advancedBrushAlgorithms.map(
   | 'flow-mosh-brush'
   | 'clone-corruption-brush'
   | 'line-freeze-brush'
+  | 'mirror-fold-brush'
+  | 'halftone-collapse-brush'
+  | 'raster-loom-brush'
+  | 'contour-crawl-brush'
 >;

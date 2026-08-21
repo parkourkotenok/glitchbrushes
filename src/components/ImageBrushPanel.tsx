@@ -141,6 +141,8 @@ const fxIcons: Record<ImageBrushFxId, Parameters<typeof EffectIcon>[0]['id']> = 
   'edge-melt': 'edge-melt',
   'flow-field': 'flow-field',
   'motion-transfer': 'motion-transfer',
+  'pixel-embroidery': 'pixel-embroidery',
+  'xerox-decay': 'xerox-decay',
 };
 
 const imageBrushFxHelpOptions: ControlHelpOption[] = imageBrushFxDefinitions.map((definition) => ({
@@ -1098,7 +1100,8 @@ export function ImageBrushPanel({
                     key={definition.id}
                     value={definition.id}
                   >
-                    {definition.name} В· {imageBrushStageLabel(definition.imageBrushStages)}
+                    {definition.experimental ? 'NEW · ' : ''}
+                    {definition.name} · {imageBrushStageLabel(definition.imageBrushStages)}
                   </option>
                 ))}
               </select>
@@ -1136,7 +1139,10 @@ export function ImageBrushPanel({
                     <span className="fx-order">{String(index + 1).padStart(2, '0')}</span>
                     <EffectIcon id={fxIcons[item.effectId]} size={14} />
                     <span>
-                      <strong>{definition.name}</strong>
+                      <strong>
+                        {definition.name}
+                        {definition.experimental && <em className="new-effect-badge">NEW</em>}
+                      </strong>
                       <small>{definition.cost} cost</small>
                     </span>
                     <Toggle
@@ -1208,6 +1214,235 @@ export function ImageBrushPanel({
                         )
                       }
                     />
+                    {item.effectId === 'pixel-embroidery' && (
+                      <div className="image-brush-experimental-fx-controls">
+                        <SliderField
+                          label="Grid Size"
+                          value={item.embroideryGridSize ?? 7}
+                          min={3}
+                          max={24}
+                          suffix=" px"
+                          onChange={(embroideryGridSize) =>
+                            updateRack(
+                              rack.map((entry) =>
+                                entry.id === item.id ? { ...entry, embroideryGridSize } : entry,
+                              ),
+                            )
+                          }
+                        />
+                        <label className="image-brush-select">
+                          <span>Stitch Type</span>
+                          <select
+                            value={item.embroideryStitchType ?? 'cross-stitch'}
+                            onChange={(event) =>
+                              updateRack(
+                                rack.map((entry) =>
+                                  entry.id === item.id
+                                    ? {
+                                        ...entry,
+                                        embroideryStitchType: event.target.value as NonNullable<
+                                          ImageBrushFxItem['embroideryStitchType']
+                                        >,
+                                      }
+                                    : entry,
+                                ),
+                              )
+                            }
+                          >
+                            <option value="cross-stitch">Cross Stitch</option>
+                            <option value="diagonal-stitch">Diagonal Stitch</option>
+                            <option value="bead">Bead</option>
+                            <option value="square">Square</option>
+                          </select>
+                        </label>
+                        <SliderField
+                          label="Palette Levels"
+                          value={item.embroideryPaletteLevels ?? 8}
+                          min={2}
+                          max={32}
+                          onChange={(embroideryPaletteLevels) =>
+                            updateRack(
+                              rack.map((entry) =>
+                                entry.id === item.id
+                                  ? { ...entry, embroideryPaletteLevels }
+                                  : entry,
+                              ),
+                            )
+                          }
+                        />
+                        <SliderField
+                          label="Thread Angle"
+                          value={item.embroideryThreadAngle ?? 0}
+                          min={-180}
+                          max={180}
+                          suffix="°"
+                          onChange={(embroideryThreadAngle) =>
+                            updateRack(
+                              rack.map((entry) =>
+                                entry.id === item.id ? { ...entry, embroideryThreadAngle } : entry,
+                              ),
+                            )
+                          }
+                        />
+                        <SliderField
+                          label="Missing Stitches"
+                          value={item.embroideryMissingStitches ?? 0.08}
+                          min={0}
+                          max={0.8}
+                          step={0.01}
+                          onChange={(embroideryMissingStitches) =>
+                            updateRack(
+                              rack.map((entry) =>
+                                entry.id === item.id
+                                  ? { ...entry, embroideryMissingStitches }
+                                  : entry,
+                              ),
+                            )
+                          }
+                        />
+                        <SliderField
+                          label="Thread Jitter"
+                          value={item.embroideryThreadJitter ?? 0.12}
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          onChange={(embroideryThreadJitter) =>
+                            updateRack(
+                              rack.map((entry) =>
+                                entry.id === item.id ? { ...entry, embroideryThreadJitter } : entry,
+                              ),
+                            )
+                          }
+                        />
+                        <SliderField
+                          label="Background Transparency"
+                          value={item.embroideryBackgroundTransparency ?? 0.9}
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          onChange={(embroideryBackgroundTransparency) =>
+                            updateRack(
+                              rack.map((entry) =>
+                                entry.id === item.id
+                                  ? { ...entry, embroideryBackgroundTransparency }
+                                  : entry,
+                              ),
+                            )
+                          }
+                        />
+                      </div>
+                    )}
+                    {item.effectId === 'xerox-decay' && (
+                      <div className="image-brush-experimental-fx-controls">
+                        <SliderField
+                          label="Threshold"
+                          value={item.xeroxThreshold ?? 0.54}
+                          min={0.05}
+                          max={0.95}
+                          step={0.01}
+                          onChange={(xeroxThreshold) =>
+                            updateRack(
+                              rack.map((entry) =>
+                                entry.id === item.id ? { ...entry, xeroxThreshold } : entry,
+                              ),
+                            )
+                          }
+                        />
+                        <SliderField
+                          label="Toner Loss"
+                          value={item.xeroxTonerLoss ?? 0.28}
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          onChange={(xeroxTonerLoss) =>
+                            updateRack(
+                              rack.map((entry) =>
+                                entry.id === item.id ? { ...entry, xeroxTonerLoss } : entry,
+                              ),
+                            )
+                          }
+                        />
+                        <SliderField
+                          label="Speckle"
+                          value={item.xeroxSpeckle ?? 0.22}
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          onChange={(xeroxSpeckle) =>
+                            updateRack(
+                              rack.map((entry) =>
+                                entry.id === item.id ? { ...entry, xeroxSpeckle } : entry,
+                              ),
+                            )
+                          }
+                        />
+                        <SliderField
+                          label="Edge Erosion"
+                          value={item.xeroxEdgeErosion ?? 0.2}
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          onChange={(xeroxEdgeErosion) =>
+                            updateRack(
+                              rack.map((entry) =>
+                                entry.id === item.id ? { ...entry, xeroxEdgeErosion } : entry,
+                              ),
+                            )
+                          }
+                        />
+                        <SliderField
+                          label="Banding"
+                          value={item.xeroxBanding ?? 0.14}
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          onChange={(xeroxBanding) =>
+                            updateRack(
+                              rack.map((entry) =>
+                                entry.id === item.id ? { ...entry, xeroxBanding } : entry,
+                              ),
+                            )
+                          }
+                        />
+                        <SliderField
+                          label="Black Crush"
+                          value={item.xeroxBlackCrush ?? 0.36}
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          onChange={(xeroxBlackCrush) =>
+                            updateRack(
+                              rack.map((entry) =>
+                                entry.id === item.id ? { ...entry, xeroxBlackCrush } : entry,
+                              ),
+                            )
+                          }
+                        />
+                        <label className="image-brush-select">
+                          <span>Color Mode</span>
+                          <select
+                            value={item.xeroxColorMode ?? 'mono'}
+                            onChange={(event) =>
+                              updateRack(
+                                rack.map((entry) =>
+                                  entry.id === item.id
+                                    ? {
+                                        ...entry,
+                                        xeroxColorMode: event.target.value as NonNullable<
+                                          ImageBrushFxItem['xeroxColorMode']
+                                        >,
+                                      }
+                                    : entry,
+                                ),
+                              )
+                            }
+                          >
+                            <option value="mono">Mono</option>
+                            <option value="duotone">Duotone</option>
+                          </select>
+                        </label>
+                      </div>
+                    )}
                     <div className="image-brush-fx-order">
                       <button
                         disabled={index === 0}
@@ -1601,6 +1836,7 @@ export function ImageBrushPanel({
                     }
                   >
                     {definition.name}
+                    {definition.experimental && <em className="new-effect-badge">NEW</em>}
                   </button>
                 ))}
             </div>

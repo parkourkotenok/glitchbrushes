@@ -11,6 +11,10 @@ Glitch Brushes — локальная мастерская изображени�
 - **Layers** — каждая добавленная фотография является отдельным скрываемым raster-слоем над закреплённым белым Background. Effect, MOSH, Retouch и Image Brush изменяют выбранный слой напрямую и не создают автоматические выходные слои. `All Layers` переключает только источник семплирования между выбранным слоем и видимым композитом.
 - **Simple / Advanced** — быстрый режим без стены ползунков и полный режим для тонкой настройки.
 
+## NEW / Experimental
+
+Первая экспериментальная пачка включает Effect Brushes **Mirror Fold**, **Halftone Collapse**, **Raster Loom**, **Contour Crawl** и Image Brush FX **Pixel Embroidery**, **Xerox Decay**. Они помечены `NEW`, не входят в старые пресеты и random pools и активируются только явным выбором пользователя.
+
 Старые **HEX**, **File Corruption**, верхний пиксельный индикатор и кнопки Continuous / Stroke Commit / Preview удалены из рабочего интерфейса.
 
 ## Image Brush
@@ -63,7 +67,7 @@ npm run generate:effect-previews
 
 Исходные рендеры лежат в `public/assets/effect-previews/`, production-сборка создаётся в `dist/`.
 
-Актуальные production-замеры post-stroke пути, baseline и известные оставшиеся full-canvas операции записаны в [`PERFORMANCE_REPORT_2026-08-21.md`](PERFORMANCE_REPORT_2026-08-21.md). Диагностика включается только параметром `?perf=1` и хранит ограниченное число последних измерений.
+Актуальные production-замеры post-stroke пути, baseline и известные оставшиеся full-canvas операции записаны в [`PERFORMANCE_REPORT_2026-08-21.md`](PERFORMANCE_REPORT_2026-08-21.md). Реализация, настройки, previews и Edge/Firefox acceptance экспериментальной пачки описаны в [`NEW_LAB_REPORT_2026-08-21.md`](NEW_LAB_REPORT_2026-08-21.md). Диагностика включается только параметром `?perf=1` и хранит ограниченное число последних измерений.
 
 ## Горячие клавиши
 

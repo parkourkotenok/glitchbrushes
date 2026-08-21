@@ -5,6 +5,7 @@ import algorithmControlsSource from './components/AlgorithmControls.tsx?raw';
 import canvasWorkspaceSource from './components/CanvasWorkspace.tsx?raw';
 import effectPanelSource from './components/EffectPanel.tsx?raw';
 import effectPreviewSource from './components/EffectPreviewStage.tsx?raw';
+import effectPickerSource from './components/EffectPicker.tsx?raw';
 import imageBrushEssentialSource from './components/ImageBrushEssentialControls.tsx?raw';
 import interfaceModeSource from './components/InterfaceModeSwitch.tsx?raw';
 import imageBrushPanelSource from './components/ImageBrushPanel.tsx?raw';
@@ -22,6 +23,11 @@ import retouchWorkerSource from './workers/retouch.worker.ts?raw';
 import moshWorkerSource from './workers/mosh.worker.ts?raw';
 import localLauncherSource from '../start-local.bat?raw';
 import devLauncherSource from '../start-dev.bat?raw';
+import imageBrushPresetSource from './imageBrush/presets.ts?raw';
+import { algorithmList, defaultAlgorithmSettings } from './glitchAlgorithms';
+import { imageBrushFxDefinitions } from './effects/sharedRegistry';
+import { builtInImageBrushPresets } from './imageBrush/presets';
+import { defaultImageBrushSettings } from './imageBrush/types';
 
 describe('production editor cleanup', () => {
   it('does not import, route or render the HEX editor in the production App', () => {
@@ -174,12 +180,44 @@ describe('production editor cleanup', () => {
   });
 
   it('reuses the full brush mask and launches production separately from development', () => {
-    expect(appSource).not.toContain(
-      'maskRef.current = new Float32Array(maskRef.current.length)',
-    );
+    expect(appSource).not.toContain('maskRef.current = new Float32Array(maskRef.current.length)');
     expect(localLauncherSource).toContain('npm run build');
     expect(localLauncherSource).toContain('npm run preview');
     expect(localLauncherSource).not.toContain('npm run dev');
     expect(devLauncherSource).toContain('npm run dev');
+  });
+
+  it('renders six metadata-driven NEW tools without leaking them into normal groups or random pools', () => {
+    const experimentalAlgorithms = algorithmList.filter((item) => item.experimental);
+    const experimentalImageFx = imageBrushFxDefinitions.filter((item) => item.experimental);
+    expect(experimentalAlgorithms.map((item) => item.id)).toEqual([
+      'mirror-fold-brush',
+      'halftone-collapse-brush',
+      'raster-loom-brush',
+      'contour-crawl-brush',
+    ]);
+    expect(experimentalImageFx.map((item) => item.id)).toEqual(['pixel-embroidery', 'xerox-decay']);
+    expect(effectPickerSource).toContain('NEW / EXPERIMENTAL');
+    expect(effectPickerSource).toContain(
+      'item.experimental && <em className="new-effect-badge">NEW</em>',
+    );
+    expect(effectPickerSource).toContain(
+      'value.experimental && <em className="new-effect-badge">NEW</em>',
+    );
+    expect(effectPickerSource).toContain('experimental={previewItem.experimental}');
+    expect(effectPickerSource).toContain("item.family === 'advanced-brush' && !item.experimental");
+    expect(imageBrushPanelSource).toContain(
+      'definition.experimental && <em className="new-effect-badge">NEW</em>',
+    );
+    for (const item of [...experimentalAlgorithms, ...experimentalImageFx]) {
+      expect(defaultAlgorithmSettings.structuralMixPool).not.toContain(item.id);
+      expect(defaultImageBrushSettings.effectPool).not.toContain(item.id);
+      expect(
+        builtInImageBrushPresets.some((preset) =>
+          preset.rack.some((fx) => fx.effectId === item.id),
+        ),
+      ).toBe(false);
+    }
+    expect(imageBrushPresetSource).toContain('!definition.experimental');
   });
 });

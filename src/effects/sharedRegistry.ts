@@ -15,11 +15,32 @@ export interface SharedEffectRegistryItem {
   imageBrushStages: readonly SharedImageBrushStage[];
   visibleInImageBrush: boolean;
   legacy?: boolean;
+  experimental?: boolean;
 }
 
 const entry = (value: SharedEffectRegistryItem) => value;
 
 export const sharedEffectRegistry: ReadonlyArray<SharedEffectRegistryItem> = [
+  entry({
+    id: 'pixel-embroidery',
+    name: 'Pixel Embroidery',
+    minSize: 6,
+    description: 'Rebuilds the stamp as a quantized grid of stitches, beads, or square cells.',
+    cost: 'medium',
+    imageBrushStages: ['tip', 'stamp', 'trail'],
+    visibleInImageBrush: true,
+    experimental: true,
+  }),
+  entry({
+    id: 'xerox-decay',
+    name: 'Xerox Decay',
+    minSize: 4,
+    description: 'Crushes tones into eroded toner, speckle, and missing copy bands.',
+    cost: 'medium',
+    imageBrushStages: ['tip', 'stamp', 'trail'],
+    visibleInImageBrush: true,
+    experimental: true,
+  }),
   entry({
     id: 'slice',
     name: 'Slice Displacement',
@@ -250,9 +271,9 @@ export const sharedEffectRegistry: ReadonlyArray<SharedEffectRegistryItem> = [
   }),
 ];
 
-export const imageBrushFxDefinitions = sharedEffectRegistry.filter(
-  (item) => item.visibleInImageBrush,
-);
+export const imageBrushFxDefinitions = sharedEffectRegistry
+  .filter((item) => item.visibleInImageBrush)
+  .sort((left, right) => Number(Boolean(right.experimental)) - Number(Boolean(left.experimental)));
 
 export function sharedEffectForImageBrush(
   id: ImageBrushFxId,

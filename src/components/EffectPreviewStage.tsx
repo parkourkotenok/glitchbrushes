@@ -4,6 +4,7 @@ interface EffectPreviewStageProps {
   algorithm: AlgorithmId;
   description?: string;
   estimatedCost?: string;
+  experimental?: boolean;
 }
 
 export const effectPreviewAssetUrl = (algorithm: AlgorithmId, kind: 'after' | 'difference') =>
@@ -13,6 +14,7 @@ export function EffectPreviewStage({
   algorithm,
   description,
   estimatedCost,
+  experimental = false,
 }: EffectPreviewStageProps) {
   return (
     <section
@@ -21,7 +23,10 @@ export function EffectPreviewStage({
       data-preview-status="static"
     >
       <header>
-        <strong>STATIC EFFECT PREVIEW</strong>
+        <strong>
+          STATIC EFFECT PREVIEW
+          {experimental && <em className="new-effect-badge">NEW</em>}
+        </strong>
         <span>PRE-RENDERED DEMO</span>
       </header>
       <div className="shared-effect-preview-grid">

@@ -1414,6 +1414,28 @@ select {
   vertical-align: 1px;
 }
 
+.new-effect-badge {
+  display: inline-block;
+  margin-left: 7px;
+  padding: 1px 4px;
+  border: 1px solid #d9a52f;
+  background: rgba(255, 220, 62, 0.13);
+  color: #ffe45b;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 6px;
+  font-style: normal;
+  line-height: 1.25;
+  letter-spacing: 0.08em;
+  vertical-align: 1px;
+}
+
+.effect-picker-trigger > .new-effect-badge {
+  flex: 0 0 auto;
+  overflow: visible;
+  color: #ffe45b;
+  text-align: center;
+}
+
 .meta-effect-controls,
 .meta-effect-pool {
   display: grid;
@@ -3956,6 +3978,19 @@ kbd {
   display: flex;
   justify-content: flex-end;
   gap: 4px;
+}
+
+.image-brush-experimental-fx-controls {
+  display: grid;
+  gap: 5px;
+  margin: 7px 0;
+  padding: 7px;
+  border: 1px solid rgba(255, 220, 62, 0.3);
+  background: rgba(255, 220, 62, 0.04);
+}
+
+.image-brush-effect-pool .new-effect-badge {
+  margin-left: 5px;
 }
 
 .image-brush-fx-order button {

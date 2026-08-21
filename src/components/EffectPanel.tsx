@@ -185,6 +185,27 @@ export function EffectPanel({
         )}
       </section>
 
+      {algorithms[algorithm].experimental && (
+        <PanelSection title="Experimental controls" icon={<SlidersHorizontal size={15} />}>
+          <AlgorithmControls
+            algorithm={algorithm}
+            settings={settings}
+            update={onUpdateSetting}
+            cloneSource={cloneSource}
+            cloneSourcePickMode={cloneSourcePickMode}
+            feedbackMemoryReady={feedbackMemoryReady}
+            onPickCloneSource={onPickCloneSource}
+            onClearCloneSource={onClearCloneSource}
+            onResetFeedback={onResetFeedback}
+            metaSeed={seed}
+            metaRecipeLocked={metaRecipeLocked}
+            onMetaRecipeLockChange={onMetaRecipeLockChange}
+            onNewMetaRecipe={onNewMetaRecipe}
+            simpleExperimental
+          />
+        </PanelSection>
+      )}
+
       <PanelSection title="Brush dynamics" icon={<Brush size={15} />}>
         <SliderField
           label="Size"
@@ -194,16 +215,18 @@ export function EffectPanel({
           suffix=" px"
           onChange={(value) => onUpdateBrush('size', value)}
         />
-        {interfaceMode === 'advanced' && <div className="interface-advanced-only">
-          <SliderField
-            label="Hardness"
-            value={brush.hardness}
-            min={0}
-            max={1}
-            step={0.01}
-            onChange={(value) => onUpdateBrush('hardness', value)}
-          />
-        </div>}
+        {interfaceMode === 'advanced' && (
+          <div className="interface-advanced-only">
+            <SliderField
+              label="Hardness"
+              value={brush.hardness}
+              min={0}
+              max={1}
+              step={0.01}
+              onChange={(value) => onUpdateBrush('hardness', value)}
+            />
+          </div>
+        )}
         <SliderField
           label="Opacity"
           value={brush.opacity}
@@ -220,196 +243,204 @@ export function EffectPanel({
           step={0.01}
           onChange={(value) => onUpdateBrush('strength', value)}
         />
-        {interfaceMode === 'advanced' && <div className="interface-advanced-only">
-          <SliderField
-            label="Structural corruption"
-            value={settings.structuralIntensity}
-            min={0.2}
-            max={1.5}
-            step={0.01}
-            onChange={(value) => onUpdateSetting('structuralIntensity', value)}
-          />
-          <SliderField
-            label="Micro corruption"
-            value={settings.microIntensity}
-            min={0.05}
-            max={1}
-            step={0.01}
-            onChange={(value) => onUpdateSetting('microIntensity', value)}
-          />
-          <SliderField
-            label="Density"
-            value={brush.density}
-            min={0.01}
-            max={1}
-            step={0.01}
-            onChange={(value) => onUpdateBrush('density', value)}
-          />
-          <SliderField
-            label="Scatter"
-            value={brush.scatter}
-            min={0}
-            max={1.5}
-            step={0.01}
-            onChange={(value) => onUpdateBrush('scatter', value)}
-          />
-          <SliderField
-            label="Spacing"
-            value={brush.spacing}
-            min={2}
-            max={100}
-            suffix="%"
-            onChange={(value) => onUpdateBrush('spacing', value)}
-          />
-          <label className="inline-select">
-            <span>Effect spill</span>
-            <select
-              value={settings.spill}
-              onChange={(event) =>
-                onUpdateSetting('spill', event.target.value as AlgorithmSettings['spill'])
-              }
-            >
-              <option value="local">Local only</option>
-              <option value="small">Small bleed</option>
-              <option value="medium">Medium bleed</option>
-              <option value="strong">Strong bleed</option>
-            </select>
-          </label>
-          <div className="switch-row">
-            <Toggle
-              label="Build up overlapping stamps"
-              checked={brush.accumulate}
-              onChange={(value) => onUpdateBrush('accumulate', value)}
+        {interfaceMode === 'advanced' && (
+          <div className="interface-advanced-only">
+            <SliderField
+              label="Structural corruption"
+              value={settings.structuralIntensity}
+              min={0.2}
+              max={1.5}
+              step={0.01}
+              onChange={(value) => onUpdateSetting('structuralIntensity', value)}
             />
-            <Toggle
-              label="Pen pressure"
-              checked={brush.pressure}
-              onChange={(value) => onUpdateBrush('pressure', value)}
+            <SliderField
+              label="Micro corruption"
+              value={settings.microIntensity}
+              min={0.05}
+              max={1}
+              step={0.01}
+              onChange={(value) => onUpdateSetting('microIntensity', value)}
             />
+            <SliderField
+              label="Density"
+              value={brush.density}
+              min={0.01}
+              max={1}
+              step={0.01}
+              onChange={(value) => onUpdateBrush('density', value)}
+            />
+            <SliderField
+              label="Scatter"
+              value={brush.scatter}
+              min={0}
+              max={1.5}
+              step={0.01}
+              onChange={(value) => onUpdateBrush('scatter', value)}
+            />
+            <SliderField
+              label="Spacing"
+              value={brush.spacing}
+              min={2}
+              max={100}
+              suffix="%"
+              onChange={(value) => onUpdateBrush('spacing', value)}
+            />
+            <label className="inline-select">
+              <span>Effect spill</span>
+              <select
+                value={settings.spill}
+                onChange={(event) =>
+                  onUpdateSetting('spill', event.target.value as AlgorithmSettings['spill'])
+                }
+              >
+                <option value="local">Local only</option>
+                <option value="small">Small bleed</option>
+                <option value="medium">Medium bleed</option>
+                <option value="strong">Strong bleed</option>
+              </select>
+            </label>
+            <div className="switch-row">
+              <Toggle
+                label="Build up overlapping stamps"
+                checked={brush.accumulate}
+                onChange={(value) => onUpdateBrush('accumulate', value)}
+              />
+              <Toggle
+                label="Pen pressure"
+                checked={brush.pressure}
+                onChange={(value) => onUpdateBrush('pressure', value)}
+              />
+            </div>
+            <p className="fine-print">
+              Build up overlapping stamps adds mask strength only where stamps overlap inside the
+              current stroke. It does not persist feedback or mutation between strokes.
+            </p>
+            {brush.pressure && (
+              <>
+                <SliderField
+                  label="Min pressure size"
+                  value={brush.minPressureSize}
+                  min={0.05}
+                  max={1}
+                  step={0.01}
+                  onChange={(value) => onUpdateBrush('minPressureSize', value)}
+                />
+                <SliderField
+                  label="Min pressure force"
+                  value={brush.minPressureStrength}
+                  min={0.05}
+                  max={1}
+                  step={0.01}
+                  onChange={(value) => onUpdateBrush('minPressureStrength', value)}
+                />
+              </>
+            )}
           </div>
-          <p className="fine-print">
-            Build up overlapping stamps adds mask strength only where stamps overlap inside the
-            current stroke. It does not persist feedback or mutation between strokes.
-          </p>
-          {brush.pressure && (
-            <>
-              <SliderField
-                label="Min pressure size"
-                value={brush.minPressureSize}
-                min={0.05}
-                max={1}
-                step={0.01}
-                onChange={(value) => onUpdateBrush('minPressureSize', value)}
-              />
-              <SliderField
-                label="Min pressure force"
-                value={brush.minPressureStrength}
-                min={0.05}
-                max={1}
-                step={0.01}
-                onChange={(value) => onUpdateBrush('minPressureStrength', value)}
-              />
-            </>
-          )}
-        </div>}
+        )}
       </PanelSection>
 
-      {interfaceMode === 'advanced' && <PanelSection
-        title="Algorithm parameters"
-        icon={<SlidersHorizontal size={15} />}
-        className="interface-advanced-only"
-      >
-        <AlgorithmControls
-          algorithm={algorithm}
-          settings={settings}
-          update={onUpdateSetting}
-          cloneSource={cloneSource}
-          cloneSourcePickMode={cloneSourcePickMode}
-          feedbackMemoryReady={feedbackMemoryReady}
-          onPickCloneSource={onPickCloneSource}
-          onClearCloneSource={onClearCloneSource}
-          onResetFeedback={onResetFeedback}
-          metaSeed={seed}
-          metaRecipeLocked={metaRecipeLocked}
-          onMetaRecipeLockChange={onMetaRecipeLockChange}
-          onNewMetaRecipe={onNewMetaRecipe}
-        />
-      </PanelSection>}
-
-      {interfaceMode === 'advanced' && <PanelSection
-        title="Seed & repeatability"
-        icon={<RefreshCcw size={15} />}
-        className="interface-advanced-only"
-      >
-        <div className="seed-row">
-          <input value={seed} onChange={(event) => onSeedChange(event.target.value)} />
-          <button
-            className="icon-button"
-            onClick={() => onSeedChange(createSeed())}
-            title="Generate seed"
-          >
-            <Shuffle size={15} />
-          </button>
-          <button
-            className="icon-button"
-            onClick={() =>
-              navigator.clipboard
-                .writeText(seed)
-                .then(() => onNotice('Seed copied.'))
-                .catch(() => onNotice('Clipboard API is unavailable.'))
-            }
-            title="Copy seed"
-          >
-            <Clipboard size={15} />
-          </button>
-        </div>
-      </PanelSection>}
-
-      {interfaceMode === 'advanced' && <PanelSection title="Presets" icon={<Save size={15} />} className="interface-advanced-only">
-        <div className="preset-grid">
-          {[...builtInPresets, ...customPresets]
-            .sort(
-              (left, right) =>
-                Number(right.algorithm === algorithm) - Number(left.algorithm === algorithm),
-            )
-            .map((preset) => (
-              <div className="preset-item" key={preset.id}>
-                <button onClick={() => onApplyPreset(preset)}>{preset.name}</button>
-                {preset.custom && (
-                  <button
-                    className="preset-delete"
-                    onClick={() => onDeletePreset(preset.id)}
-                    title="Delete preset"
-                  >
-                    <X size={12} />
-                  </button>
-                )}
-              </div>
-            ))}
-        </div>
-        <div className="button-row">
-          <button onClick={onSavePreset}>
-            <Plus size={14} /> Save current
-          </button>
-          <button onClick={onExportPresets}>
-            <FileDown size={14} /> JSON
-          </button>
-          <button onClick={() => presetInputRef.current?.click()}>
-            <FileUp size={14} /> Import
-          </button>
-          <input
-            ref={presetInputRef}
-            hidden
-            type="file"
-            accept="application/json"
-            onChange={(event: ChangeEvent<HTMLInputElement>) => {
-              const file = event.target.files?.[0];
-              if (file) void onImportPresets(file);
-              event.target.value = '';
-            }}
+      {interfaceMode === 'advanced' && (
+        <PanelSection
+          title="Algorithm parameters"
+          icon={<SlidersHorizontal size={15} />}
+          className="interface-advanced-only"
+        >
+          <AlgorithmControls
+            algorithm={algorithm}
+            settings={settings}
+            update={onUpdateSetting}
+            cloneSource={cloneSource}
+            cloneSourcePickMode={cloneSourcePickMode}
+            feedbackMemoryReady={feedbackMemoryReady}
+            onPickCloneSource={onPickCloneSource}
+            onClearCloneSource={onClearCloneSource}
+            onResetFeedback={onResetFeedback}
+            metaSeed={seed}
+            metaRecipeLocked={metaRecipeLocked}
+            onMetaRecipeLockChange={onMetaRecipeLockChange}
+            onNewMetaRecipe={onNewMetaRecipe}
           />
-        </div>
-      </PanelSection>}
+        </PanelSection>
+      )}
+
+      {interfaceMode === 'advanced' && (
+        <PanelSection
+          title="Seed & repeatability"
+          icon={<RefreshCcw size={15} />}
+          className="interface-advanced-only"
+        >
+          <div className="seed-row">
+            <input value={seed} onChange={(event) => onSeedChange(event.target.value)} />
+            <button
+              className="icon-button"
+              onClick={() => onSeedChange(createSeed())}
+              title="Generate seed"
+            >
+              <Shuffle size={15} />
+            </button>
+            <button
+              className="icon-button"
+              onClick={() =>
+                navigator.clipboard
+                  .writeText(seed)
+                  .then(() => onNotice('Seed copied.'))
+                  .catch(() => onNotice('Clipboard API is unavailable.'))
+              }
+              title="Copy seed"
+            >
+              <Clipboard size={15} />
+            </button>
+          </div>
+        </PanelSection>
+      )}
+
+      {interfaceMode === 'advanced' && (
+        <PanelSection title="Presets" icon={<Save size={15} />} className="interface-advanced-only">
+          <div className="preset-grid">
+            {[...builtInPresets, ...customPresets]
+              .sort(
+                (left, right) =>
+                  Number(right.algorithm === algorithm) - Number(left.algorithm === algorithm),
+              )
+              .map((preset) => (
+                <div className="preset-item" key={preset.id}>
+                  <button onClick={() => onApplyPreset(preset)}>{preset.name}</button>
+                  {preset.custom && (
+                    <button
+                      className="preset-delete"
+                      onClick={() => onDeletePreset(preset.id)}
+                      title="Delete preset"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+              ))}
+          </div>
+          <div className="button-row">
+            <button onClick={onSavePreset}>
+              <Plus size={14} /> Save current
+            </button>
+            <button onClick={onExportPresets}>
+              <FileDown size={14} /> JSON
+            </button>
+            <button onClick={() => presetInputRef.current?.click()}>
+              <FileUp size={14} /> Import
+            </button>
+            <input
+              ref={presetInputRef}
+              hidden
+              type="file"
+              accept="application/json"
+              onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                const file = event.target.files?.[0];
+                if (file) void onImportPresets(file);
+                event.target.value = '';
+              }}
+            />
+          </div>
+        </PanelSection>
+      )}
 
       {false && (
         <PanelSection

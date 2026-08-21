@@ -1023,3 +1023,14 @@ Output: dist/index.html, 21.39 KB CSS, 297.34 KB JS, 0.90 KB Raw Worker
 * Sharpen использует тот же separable-проход.
 * Замеры 512x512 полный кадр, 5 runs avg: blur 6153 -> 3806 (предвычисление ядра/luma) -> 340 ms (separable), sharpen 426 -> 78 ms. Итого blur ~-94%.
 * Валидация: typecheck ✓, 161/161 ✓, build ✓, prettier ✓.
+
+### 2026-08-21 NEW LAB: experimental Effect Brushes + Image Brush FX
+
+* Добавлены experimental Effect Brushes: Mirror Fold, Halftone Collapse, Raster Loom и Contour Crawl. Все используют направление/fallback axis, локальный padded snapshot, bounded `writeBounds`, Worker pipeline и сохраняют alpha.
+* Добавлены Image Brush FX Pixel Embroidery и Xerox Decay с Tip / Per Stamp / Whole Trail стадиями, собственными controls и существующим bounded variant/evolution pipeline.
+* Введён общий metadata-флаг `experimental`; Effect Picker показывает отдельную `NEW / EXPERIMENTAL` группу и NEW в item/trigger/preview, Image Brush сортирует NEW FX первыми и сохраняет badge в rack.
+* Experimental ID исключены из прежних built-in presets, `structuralMixPool`, default Image Brush pool и Randomize; явные rack/project settings сериализуются и старые проекты получают defaults.
+* Сгенерированы 8 WebP (`after`/`difference`) для четырёх Effect Brush previews.
+* Валидация: typecheck ✓; 223/223 тестов ✓; production build ✓; in-app визуальный smoke без console errors.
+* Edge 151 + headed Firefox 154: по 20 short + 20 long strokes каждого Effect Brush и по 20 Image Brush strokes Pixel Embroidery / Xerox Progressive / Xerox Evolving. Во всех сериях full sync 0, fit 0, zoom stable, rAF ≥50 ms 0; Undo/Redo byte-exact по SHA-256.
+* Полные настройки, p50/p95/max, ограничения и отложенные идеи: `NEW_LAB_REPORT_2026-08-21.md`.

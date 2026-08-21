@@ -5,6 +5,10 @@ export type AlgorithmId =
   | 'flow-mosh-brush'
   | 'clone-corruption-brush'
   | 'line-freeze-brush'
+  | 'mirror-fold-brush'
+  | 'halftone-collapse-brush'
+  | 'raster-loom-brush'
+  | 'contour-crawl-brush'
   | 'slice-displacement'
   | 'macroblock-shift'
   | 'datamosh-smear'
@@ -43,6 +47,12 @@ export type EffectIconId =
   | 'flow-mosh-brush'
   | 'clone-corruption-brush'
   | 'line-freeze-brush'
+  | 'mirror-fold-brush'
+  | 'halftone-collapse-brush'
+  | 'raster-loom-brush'
+  | 'contour-crawl-brush'
+  | 'pixel-embroidery'
+  | 'xerox-decay'
   | 'slice'
   | 'macroblock'
   | 'datamosh'
@@ -288,6 +298,45 @@ export interface AlgorithmSettings {
   lineBrushDropout: number;
   lineBrushThickness: number;
   lineBrushSpill: number;
+  mirrorFoldSide: 'left' | 'right' | 'both';
+  mirrorFoldAxis: 'stroke' | 'perpendicular';
+  mirrorFoldOffset: number;
+  mirrorFoldMix: number;
+  mirrorFoldRepetitions: number;
+  mirrorFoldRgbSlip: number;
+  mirrorFoldEdgeMode: 'clamp' | 'mirror' | 'wrap';
+  mirrorFoldFalloff: number;
+  mirrorFoldFallbackAngle: number;
+  halftoneCellSize: number;
+  halftoneCollapse: number;
+  halftoneDotGain: number;
+  halftoneColorMode: 'mono' | 'rgb';
+  halftoneGridAngle: 'stroke' | 'perpendicular' | 'fixed';
+  halftoneDrift: number;
+  halftoneChannelOffset: number;
+  halftoneShape: 'circle' | 'square';
+  halftoneBackgroundMix: number;
+  halftoneFallbackAngle: number;
+  rasterLoomStripWidth: number;
+  rasterLoomSourceOffset: number;
+  rasterLoomWeaveDepth: number;
+  rasterLoomDirection: 'stroke' | 'perpendicular';
+  rasterLoomGap: number;
+  rasterLoomRgbSlip: number;
+  rasterLoomAlternation: number;
+  rasterLoomEdgeSoftness: number;
+  rasterLoomMix: number;
+  rasterLoomFallbackAngle: number;
+  contourCrawlEdgeThreshold: number;
+  contourCrawlLength: number;
+  contourCrawlRepeatCount: number;
+  contourCrawlDecay: number;
+  contourCrawlLineWidth: number;
+  contourCrawlRgbSplit: number;
+  contourCrawlSideDrift: number;
+  contourCrawlEdgePolarity: 'dark' | 'light' | 'both';
+  contourCrawlMix: number;
+  contourCrawlFallbackAngle: number;
 }
 
 export interface GlitchContext {
@@ -316,6 +365,7 @@ export interface GlitchAlgorithm {
   id: AlgorithmId;
   name: string;
   family: AlgorithmFamily;
+  experimental?: boolean;
   apply(context: GlitchContext): GlitchResult;
 }
 

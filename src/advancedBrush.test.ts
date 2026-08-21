@@ -8,7 +8,21 @@ import {
 import { algorithms, defaultAlgorithmSettings } from './glitchAlgorithms';
 import { algorithmIconIds, effectIconIds } from './icons/effects';
 import { builtInPresets } from './presets';
-import type { AlgorithmSettings, BrushSettings, GlitchContext, Point, Rectangle } from './types';
+import type {
+  AlgorithmId,
+  AlgorithmSettings,
+  BrushSettings,
+  GlitchContext,
+  Point,
+  Rectangle,
+} from './types';
+
+const experimentalBrushIds = [
+  'mirror-fold-brush',
+  'halftone-collapse-brush',
+  'raster-loom-brush',
+  'contour-crawl-brush',
+] as const satisfies readonly AlgorithmId[];
 
 const testBrush: BrushSettings = {
   size: 120,
@@ -478,4 +492,104 @@ describe('advanced brush overlay ownership', () => {
     expect(deriveAdvancedBrushOverlays('feedback-brush', source)).toEqual([]);
     expect(deriveAdvancedBrushOverlays('clone-corruption-brush', null)).toEqual([]);
   });
+});
+
+describe('experimental directional brush effects', () => {
+  it('registers four metadata-driven NEW brushes without adding them to default combinations', () => {
+    for (const id of experimentalBrushIds) {
+      expect(algorithms[id]).toMatchObject({ family: 'advanced-brush', experimental: true });
+      expect(effectIconIds).toContain(algorithmIconIds[id]);
+      expect(defaultAlgorithmSettings.structuralMixPool).not.toContain(id);
+      expect(builtInPresets.some((preset) => preset.algorithm === id)).toBe(false);
+    }
+  });
+
+  it.each(experimentalBrushIds)(
+    '%s is deterministic, directional, alpha-safe, write-bounded and fallback-safe',
+    (id) => {
+      const first = advancedContext({}, { x: 24, y: 7 });
+      const second = advancedContext({}, { x: 24, y: 7 });
+      for (let pixel = 0; pixel < first.width * first.height; pixel += 1) {
+        const alpha = 40 + (pixel % 211);
+        first.pixels[pixel * 4 + 3] = alpha;
+        second.pixels[pixel * 4 + 3] = alpha;
+      }
+      first.originalPixels = first.pixels.slice();
+      second.originalPixels = second.pixels.slice();
+      const before = first.pixels.slice();
+      algorithms[id].apply(first);
+      algorithms[id].apply(second);
+      expect(first.pixels).toEqual(second.pixels);
+      expect(changedPixels(before, first.pixels)).toBeGreaterThan(0);
+      for (let pixel = 0; pixel < first.width * first.height; pixel += 1) {
+        expect(first.pixels[pixel * 4 + 3]).toBe(before[pixel * 4 + 3]);
+        const x = pixel % first.width;
+        const y = Math.floor(pixel / first.width);
+        const insideWrite =
+          x >= first.writeBounds!.x &&
+          y >= first.writeBounds!.y &&
+          x < first.writeBounds!.x + first.writeBounds!.width &&
+          y < first.writeBounds!.y + first.writeBounds!.height;
+        if (!insideWrite) {
+          expect(first.pixels.slice(pixel * 4, pixel * 4 + 4)).toEqual(
+            before.slice(pixel * 4, pixel * 4 + 4),
+          );
+        }
+      }
+      const vertical = advancedContext({}, { x: 0, y: 28 });
+      algorithms[id].apply(vertical);
+      expect(hash(vertical.pixels)).not.toBe(hash(first.pixels));
+      const fallback = advancedContext(
+        {
+          mirrorFoldFallbackAngle: 37,
+          halftoneFallbackAngle: 37,
+          rasterLoomFallbackAngle: 37,
+          contourCrawlFallbackAngle: 37,
+        },
+        { x: 0, y: 0 },
+      );
+      const fallbackBefore = fallback.pixels.slice();
+      expect(() => algorithms[id].apply(fallback)).not.toThrow();
+      expect(changedPixels(fallbackBefore, fallback.pixels)).toBeGreaterThan(0);
+    },
+  );
+
+  it.each(experimentalBrushIds)('%s keeps seeded variation stable and meaningful', (id) => {
+    const signatures = ['seed-a', 'seed-b', 'seed-c'].map((seed) => {
+      const context = advancedContext({
+        mirrorFoldRgbSlip: 9,
+        halftoneDrift: 14,
+        rasterLoomStripWidth: 9,
+        contourCrawlSideDrift: 12,
+      });
+      context.seed = seed;
+      algorithms[id].apply(context);
+      return hash(context.pixels);
+    });
+    expect(new Set(signatures).size).toBeGreaterThan(1);
+  });
+
+  it.each(experimentalBrushIds)(
+    '%s remains bounded on tiny edge strokes and extreme settings',
+    (id) => {
+      const context = advancedContext({
+        mirrorFoldRepetitions: 99,
+        mirrorFoldOffset: 999,
+        halftoneCellSize: 999,
+        halftoneDrift: 999,
+        rasterLoomStripWidth: 999,
+        rasterLoomSourceOffset: 999,
+        contourCrawlRepeatCount: 99,
+        contourCrawlLength: 999,
+        contourCrawlLineWidth: 99,
+      });
+      context.bounds = { x: 0, y: 0, width: 3, height: 3 };
+      context.writeBounds = { x: 0, y: 0, width: 5, height: 5 };
+      context.mask.fill(0);
+      for (let y = 0; y < 3; y += 1)
+        for (let x = 0; x < 3; x += 1) context.mask[y * context.width + x] = 1;
+      expect(() => algorithms[id].apply(context)).not.toThrow();
+      expect(context.pixels).toHaveLength(context.width * context.height * 4);
+    },
+  );
 });

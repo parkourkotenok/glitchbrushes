@@ -66,6 +66,7 @@ import {
 } from './imageBrush/simple';
 import {
   defaultImageBrushSettings,
+  createImageBrushFx,
   imageBrushFxDefinitions,
   type ImageBrushFxId,
   type ImageBrushFxItem,
@@ -984,5 +985,173 @@ describe('Image Brush presets, project and history contracts', () => {
     expect(buffer).toEqual(before);
     history.redo(buffer);
     expect(buffer).toEqual(patch.after);
+  });
+});
+
+describe('experimental Image Brush FX', () => {
+  function embroideredSource(): Uint8ClampedArray {
+    const pixels = new Uint8ClampedArray(16 * 16 * 4);
+    for (let y = 2; y < 14; y += 1) {
+      for (let x = 2; x < 14; x += 1) {
+        const offset = (y * 16 + x) * 4;
+        pixels.set([40 + x * 12, 30 + y * 13, 220 - x * 7, 80 + ((x + y) % 8) * 20], offset);
+      }
+    }
+    return pixels;
+  }
+
+  it('lists both FX first with persistent metadata and every supported stage', () => {
+    expect(imageBrushFxDefinitions.slice(0, 2).map((item) => item.id)).toEqual([
+      'pixel-embroidery',
+      'xerox-decay',
+    ]);
+    for (const id of ['pixel-embroidery', 'xerox-decay'] as const) {
+      const definition = imageBrushFxDefinitions.find((item) => item.id === id)!;
+      expect(definition.experimental).toBe(true);
+      expect(supportsImageBrushStages(id, ['tip', 'stamp', 'trail'])).toBe(true);
+      expect(defaultImageBrushSettings.effectPool).not.toContain(id);
+      expect(
+        builtInImageBrushPresets.some((preset) => preset.rack.some((item) => item.effectId === id)),
+      ).toBe(false);
+    }
+  });
+
+  it('Pixel Embroidery deterministically creates a transparent structural stitch grid', () => {
+    const source = embroideredSource();
+    const item = {
+      ...createImageBrushFx('pixel-embroidery'),
+      amount: 0.88,
+      embroideryGridSize: 5,
+      embroideryStitchType: 'cross-stitch' as const,
+      embroideryMissingStitches: 0.12,
+    };
+    const first = processBrushTipFx(
+      source,
+      16,
+      16,
+      [item],
+      { alphaMode: 'preserve', bleedAmount: 0 },
+      'embroidery',
+    );
+    const second = processBrushTipFx(
+      source,
+      16,
+      16,
+      [item],
+      { alphaMode: 'preserve', bleedAmount: 0 },
+      'embroidery',
+    );
+    expect(first.pixels).toHaveLength(source.length);
+    expect(first.pixels).toEqual(second.pixels);
+    expect(pixelDistance(first.pixels, source)).toBeGreaterThan(2000);
+    for (let pixel = 0; pixel < 16 * 16; pixel += 1) {
+      if (source[pixel * 4 + 3] === 0) expect(first.pixels[pixel * 4 + 3]).toBe(0);
+    }
+    expect(
+      Array.from({ length: 16 * 16 }, (_, pixel) => first.pixels[pixel * 4 + 3]!).some(
+        (alpha, pixel) => source[pixel * 4 + 3]! > 0 && alpha < source[pixel * 4 + 3]!,
+      ),
+    ).toBe(true);
+  });
+
+  it('Xerox Decay is deterministic, alpha-safe, and grows through Progressive and Evolving', () => {
+    const item = {
+      ...createImageBrushFx('xerox-decay'),
+      amount: 0.9,
+      xeroxSpeckle: 0.42,
+      xeroxTonerLoss: 0.48,
+    };
+    const source = embroideredSource();
+    const first = processBrushTipFx(
+      source,
+      16,
+      16,
+      [item],
+      { alphaMode: 'preserve', bleedAmount: 0 },
+      'xerox',
+    );
+    const second = processBrushTipFx(
+      source,
+      16,
+      16,
+      [item],
+      { alphaMode: 'preserve', bleedAmount: 0 },
+      'xerox',
+    );
+    expect(first.pixels).toEqual(second.pixels);
+    for (let pixel = 0; pixel < 16 * 16; pixel += 1) {
+      expect(first.pixels[pixel * 4 + 3]).toBe(source[pixel * 4 + 3]);
+    }
+    for (const mode of ['progressive', 'evolving'] as const) {
+      const request = strokeRequest(mode, [item]);
+      request.settings.progressiveStart = 0.05;
+      request.settings.progressiveEnd = 1;
+      request.settings.evolutionSpeed = 0.9;
+      request.settings.effectVariation = 0;
+      const processed = processImageBrushStroke(request);
+      const clean = processImageBrushStroke(strokeRequest('clean', []));
+      expect(pixelDistance(stampCrop(processed, 65), stampCrop(clean, 65))).toBeGreaterThan(
+        pixelDistance(stampCrop(processed, 15), stampCrop(clean, 15)),
+      );
+      expect(processed.pixels).toEqual(processImageBrushStroke(request).pixels);
+    }
+  });
+
+  it('round-trips explicit experimental IDs and settings without adding them to presets', () => {
+    const library = [tinyAsset()];
+    const embroidery = {
+      ...createImageBrushFx('pixel-embroidery'),
+      embroideryGridSize: 11,
+      embroideryStitchType: 'bead' as const,
+    };
+    const xerox = {
+      ...createImageBrushFx('xerox-decay'),
+      xeroxThreshold: 0.67,
+      xeroxColorMode: 'duotone' as const,
+    };
+    const serialized = serializeImageBrushProject({
+      settings: { ...defaultImageBrushSettings, effectPool: ['pixel-embroidery'] },
+      seed: 'experimental-project',
+      activePresetId: 'custom',
+      activeAssetId: library[0]!.id,
+      evolutionOffset: 0,
+      rack: [embroidery, xerox],
+      library,
+    });
+    const restored = restoreImageBrushProject(serialized);
+    expect(restored.settings.effectPool).toEqual(['pixel-embroidery']);
+    expect(restored.rack).toEqual([embroidery, xerox]);
+  });
+
+  it('fills omitted experimental settings with engine defaults for older projects', () => {
+    const source = embroideredSource();
+    for (const effectId of ['pixel-embroidery', 'xerox-decay'] as const) {
+      const legacyItem: ImageBrushFxItem = {
+        id: `legacy-${effectId}`,
+        effectId,
+        enabled: true,
+        amount: 0.5,
+        mix: 1,
+      };
+      const first = processBrushTipFx(
+        source,
+        16,
+        16,
+        [legacyItem],
+        { alphaMode: 'preserve', bleedAmount: 0 },
+        'legacy-project',
+      );
+      const second = processBrushTipFx(
+        source,
+        16,
+        16,
+        [legacyItem],
+        { alphaMode: 'preserve', bleedAmount: 0 },
+        'legacy-project',
+      );
+      expect(first.pixels).toHaveLength(source.length);
+      expect(first.pixels).toEqual(second.pixels);
+      expect(pixelDistance(first.pixels, source)).toBeGreaterThan(0);
+    }
   });
 });

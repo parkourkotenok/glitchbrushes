@@ -58,7 +58,9 @@ export type ImageBrushFxId =
   | 'dct-damage'
   | 'edge-melt'
   | 'flow-field'
-  | 'motion-transfer';
+  | 'motion-transfer'
+  | 'pixel-embroidery'
+  | 'xerox-decay';
 
 export interface ImageBrushFxItem {
   id: string;
@@ -66,6 +68,20 @@ export interface ImageBrushFxItem {
   enabled: boolean;
   amount: number;
   mix: number;
+  embroideryGridSize?: number;
+  embroideryStitchType?: 'cross-stitch' | 'diagonal-stitch' | 'bead' | 'square';
+  embroideryPaletteLevels?: number;
+  embroideryThreadAngle?: number;
+  embroideryMissingStitches?: number;
+  embroideryThreadJitter?: number;
+  embroideryBackgroundTransparency?: number;
+  xeroxThreshold?: number;
+  xeroxTonerLoss?: number;
+  xeroxSpeckle?: number;
+  xeroxEdgeErosion?: number;
+  xeroxBanding?: number;
+  xeroxBlackCrush?: number;
+  xeroxColorMode?: 'mono' | 'duotone';
 }
 
 export interface ImageBrushSettings {
@@ -472,11 +488,36 @@ export const defaultImageBrushSettings: ImageBrushSettings = {
 export { imageBrushFxDefinitions } from '../effects/sharedRegistry';
 
 export function createImageBrushFx(effectId: ImageBrushFxId): ImageBrushFxItem {
-  return {
+  const base: ImageBrushFxItem = {
     id: `${effectId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     effectId,
     enabled: true,
     amount: 0.5,
     mix: 1,
   };
+  if (effectId === 'pixel-embroidery') {
+    return {
+      ...base,
+      embroideryGridSize: 7,
+      embroideryStitchType: 'cross-stitch',
+      embroideryPaletteLevels: 8,
+      embroideryThreadAngle: 0,
+      embroideryMissingStitches: 0.08,
+      embroideryThreadJitter: 0.12,
+      embroideryBackgroundTransparency: 0.9,
+    };
+  }
+  if (effectId === 'xerox-decay') {
+    return {
+      ...base,
+      xeroxThreshold: 0.54,
+      xeroxTonerLoss: 0.28,
+      xeroxSpeckle: 0.22,
+      xeroxEdgeErosion: 0.2,
+      xeroxBanding: 0.14,
+      xeroxBlackCrush: 0.36,
+      xeroxColorMode: 'mono',
+    };
+  }
+  return base;
 }

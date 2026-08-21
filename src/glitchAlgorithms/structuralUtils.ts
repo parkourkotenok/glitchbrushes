@@ -74,6 +74,26 @@ function structuralReach(algorithm: AlgorithmId, settings: AlgorithmSettings): n
       return settings.cloneBrushBlockSize * settings.cloneBrushRepetition;
     case 'line-freeze-brush':
       return settings.lineBrushSpill + settings.lineBrushThickness * settings.lineBrushRepeatCount;
+    case 'mirror-fold-brush':
+      return (
+        settings.mirrorFoldOffset * settings.mirrorFoldRepetitions + settings.mirrorFoldRgbSlip + 2
+      );
+    case 'halftone-collapse-brush':
+      return (
+        settings.halftoneCellSize + settings.halftoneDrift + settings.halftoneChannelOffset + 2
+      );
+    case 'raster-loom-brush':
+      return (
+        settings.rasterLoomSourceOffset + settings.rasterLoomRgbSlip + settings.rasterLoomGap + 2
+      );
+    case 'contour-crawl-brush':
+      return (
+        settings.contourCrawlLength +
+        settings.contourCrawlSideDrift +
+        settings.contourCrawlRgbSplit +
+        settings.contourCrawlLineWidth +
+        2
+      );
     case 'slice-displacement':
       return settings.sliceMaxOffset * settings.structuralIntensity;
     case 'macroblock-shift':

@@ -149,6 +149,8 @@ const effectCurves: Record<ImageBrushFxId, readonly number[]> = {
   'edge-melt': [0.01, 0.08, 0.24, 0.46, 0.68, 0.88],
   'flow-field': [0.01, 0.06, 0.18, 0.34, 0.54, 0.72],
   'motion-transfer': [0.01, 0.08, 0.22, 0.42, 0.64, 0.84],
+  'pixel-embroidery': [0.01, 0.14, 0.3, 0.52, 0.74, 0.94],
+  'xerox-decay': [0.01, 0.12, 0.28, 0.5, 0.74, 0.98],
 };
 
 export function applyImageBrushGlitchAmount(

@@ -61,6 +61,48 @@ function Glyph({ id }: { id: EffectIconId }) {
           <path d="M9 2v14m-2-2 2 2 2-2" />
         </>
       );
+    case 'mirror-fold-brush':
+      return (
+        <>
+          <path d="M9 2v14M7 4 3 7l4 3M11 4l4 3-4 3" />
+          <path d="M3 13h4M11 13h4" />
+        </>
+      );
+    case 'halftone-collapse-brush':
+      return (
+        <>
+          <circle cx="4" cy="4" r="1.5" />
+          <circle cx="9" cy="4" r="1" />
+          <circle cx="14" cy="4" r=".6" />
+          <circle cx="6" cy="9" r="2" />
+          <circle cx="11" cy="9" r="1.3" />
+          <circle cx="9" cy="14" r="2.4" />
+        </>
+      );
+    case 'raster-loom-brush':
+      return (
+        <>
+          <path d="M3 2v14M7 2v14M11 2v14M15 2v14" />
+          <path d="M2 5h4m2 0h4m2 0h2M2 9h2m2 0h4m2 0h4M2 13h4m2 0h4m2 0h2" />
+        </>
+      );
+    case 'contour-crawl-brush':
+      return (
+        <>
+          <path d="M3 14c2-7 4-9 7-9 2 0 3 2 5 2" />
+          <path d="M5 16c2-6 4-8 7-8 2 0 3 2 4 2M2 11c2-6 4-9 7-9" />
+        </>
+      );
+    case 'pixel-embroidery':
+      return <path d="m2 2 5 5m0-5L2 7m9-5 5 5m0-5-5 5M2 11l5 5m0-5-5 5m9-5 5 5m0-5-5 5" />;
+    case 'xerox-decay':
+      return (
+        <>
+          <path d="M4 2h8l2 2v10H4zM6 6h6M6 9h4M6 12h6" />
+          <circle cx="15" cy="7" r=".7" fill="currentColor" />
+          <circle cx="2" cy="12" r=".7" fill="currentColor" />
+        </>
+      );
     case 'slice':
       return (
         <>
@@ -313,6 +355,10 @@ export const algorithmIconIds: Record<AlgorithmId, EffectIconId> = {
   'flow-mosh-brush': 'flow-mosh-brush',
   'clone-corruption-brush': 'clone-corruption-brush',
   'line-freeze-brush': 'line-freeze-brush',
+  'mirror-fold-brush': 'mirror-fold-brush',
+  'halftone-collapse-brush': 'halftone-collapse-brush',
+  'raster-loom-brush': 'raster-loom-brush',
+  'contour-crawl-brush': 'contour-crawl-brush',
   'slice-displacement': 'slice',
   'macroblock-shift': 'macroblock',
   'datamosh-smear': 'datamosh',
@@ -343,6 +389,12 @@ export const effectIconIds: readonly EffectIconId[] = [
   'flow-mosh-brush',
   'clone-corruption-brush',
   'line-freeze-brush',
+  'mirror-fold-brush',
+  'halftone-collapse-brush',
+  'raster-loom-brush',
+  'contour-crawl-brush',
+  'pixel-embroidery',
+  'xerox-decay',
   'slice',
   'macroblock',
   'datamosh',

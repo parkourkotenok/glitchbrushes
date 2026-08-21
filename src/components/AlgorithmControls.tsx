@@ -18,6 +18,7 @@ export function AlgorithmControls({
   metaRecipeLocked,
   onMetaRecipeLockChange,
   onNewMetaRecipe,
+  simpleExperimental = false,
 }: {
   algorithm: AlgorithmId;
   settings: AlgorithmSettings;
@@ -32,7 +33,415 @@ export function AlgorithmControls({
   metaRecipeLocked: boolean;
   onMetaRecipeLockChange(value: boolean): void;
   onNewMetaRecipe(): void;
+  simpleExperimental?: boolean;
 }) {
+  if (algorithm === 'mirror-fold-brush') {
+    if (simpleExperimental) {
+      return (
+        <>
+          <label className="inline-select">
+            <span>Fold Side</span>
+            <select
+              value={settings.mirrorFoldSide}
+              onChange={(event) =>
+                update('mirrorFoldSide', event.target.value as AlgorithmSettings['mirrorFoldSide'])
+              }
+            >
+              <option value="left">Left</option>
+              <option value="right">Right</option>
+              <option value="both">Both</option>
+            </select>
+          </label>
+          <label className="inline-select">
+            <span>Axis</span>
+            <select
+              value={settings.mirrorFoldAxis}
+              onChange={(event) =>
+                update('mirrorFoldAxis', event.target.value as AlgorithmSettings['mirrorFoldAxis'])
+              }
+            >
+              <option value="stroke">Along stroke</option>
+              <option value="perpendicular">Perpendicular</option>
+            </select>
+          </label>
+          <SliderField
+            label="Fold Offset"
+            value={settings.mirrorFoldOffset}
+            min={0}
+            max={96}
+            suffix=" px"
+            onChange={(value) => update('mirrorFoldOffset', value)}
+          />
+          <SliderField
+            label="Mix"
+            value={settings.mirrorFoldMix}
+            min={0}
+            max={1}
+            step={0.01}
+            onChange={(value) => update('mirrorFoldMix', value)}
+          />
+        </>
+      );
+    }
+    return (
+      <>
+        <SliderField
+          label="Repetitions"
+          value={settings.mirrorFoldRepetitions}
+          min={1}
+          max={3}
+          onChange={(value) => update('mirrorFoldRepetitions', value)}
+        />
+        <SliderField
+          label="RGB Slip"
+          value={settings.mirrorFoldRgbSlip}
+          min={0}
+          max={20}
+          suffix=" px"
+          onChange={(value) => update('mirrorFoldRgbSlip', value)}
+        />
+        <label className="inline-select">
+          <span>Edge Mode</span>
+          <select
+            value={settings.mirrorFoldEdgeMode}
+            onChange={(event) =>
+              update(
+                'mirrorFoldEdgeMode',
+                event.target.value as AlgorithmSettings['mirrorFoldEdgeMode'],
+              )
+            }
+          >
+            <option value="clamp">Clamp</option>
+            <option value="mirror">Mirror</option>
+            <option value="wrap">Wrap</option>
+          </select>
+        </label>
+        <SliderField
+          label="Falloff"
+          value={settings.mirrorFoldFalloff}
+          min={0}
+          max={1}
+          step={0.01}
+          onChange={(value) => update('mirrorFoldFalloff', value)}
+        />
+        <SliderField
+          label="Fallback Angle"
+          value={settings.mirrorFoldFallbackAngle}
+          min={-180}
+          max={180}
+          suffix="°"
+          onChange={(value) => update('mirrorFoldFallbackAngle', value)}
+        />
+      </>
+    );
+  }
+  if (algorithm === 'halftone-collapse-brush') {
+    if (simpleExperimental) {
+      return (
+        <>
+          <SliderField
+            label="Cell Size"
+            value={settings.halftoneCellSize}
+            min={3}
+            max={48}
+            suffix=" px"
+            onChange={(value) => update('halftoneCellSize', value)}
+          />
+          <SliderField
+            label="Collapse"
+            value={settings.halftoneCollapse}
+            min={0}
+            max={1}
+            step={0.01}
+            onChange={(value) => update('halftoneCollapse', value)}
+          />
+          <SliderField
+            label="Dot Gain"
+            value={settings.halftoneDotGain}
+            min={0}
+            max={1}
+            step={0.01}
+            onChange={(value) => update('halftoneDotGain', value)}
+          />
+          <label className="inline-select">
+            <span>Color Mode</span>
+            <select
+              value={settings.halftoneColorMode}
+              onChange={(event) =>
+                update(
+                  'halftoneColorMode',
+                  event.target.value as AlgorithmSettings['halftoneColorMode'],
+                )
+              }
+            >
+              <option value="mono">Mono</option>
+              <option value="rgb">RGB</option>
+            </select>
+          </label>
+        </>
+      );
+    }
+    return (
+      <>
+        <label className="inline-select">
+          <span>Grid Angle</span>
+          <select
+            value={settings.halftoneGridAngle}
+            onChange={(event) =>
+              update(
+                'halftoneGridAngle',
+                event.target.value as AlgorithmSettings['halftoneGridAngle'],
+              )
+            }
+          >
+            <option value="stroke">Stroke</option>
+            <option value="perpendicular">Perpendicular</option>
+            <option value="fixed">Fixed</option>
+          </select>
+        </label>
+        <SliderField
+          label="Drift"
+          value={settings.halftoneDrift}
+          min={0}
+          max={40}
+          suffix=" px"
+          onChange={(value) => update('halftoneDrift', value)}
+        />
+        <SliderField
+          label="Channel Offset"
+          value={settings.halftoneChannelOffset}
+          min={0}
+          max={12}
+          suffix=" px"
+          onChange={(value) => update('halftoneChannelOffset', value)}
+        />
+        <label className="inline-select">
+          <span>Shape</span>
+          <select
+            value={settings.halftoneShape}
+            onChange={(event) =>
+              update('halftoneShape', event.target.value as AlgorithmSettings['halftoneShape'])
+            }
+          >
+            <option value="circle">Circle</option>
+            <option value="square">Square</option>
+          </select>
+        </label>
+        <SliderField
+          label="Background Mix"
+          value={settings.halftoneBackgroundMix}
+          min={0}
+          max={1}
+          step={0.01}
+          onChange={(value) => update('halftoneBackgroundMix', value)}
+        />
+        <SliderField
+          label="Fallback Angle"
+          value={settings.halftoneFallbackAngle}
+          min={-180}
+          max={180}
+          suffix="°"
+          onChange={(value) => update('halftoneFallbackAngle', value)}
+        />
+      </>
+    );
+  }
+  if (algorithm === 'raster-loom-brush') {
+    if (simpleExperimental) {
+      return (
+        <>
+          <SliderField
+            label="Strip Width"
+            value={settings.rasterLoomStripWidth}
+            min={2}
+            max={64}
+            suffix=" px"
+            onChange={(value) => update('rasterLoomStripWidth', value)}
+          />
+          <SliderField
+            label="Source Offset"
+            value={settings.rasterLoomSourceOffset}
+            min={1}
+            max={120}
+            suffix=" px"
+            onChange={(value) => update('rasterLoomSourceOffset', value)}
+          />
+          <SliderField
+            label="Weave Depth"
+            value={settings.rasterLoomWeaveDepth}
+            min={0}
+            max={1}
+            step={0.01}
+            onChange={(value) => update('rasterLoomWeaveDepth', value)}
+          />
+          <label className="inline-select">
+            <span>Direction</span>
+            <select
+              value={settings.rasterLoomDirection}
+              onChange={(event) =>
+                update(
+                  'rasterLoomDirection',
+                  event.target.value as AlgorithmSettings['rasterLoomDirection'],
+                )
+              }
+            >
+              <option value="stroke">Along stroke</option>
+              <option value="perpendicular">Perpendicular</option>
+            </select>
+          </label>
+        </>
+      );
+    }
+    return (
+      <>
+        <SliderField
+          label="Gap"
+          value={settings.rasterLoomGap}
+          min={0}
+          max={12}
+          suffix=" px"
+          onChange={(value) => update('rasterLoomGap', value)}
+        />
+        <SliderField
+          label="RGB Slip"
+          value={settings.rasterLoomRgbSlip}
+          min={0}
+          max={16}
+          suffix=" px"
+          onChange={(value) => update('rasterLoomRgbSlip', value)}
+        />
+        <SliderField
+          label="Alternation"
+          value={settings.rasterLoomAlternation}
+          min={1}
+          max={6}
+          onChange={(value) => update('rasterLoomAlternation', value)}
+        />
+        <SliderField
+          label="Edge Softness"
+          value={settings.rasterLoomEdgeSoftness}
+          min={0}
+          max={1}
+          step={0.01}
+          onChange={(value) => update('rasterLoomEdgeSoftness', value)}
+        />
+        <SliderField
+          label="Mix"
+          value={settings.rasterLoomMix}
+          min={0}
+          max={1}
+          step={0.01}
+          onChange={(value) => update('rasterLoomMix', value)}
+        />
+        <SliderField
+          label="Fallback Angle"
+          value={settings.rasterLoomFallbackAngle}
+          min={-180}
+          max={180}
+          suffix="°"
+          onChange={(value) => update('rasterLoomFallbackAngle', value)}
+        />
+      </>
+    );
+  }
+  if (algorithm === 'contour-crawl-brush') {
+    if (simpleExperimental) {
+      return (
+        <>
+          <SliderField
+            label="Edge Threshold"
+            value={settings.contourCrawlEdgeThreshold}
+            min={0}
+            max={255}
+            onChange={(value) => update('contourCrawlEdgeThreshold', value)}
+          />
+          <SliderField
+            label="Crawl Length"
+            value={settings.contourCrawlLength}
+            min={1}
+            max={160}
+            suffix=" px"
+            onChange={(value) => update('contourCrawlLength', value)}
+          />
+          <SliderField
+            label="Repeat Count"
+            value={settings.contourCrawlRepeatCount}
+            min={1}
+            max={8}
+            onChange={(value) => update('contourCrawlRepeatCount', value)}
+          />
+          <SliderField
+            label="Decay"
+            value={settings.contourCrawlDecay}
+            min={0}
+            max={1}
+            step={0.01}
+            onChange={(value) => update('contourCrawlDecay', value)}
+          />
+        </>
+      );
+    }
+    return (
+      <>
+        <SliderField
+          label="Line Width"
+          value={settings.contourCrawlLineWidth}
+          min={1}
+          max={8}
+          suffix=" px"
+          onChange={(value) => update('contourCrawlLineWidth', value)}
+        />
+        <SliderField
+          label="RGB Split"
+          value={settings.contourCrawlRgbSplit}
+          min={0}
+          max={12}
+          suffix=" px"
+          onChange={(value) => update('contourCrawlRgbSplit', value)}
+        />
+        <SliderField
+          label="Side Drift"
+          value={settings.contourCrawlSideDrift}
+          min={0}
+          max={20}
+          suffix=" px"
+          onChange={(value) => update('contourCrawlSideDrift', value)}
+        />
+        <label className="inline-select">
+          <span>Edge Polarity</span>
+          <select
+            value={settings.contourCrawlEdgePolarity}
+            onChange={(event) =>
+              update(
+                'contourCrawlEdgePolarity',
+                event.target.value as AlgorithmSettings['contourCrawlEdgePolarity'],
+              )
+            }
+          >
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+            <option value="both">Both</option>
+          </select>
+        </label>
+        <SliderField
+          label="Mix"
+          value={settings.contourCrawlMix}
+          min={0}
+          max={1}
+          step={0.01}
+          onChange={(value) => update('contourCrawlMix', value)}
+        />
+        <SliderField
+          label="Fallback Angle"
+          value={settings.contourCrawlFallbackAngle}
+          min={-180}
+          max={180}
+          suffix="°"
+          onChange={(value) => update('contourCrawlFallbackAngle', value)}
+        />
+      </>
+    );
+  }
   if (algorithm === 'pixel-sort-brush') {
     return (
       <>

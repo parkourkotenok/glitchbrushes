@@ -782,7 +782,7 @@ export function ImageBrushPanel({
             className="icon-button"
             aria-label="Source image actions"
             aria-expanded={assetMenuOpen}
-            aria-haspopup="menu"
+            aria-haspopup="dialog"
             onClick={() => setAssetMenuOpen((value) => !value)}
           >
             <MoreHorizontal size={16} aria-hidden="true" />
@@ -831,18 +831,16 @@ export function ImageBrushPanel({
           <div
             ref={assetMenuRef}
             className="image-brush-popover image-brush-menu"
-            role="menu"
+            role="dialog"
             aria-label="Source image actions"
           >
             <button
-              role="menuitem"
               disabled={!active}
               onClick={() => active && duplicateAsset(active)}
             >
               <Copy size={13} aria-hidden="true" /> Duplicate image
             </button>
             <button
-              role="menuitem"
               disabled={!active || Boolean(active?.demo)}
               className="danger"
               onClick={() => {
@@ -867,7 +865,7 @@ export function ImageBrushPanel({
                 <option value="original">Restore original</option>
               </select>
             </label>
-            <button role="menuitem" disabled={!active} onClick={applyOptimization}>
+            <button disabled={!active} onClick={applyOptimization}>
               Apply working size
             </button>
             {diagnosticsEnabled && active && (
@@ -942,7 +940,7 @@ export function ImageBrushPanel({
             <button
               ref={randomizeTriggerRef}
               aria-label="More randomize options"
-              aria-haspopup="menu"
+              aria-haspopup="dialog"
               aria-expanded={randomizeMenuOpen}
               onClick={() => setRandomizeMenuOpen((value) => !value)}
             >
@@ -964,22 +962,22 @@ export function ImageBrushPanel({
           <div
             ref={randomizeMenuRef}
             className="image-brush-popover image-brush-menu image-brush-randomize-menu"
-            role="menu"
+            role="dialog"
             aria-label="Randomize brush"
           >
-            <button role="menuitem" onClick={() => onRandomize('everything')}>
+            <button onClick={() => onRandomize('everything')}>
               Randomize whole brush
             </button>
-            <button role="menuitem" onClick={() => onRandomize('layout')}>
+            <button onClick={() => onRandomize('layout')}>
               Randomize placement only
             </button>
-            <button role="menuitem" onClick={() => onRandomize('mutation')}>
+            <button onClick={() => onRandomize('mutation')}>
               Randomize evolution only
             </button>
-            <button role="menuitem" onClick={() => onRandomize('fx')}>
+            <button onClick={() => onRandomize('fx')}>
               Randomize FX only
             </button>
-            <button role="menuitem" onClick={() => onRandomize('wild')}>
+            <button onClick={() => onRandomize('wild')}>
               <Zap size={12} aria-hidden="true" /> Wild variation
             </button>
             <div className="menu-separator" />

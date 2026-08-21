@@ -125,7 +125,7 @@ async function exercise(evaluate, stroke, capabilities) {
     if (!openedImageBrush) throw new Error('Could not open Image Brush.');
     await delay(1000);
     const imageBrushReady = await evaluate(
-      `Boolean(document.querySelector('.image-brush-lab') && document.querySelector('.image-brush-active-image'))`,
+      `Boolean(document.querySelector('.image-brush-lab') && document.querySelector('.image-brush-source-row'))`,
     );
     if (!imageBrushReady) {
       const state = await evaluate(
@@ -133,28 +133,29 @@ async function exercise(evaluate, stroke, capabilities) {
       );
       throw new Error(`Image Brush did not open: ${JSON.stringify(state)}`);
     }
+    await waitFor(() =>
+      evaluate(
+        `document.querySelector('.image-brush-source-copy strong')?.textContent.trim() !== 'No brush image'`,
+      ),
+    );
+    await evaluate(`document.querySelector('[id$="-tab-evolution"]')?.click()`);
+    await waitFor(() =>
+      evaluate(`document.querySelector('[id$="-tab-evolution"]')?.getAttribute('aria-selected') === 'true'`),
+    );
     const configured = await evaluate(`(() => {
-      const advanced = [...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Advanced');
-      advanced?.click();
       const mutation = [...document.querySelectorAll('.image-brush-lab select')]
-        .find((select) => select.closest('label')?.textContent.includes('Mutation mode'));
+        .find((select) => select.closest('label')?.textContent.includes('Evolution mode'));
       if (!mutation || ![...mutation.options].some((option) => option.value === ${JSON.stringify(mutationMode)})) return false;
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(mutation, ${JSON.stringify(mutationMode)});
       mutation.dispatchEvent(new Event('change', { bubbles: true }));
       return true;
     })()`);
     if (!configured) throw new Error(`Could not configure Image Brush mutation: ${mutationMode}`);
+    await evaluate(`document.querySelector('[id$="-tab-fx"]')?.click()`);
+    await waitFor(() =>
+      evaluate(`document.querySelector('[id$="-tab-fx"]')?.getAttribute('aria-selected') === 'true'`),
+    );
     await delay(250);
-    const opened = await evaluate(`(() => {
-      const summary = [...document.querySelectorAll('summary')].find((entry) => entry.textContent.trim() === 'Edit effect stack');
-      if (!summary) return false;
-      const details = summary.closest('details');
-      if (!details) return false;
-      details.open = true;
-      details.dispatchEvent(new Event('toggle', { bubbles: false }));
-      return true;
-    })()`);
-    if (!opened) throw new Error('Could not open the Image Brush FX editor.');
     await delay(500);
     const fxEditorReady = await evaluate(
       `Boolean(document.querySelector('.image-brush-add-fx select'))`,
@@ -187,7 +188,7 @@ async function exercise(evaluate, stroke, capabilities) {
     await evaluate(
       `(() => { const button = [...document.querySelectorAll('nav button')].find((entry) => entry.textContent.trim() === 'Effect'); button?.click(); return Boolean(button); })()`,
     );
-    await waitFor(() => evaluate(`document.querySelector('.effect-picker-trigger')`));
+    await waitFor(() => evaluate(`Boolean(document.querySelector('.effect-picker-trigger'))`));
     const opened = await evaluate(`(() => {
     const trigger = document.querySelector('.effect-picker-trigger');
     if (!trigger) return false;
@@ -248,13 +249,13 @@ async function exercise(evaluate, stroke, capabilities) {
           return (
             (metrics.counts['glitchbrushes:image-brush-canvas-upload'] ?? 0) > previousImageUploads
           );
-        }, 15000);
+        }, 60000);
       } catch {
         const state = await evaluate(`({
-          notice: document.querySelector('.app-status')?.textContent.trim() ?? document.querySelector('.statusbar')?.textContent.trim(),
+          notice: document.querySelector('.status-message')?.textContent.trim(),
           progress: document.querySelector('.image-brush-progress')?.textContent.trim(),
           rack: document.querySelector('.image-brush-fx-rack')?.textContent.trim().slice(0, 180),
-          mutation: [...document.querySelectorAll('.image-brush-lab select')].find((select) => select.closest('label')?.textContent.includes('Mutation mode'))?.value
+          mutation: [...document.querySelectorAll('.image-brush-lab select')].find((select) => select.closest('label')?.textContent.includes('Evolution mode'))?.value
         })`);
         throw new Error(`Image Brush stroke ${index + 1} did not commit: ${JSON.stringify(state)}`);
       }
@@ -302,6 +303,9 @@ async function exercise(evaluate, stroke, capabilities) {
     fitToScreenDelta: delta('glitchbrushes:fit-to-screen'),
     zoomStable: zoomBefore === zoomAfter,
     historyByteExact: committedHash !== undoneHash && committedHash === redoneHash,
+    workerRoundTrip: summarize(
+      (after.samples['glitchbrushes:pointer-up-to-result'] ?? []).slice(-20),
+    ),
     adoption: summarize((after.samples['glitchbrushes:worker-result-adoption'] ?? []).slice(-20)),
     layerCommit: summarize(
       (

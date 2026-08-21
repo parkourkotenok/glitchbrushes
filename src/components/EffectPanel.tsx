@@ -95,16 +95,15 @@ export function EffectPanel(props: EffectPanelProps) {
               ref={menuTriggerRef}
               className="icon-button compact-menu-trigger"
               aria-label="Effect actions"
-              aria-haspopup="menu"
+              aria-haspopup="dialog"
               aria-expanded={menuOpen}
               onClick={() => setMenuOpen((current) => !current)}
             >
               <MoreHorizontal size={17} aria-hidden="true" />
             </button>
             {menuOpen && (
-              <div className="compact-menu-popover" role="menu" aria-label="Effect actions">
+              <div className="compact-menu-popover" role="dialog" aria-label="Effect actions">
                 <button
-                  role="menuitem"
                   onClick={() => {
                     props.onRandomizeEffect('balanced');
                     setMenuOpen(false);
@@ -114,7 +113,6 @@ export function EffectPanel(props: EffectPanelProps) {
                   <Shuffle size={14} aria-hidden="true" /> Randomize effect
                 </button>
                 <button
-                  role="menuitem"
                   onClick={() => {
                     props.onRandomizeEffect('wild');
                     setMenuOpen(false);
@@ -124,7 +122,6 @@ export function EffectPanel(props: EffectPanelProps) {
                   <Sparkles size={14} aria-hidden="true" /> Randomize wildly
                 </button>
                 <button
-                  role="menuitem"
                   onClick={() => {
                     props.onResetEffect();
                     setMenuOpen(false);

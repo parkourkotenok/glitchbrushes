@@ -1,0 +1,155 @@
+{
+  "screenshots": [
+    "effect-1366x768.png",
+    "image-brush-1366x768.png",
+    "effect-1440x900.png",
+    "image-brush-1440x900.png",
+    "effect-1920x1080.png",
+    "image-brush-1920x1080.png",
+    "effect-fine-tuning-1440x900.png",
+    "effect-picker-new-effects-1440x900.png",
+    "image-brush-evolution-1440x900.png",
+    "image-brush-fx-1440x900.png",
+    "image-brush-advanced-1440x900.png",
+    "image-brush-source-picker-1440x900.png",
+    "image-brush-randomize-menu-1440x900.png",
+    "image-brush-style-menu-1440x900.png"
+  ],
+  "layouts": [
+    {
+      "state": "effect-1366x768",
+      "viewport": [
+        1366,
+        768
+      ],
+      "documentOverflowX": false,
+      "inspectorOverflowX": false,
+      "popoverOverflow": false,
+      "inspectorHeight": 415,
+      "inspectorScrollHeight": 575,
+      "layersTop": 556.6875
+    },
+    {
+      "state": "image-brush-1366x768",
+      "viewport": [
+        1366,
+        768
+      ],
+      "documentOverflowX": false,
+      "inspectorOverflowX": false,
+      "popoverOverflow": false,
+      "inspectorHeight": 415,
+      "inspectorScrollHeight": 1224,
+      "layersTop": 556.6875
+    },
+    {
+      "state": "effect-1440x900",
+      "viewport": [
+        1440,
+        900
+      ],
+      "documentOverflowX": false,
+      "inspectorOverflowX": false,
+      "popoverOverflow": false,
+      "inspectorHeight": 515,
+      "inspectorScrollHeight": 571,
+      "layersTop": 657
+    },
+    {
+      "state": "image-brush-1440x900",
+      "viewport": [
+        1440,
+        900
+      ],
+      "documentOverflowX": false,
+      "inspectorOverflowX": false,
+      "popoverOverflow": false,
+      "inspectorHeight": 515,
+      "inspectorScrollHeight": 1299,
+      "layersTop": 657
+    },
+    {
+      "state": "effect-1920x1080",
+      "viewport": [
+        1920,
+        1080
+      ],
+      "documentOverflowX": false,
+      "inspectorOverflowX": false,
+      "popoverOverflow": false,
+      "inspectorHeight": 661,
+      "inspectorScrollHeight": 661,
+      "layersTop": 803
+    },
+    {
+      "state": "image-brush-1920x1080",
+      "viewport": [
+        1920,
+        1080
+      ],
+      "documentOverflowX": false,
+      "inspectorOverflowX": false,
+      "popoverOverflow": false,
+      "inspectorHeight": 661,
+      "inspectorScrollHeight": 1299,
+      "layersTop": 803
+    },
+    {
+      "state": "source-picker",
+      "viewport": [
+        1440,
+        900
+      ],
+      "documentOverflowX": false,
+      "inspectorOverflowX": false,
+      "popoverOverflow": false,
+      "inspectorHeight": 515,
+      "inspectorScrollHeight": 1024,
+      "layersTop": 657
+    },
+    {
+      "state": "randomize-menu",
+      "viewport": [
+        1440,
+        900
+      ],
+      "documentOverflowX": false,
+      "inspectorOverflowX": false,
+      "popoverOverflow": false,
+      "inspectorHeight": 515,
+      "inspectorScrollHeight": 1024,
+      "layersTop": 657
+    },
+    {
+      "state": "style-menu",
+      "viewport": [
+        1440,
+        900
+      ],
+      "documentOverflowX": false,
+      "inspectorOverflowX": false,
+      "popoverOverflow": false,
+      "inspectorHeight": 515,
+      "inspectorScrollHeight": 1024,
+      "layersTop": 657
+    }
+  ],
+  "keyboard": {
+    "effectPickerFocusReturned": true,
+    "tabsArrowRight": true,
+    "sourceFocusReturned": true,
+    "randomizeFocusReturned": true,
+    "styleFocusReturned": true
+  },
+  "workflow": {
+    "styleActionsGrouped": true,
+    "styleRoundTrip": true,
+    "assetDuplicateRemove": true,
+    "lockedRandomizeDeterministic": true,
+    "balancedRandomizePreservesEssentials": true,
+    "projectV3RoundTrip": true,
+    "legacyProjectImport": true,
+    "tabReloadPersistence": true
+  },
+  "ok": true
+}

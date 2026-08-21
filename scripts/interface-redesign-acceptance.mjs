@@ -125,6 +125,17 @@ try {
     const shot = await rpc.send('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false });
     writeFileSync(join(outputDir, `${name}.png`), Buffer.from(shot.data, 'base64'));
   };
+  const waitForImageBrushPreviewReady = async () =>
+    waitFor(() =>
+      evaluate(`(() => {
+        const status = document.querySelector('.image-brush-live-preview > header span')?.textContent.trim();
+        const canvas = document.querySelector('canvas[aria-label="Live Image Brush stroke preview"]');
+        if (status !== 'Ready' || !canvas) return false;
+        const pixels = canvas.getContext('2d')?.getImageData(0, 0, canvas.width, canvas.height).data;
+        return Boolean(pixels?.some((value, index) => index % 4 === 3 && value > 0));
+      })()`),
+      30000,
+    );
   const layout = async () =>
     evaluate(`(() => {
       const inspector = document.querySelector('.inspector-scroll');
@@ -161,6 +172,16 @@ try {
 
   await setViewport(1440, 900);
   await load();
+  for (const [panel, name] of [['retouch', 'brushes-retouch-1440x900'], ['mosh', 'brushes-mosh-1440x900']]) {
+    await evaluate(`(document.querySelector('#brushes-tab-${panel}')?.click(), true)`);
+    await waitFor(() => evaluate(`document.querySelector('#brushes-tab-${panel}')?.getAttribute('aria-selected') === 'true'`));
+    await delay(200);
+    await capture(name);
+    report.screenshots.push(`${name}.png`);
+    report.layouts.push({ state: name, ...(await layout()) });
+  }
+  await evaluate(`(document.querySelector('#brushes-tab-effect')?.click(), true)`);
+  await waitFor(() => evaluate(`document.querySelector('#brushes-tab-effect')?.getAttribute('aria-selected') === 'true'`));
   await evaluate(`(document.querySelector('.effect-fine-tuning').open = true, document.querySelector('.effect-fine-tuning').scrollIntoView({block:'center'}), true)`);
   await delay(200);
   await capture('effect-fine-tuning-1440x900');
@@ -176,6 +197,9 @@ try {
 
   await evaluate(`([...document.querySelectorAll('nav button')].find((button) => button.textContent.trim() === 'Image Brush')?.click(), true)`);
   await waitFor(() => evaluate(`document.querySelector('.image-brush-source-copy strong')?.textContent.trim() === 'Astronaut demo'`));
+  await evaluate(`([...document.querySelectorAll('.interface-mode-options button')]
+    .find((button) => button.textContent.trim() === 'Advanced')?.click(), true)`);
+  await waitFor(() => evaluate(`document.querySelector('.app')?.dataset.interfaceMode === 'advanced'`));
   await evaluate(`(document.querySelector('[id$="-tab-placement"]').focus(), true)`);
   await key('ArrowRight');
   report.keyboard.tabsArrowRight = await evaluate(`document.querySelector('[id$="-tab-evolution"]')?.getAttribute('aria-selected') === 'true'`);
@@ -249,14 +273,14 @@ try {
     return ['Save current as new style','Rename current style','Delete current style','Import style','Export style'].every((label) => text.includes(label));
   })()`);
   await evaluate(`([...document.querySelectorAll('.image-brush-style-menu button')].find((button) => button.textContent.includes('Save current'))?.click(), true)`);
-  await waitFor(() => evaluate(`[...document.querySelectorAll('select[aria-label="Image Brush style"] option')].some((option) => option.textContent === 'UI Saved Style')`));
+  await waitFor(() => evaluate(`document.querySelector('.image-brush-style-section > header span')?.textContent.trim() === 'UI Saved Style'`));
   await evaluate(`([...document.querySelectorAll('.image-brush-style-menu button')].find((button) => button.textContent.includes('Rename current'))?.click(), true)`);
-  await waitFor(() => evaluate(`[...document.querySelectorAll('select[aria-label="Image Brush style"] option')].some((option) => option.textContent === 'UI Renamed Style')`));
+  await waitFor(() => evaluate(`document.querySelector('.image-brush-style-section > header span')?.textContent.trim() === 'UI Renamed Style'`));
   await evaluate(`(window.__lastDownload = null, [...document.querySelectorAll('.image-brush-style-menu button')].find((button) => button.textContent.includes('Export style'))?.click(), true)`);
   await waitFor(() => evaluate(`Boolean(window.__lastDownload)`));
   await evaluate(`(async () => { window.__styleJson = await fetch(window.__lastDownload).then((response) => response.text()); return true; })()`);
   await evaluate(`([...document.querySelectorAll('.image-brush-style-menu button')].find((button) => button.textContent.includes('Delete current'))?.click(), true)`);
-  await waitFor(() => evaluate(`![...document.querySelectorAll('select[aria-label="Image Brush style"] option')].some((option) => option.textContent === 'UI Renamed Style')`));
+  await waitFor(() => evaluate(`!JSON.parse(localStorage.getItem('hex-redactor:image-brush-presets:v1') ?? '[]').some((item) => item.name === 'UI Renamed Style')`));
   await evaluate(`(async () => {
     const input = document.querySelector('input[aria-label="Import Image Brush style"]');
     const transfer = new DataTransfer();
@@ -265,7 +289,7 @@ try {
     input.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
   })()`);
-  await waitFor(() => evaluate(`[...document.querySelectorAll('select[aria-label="Image Brush style"] option')].some((option) => option.textContent === 'UI Renamed Style')`));
+  await waitFor(() => evaluate(`document.querySelector('.image-brush-style-section > header span')?.textContent.trim() === 'UI Renamed Style'`));
   report.workflow.styleRoundTrip = await evaluate(`(() => {
     const exported = JSON.parse(window.__styleJson);
     const stored = JSON.parse(localStorage.getItem('hex-redactor:image-brush-presets:v1') ?? '[]').find((item) => item.name === 'UI Renamed Style');
@@ -273,13 +297,60 @@ try {
   })()`);
   if (await evaluate(`Boolean(document.querySelector('.image-brush-style-menu'))`)) await key('Escape');
 
-  await evaluate(`document.querySelector('button[aria-label="Source image actions"]').click()`);
+  await evaluate(`(() => { if (!document.querySelector('[aria-label="Source image actions"][role="dialog"]')) document.querySelector('button[aria-label="Source image actions"]')?.click(); return true; })()`);
   await waitFor(() => evaluate(`Boolean(document.querySelector('[aria-label="Source image actions"][role="dialog"]'))`));
   await evaluate(`([...document.querySelectorAll('[aria-label="Source image actions"] button')].find((button) => button.textContent.includes('Duplicate image'))?.click(), true)`);
   await waitFor(() => evaluate(`document.querySelector('.image-brush-source-section > header span')?.textContent.trim() === '2 images'`));
   await evaluate(`([...document.querySelectorAll('[aria-label="Source image actions"] button')].find((button) => button.textContent.includes('Remove image'))?.click(), true)`);
   await waitFor(() => evaluate(`document.querySelector('.image-brush-source-section > header span')?.textContent.trim() === '1 image'`));
   report.workflow.assetDuplicateRemove = true;
+
+  await evaluate(`document.querySelector('button[aria-label="Source image actions"]').click()`);
+  await waitFor(() => evaluate(`Boolean(document.querySelector('[aria-label="Source image actions"][role="dialog"]'))`));
+  await evaluate(`([...document.querySelectorAll('[aria-label="Source image actions"] button')].find((button) => button.textContent.includes('Duplicate image'))?.click(), true)`);
+  await waitFor(() => evaluate(`document.querySelector('.image-brush-source-section > header span')?.textContent.trim() === '2 images'`));
+  await key('Escape');
+  await waitFor(() => evaluate(`!document.querySelector('[aria-label="Source image actions"][role="dialog"]')`));
+  await evaluate(`([...document.querySelectorAll('.image-brush-source-mode button')].find((button) => button.textContent.trim() === 'All')?.click(), true)`);
+  await waitFor(() => evaluate(`document.querySelector('[aria-label="Image source mode"] [role="radio"][aria-checked="true"]')?.textContent.trim() === 'All'`));
+  await evaluate(`(() => { const select = document.querySelector('select[aria-label="Image source order"]'); if (!select) return false; select.value = 'cycle'; select.dispatchEvent(new Event('change', {bubbles:true})); return true; })()`);
+  await waitForImageBrushPreviewReady();
+  await capture('image-brush-all-cycle-1440x900');
+  report.screenshots.push('image-brush-all-cycle-1440x900.png');
+  report.layouts.push({ state: 'all-cycle', ...(await layout()) });
+  report.sourceModes = {
+    allCycle: await evaluate(`document.querySelector('[aria-label="Image source mode"] [role="radio"][aria-checked="true"]')?.textContent.trim() === 'All' && document.querySelector('select[aria-label="Image source order"]')?.value === 'cycle'`),
+  };
+  await evaluate(`(() => { const select = document.querySelector('select[aria-label="Image source order"]'); if (!select) return false; select.value = 'random'; select.dispatchEvent(new Event('change', {bubbles:true})); return true; })()`);
+  await waitForImageBrushPreviewReady();
+  await capture('image-brush-all-random-1440x900');
+  report.screenshots.push('image-brush-all-random-1440x900.png');
+  report.layouts.push({ state: 'all-random', ...(await layout()) });
+  report.sourceModes.allRandom = await evaluate(`document.querySelector('select[aria-label="Image source order"]')?.value === 'random'`);
+
+  await evaluate(`(document.querySelector('button[aria-label="Choose Image Brush style"]').click(), true)`);
+  await waitFor(() => evaluate(`Boolean(document.querySelector('[aria-label="Image Brush style browser"]'))`));
+  await delay(120);
+  await capture('image-brush-style-browser-1440x900');
+  report.screenshots.push('image-brush-style-browser-1440x900.png');
+  report.layouts.push({ state: 'style-browser', ...(await layout()) });
+  report.styleCards = {};
+  for (const [styleName, name] of [
+    ['Pixel Embroidery', 'image-brush-pixel-embroidery-1440x900'],
+    ['Xerox Decay', 'image-brush-xerox-decay-1440x900'],
+    ['Zine Stitch', 'image-brush-zine-stitch-1440x900'],
+    ['MOSH Flow Trail', 'image-brush-mosh-flow-trail-fixed-1440x900'],
+  ]) {
+    await evaluate(`(() => { const card = [...document.querySelectorAll('.image-brush-style-browser-cards button')].find((button) => button.querySelector('strong')?.textContent.trim() === ${JSON.stringify(styleName)}); card?.click(); return Boolean(card); })()`);
+    await waitFor(() => evaluate(`document.querySelector('.image-brush-style-section > header span')?.textContent.trim() === ${JSON.stringify(styleName)}`));
+    await waitForImageBrushPreviewReady();
+    await capture(name);
+    report.screenshots.push(`${name}.png`);
+    report.styleCards[styleName] = true;
+    await evaluate(`(document.querySelector('button[aria-label="Choose Image Brush style"]').click(), true)`);
+    await waitFor(() => evaluate(`Boolean(document.querySelector('[aria-label="Image Brush style browser"]'))`));
+  }
+  await key('Escape');
 
   await evaluate(`document.querySelector('button[aria-label="More randomize options"]').click()`);
   await waitFor(() => evaluate(`Boolean(document.querySelector('[aria-label="Randomize brush"][role="dialog"]'))`));
@@ -338,7 +409,9 @@ try {
   report.ok =
     report.layouts.every((entry) => !entry.documentOverflowX && !entry.inspectorOverflowX && !entry.popoverOverflow) &&
     Object.values(report.keyboard).every(Boolean) &&
-    Object.values(report.workflow).every(Boolean);
+    Object.values(report.workflow).every(Boolean) &&
+    Object.values(report.sourceModes).every(Boolean) &&
+    Object.values(report.styleCards).every(Boolean);
   writeFileSync(join(outputDir, 'acceptance.json'), `${JSON.stringify(report, null, 2)}\n`);
   console.log(JSON.stringify(report, null, 2));
   if (!report.ok) process.exitCode = 1;

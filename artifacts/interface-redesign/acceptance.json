@@ -6,6 +6,8 @@
     "image-brush-1440x900.png",
     "effect-1920x1080.png",
     "image-brush-1920x1080.png",
+    "brushes-retouch-1440x900.png",
+    "brushes-mosh-1440x900.png",
     "effect-fine-tuning-1440x900.png",
     "effect-picker-new-effects-1440x900.png",
     "image-brush-evolution-1440x900.png",
@@ -13,7 +15,14 @@
     "image-brush-advanced-1440x900.png",
     "image-brush-source-picker-1440x900.png",
     "image-brush-randomize-menu-1440x900.png",
-    "image-brush-style-menu-1440x900.png"
+    "image-brush-style-menu-1440x900.png",
+    "image-brush-all-cycle-1440x900.png",
+    "image-brush-all-random-1440x900.png",
+    "image-brush-style-browser-1440x900.png",
+    "image-brush-pixel-embroidery-1440x900.png",
+    "image-brush-xerox-decay-1440x900.png",
+    "image-brush-zine-stitch-1440x900.png",
+    "image-brush-mosh-flow-trail-fixed-1440x900.png"
   ],
   "layouts": [
     {
@@ -25,7 +34,7 @@
       "documentOverflowX": false,
       "inspectorOverflowX": false,
       "popoverOverflow": false,
-      "inspectorHeight": 415,
+      "inspectorHeight": 375,
       "inspectorScrollHeight": 575,
       "layersTop": 556.6875
     },
@@ -39,7 +48,7 @@
       "inspectorOverflowX": false,
       "popoverOverflow": false,
       "inspectorHeight": 415,
-      "inspectorScrollHeight": 1224,
+      "inspectorScrollHeight": 671,
       "layersTop": 556.6875
     },
     {
@@ -51,7 +60,7 @@
       "documentOverflowX": false,
       "inspectorOverflowX": false,
       "popoverOverflow": false,
-      "inspectorHeight": 515,
+      "inspectorHeight": 475,
       "inspectorScrollHeight": 571,
       "layersTop": 657
     },
@@ -65,7 +74,7 @@
       "inspectorOverflowX": false,
       "popoverOverflow": false,
       "inspectorHeight": 515,
-      "inspectorScrollHeight": 1299,
+      "inspectorScrollHeight": 710,
       "layersTop": 657
     },
     {
@@ -77,8 +86,8 @@
       "documentOverflowX": false,
       "inspectorOverflowX": false,
       "popoverOverflow": false,
-      "inspectorHeight": 661,
-      "inspectorScrollHeight": 661,
+      "inspectorHeight": 621,
+      "inspectorScrollHeight": 621,
       "layersTop": 803
     },
     {
@@ -91,8 +100,34 @@
       "inspectorOverflowX": false,
       "popoverOverflow": false,
       "inspectorHeight": 661,
-      "inspectorScrollHeight": 1299,
+      "inspectorScrollHeight": 710,
       "layersTop": 803
+    },
+    {
+      "state": "brushes-retouch-1440x900",
+      "viewport": [
+        1440,
+        900
+      ],
+      "documentOverflowX": false,
+      "inspectorOverflowX": false,
+      "popoverOverflow": false,
+      "inspectorHeight": 475,
+      "inspectorScrollHeight": 475,
+      "layersTop": 657
+    },
+    {
+      "state": "brushes-mosh-1440x900",
+      "viewport": [
+        1440,
+        900
+      ],
+      "documentOverflowX": false,
+      "inspectorOverflowX": false,
+      "popoverOverflow": false,
+      "inspectorHeight": 475,
+      "inspectorScrollHeight": 475,
+      "layersTop": 657
     },
     {
       "state": "source-picker",
@@ -104,7 +139,7 @@
       "inspectorOverflowX": false,
       "popoverOverflow": false,
       "inspectorHeight": 515,
-      "inspectorScrollHeight": 1024,
+      "inspectorScrollHeight": 710,
       "layersTop": 657
     },
     {
@@ -117,7 +152,7 @@
       "inspectorOverflowX": false,
       "popoverOverflow": false,
       "inspectorHeight": 515,
-      "inspectorScrollHeight": 1024,
+      "inspectorScrollHeight": 710,
       "layersTop": 657
     },
     {
@@ -130,7 +165,46 @@
       "inspectorOverflowX": false,
       "popoverOverflow": false,
       "inspectorHeight": 515,
-      "inspectorScrollHeight": 1024,
+      "inspectorScrollHeight": 710,
+      "layersTop": 657
+    },
+    {
+      "state": "all-cycle",
+      "viewport": [
+        1440,
+        900
+      ],
+      "documentOverflowX": false,
+      "inspectorOverflowX": false,
+      "popoverOverflow": false,
+      "inspectorHeight": 515,
+      "inspectorScrollHeight": 710,
+      "layersTop": 657
+    },
+    {
+      "state": "all-random",
+      "viewport": [
+        1440,
+        900
+      ],
+      "documentOverflowX": false,
+      "inspectorOverflowX": false,
+      "popoverOverflow": false,
+      "inspectorHeight": 515,
+      "inspectorScrollHeight": 710,
+      "layersTop": 657
+    },
+    {
+      "state": "style-browser",
+      "viewport": [
+        1440,
+        900
+      ],
+      "documentOverflowX": false,
+      "inspectorOverflowX": false,
+      "popoverOverflow": false,
+      "inspectorHeight": 515,
+      "inspectorScrollHeight": 732,
       "layersTop": 657
     }
   ],
@@ -150,6 +224,16 @@
     "projectV3RoundTrip": true,
     "legacyProjectImport": true,
     "tabReloadPersistence": true
+  },
+  "sourceModes": {
+    "allCycle": true,
+    "allRandom": true
+  },
+  "styleCards": {
+    "Pixel Embroidery": true,
+    "Xerox Decay": true,
+    "Zine Stitch": true,
+    "MOSH Flow Trail": true
   },
   "ok": true
 }

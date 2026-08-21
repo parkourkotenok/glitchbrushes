@@ -36,7 +36,19 @@ already performed that clear.
 
 ## Visual acceptance
 
-`artifacts/mosh-flow-alpha/mosh-flow-trail-fixed.png` was captured from the local app after
-selecting **MOSH Flow Trail** and committing a repeated transparent astronaut-demo stroke. The
-worker completed as one history action and the screenshot shows the processed trail without a
-remaining live-overlay ghost.
+The literal before/after pair is rendered by `scripts/mosh-flow-alpha-fixture.ts` using the same
+transparent astronaut (64×64 Lanczos decode), 512×184 canvas, nine sinusoidal stamps, seed
+`mosh-flow-alpha-v1`, stroke ID `mosh-flow-alpha-stroke`, `whole-trail` Flow Field, and Alpha
+Bleed (radius 4). It is engine output, not a Style-card preview.
+
+- `artifacts/mosh-flow-alpha/mosh-flow-alpha-before.png` comes from isolated detached worktree
+  `275ad4a08c36999ef145cb7922cde87ed3e8d853` (the parent of `afdf5e1`, before the alpha fix):
+  pixel hash `3f2fbc17`, 17,934 non-transparent pixels.
+- `artifacts/mosh-flow-alpha/mosh-flow-alpha-after.png` comes from the integrated fixed HEAD:
+  pixel hash `dc84821d`, 12,985 non-transparent pixels.
+
+The shared bounds are `{ x: 18, y: 20, width: 482, height: 157 }`. The baseline's higher alpha
+coverage is the restored stationary clean mask; the fixed output keeps only post-Flow alpha.
+
+`artifacts/mosh-flow-alpha/mosh-flow-trail-fixed.png` remains the separate actual post-fix
+browser committed-canvas screenshot; it is intentionally not overwritten by the engine fixture.

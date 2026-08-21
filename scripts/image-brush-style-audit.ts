@@ -386,6 +386,9 @@ const sources: AuditSource[] = [
 mkdirSync(outputDirectory, { recursive: true });
 const rendered = new Map<string, RenderedCell>();
 const manifest: Array<Record<string, unknown>> = [];
+// Timing is useful to the person running the audit, but is not part of the
+// reproducible visual artifact. Keep it out of the persisted manifest.
+const timings: number[] = [];
 for (const preset of builtInImageBrushPresets) {
   const entry: Record<string, unknown> = { id: preset.id, name: preset.name, sources: [] };
   for (const [sourceIndex, source] of sources.entries()) {
@@ -399,12 +402,12 @@ for (const preset of builtInImageBrushPresets) {
       throw new Error(`${preset.id} is not byte-deterministic for ${source.label}.`);
     }
     rendered.set(`${preset.id}:${sourceIndex}`, first);
+    timings.push(first.renderMs);
     (entry.sources as Array<Record<string, unknown>>).push({
       id: source.id,
       label: source.label,
       pixelHash: first.hash,
       bounds: first.bounds,
-      firstRenderMs: Number(first.renderMs.toFixed(2)),
     });
   }
   manifest.push(entry);
@@ -434,9 +437,6 @@ writeFileSync(
   ),
 );
 
-const timings = manifest.flatMap((entry) =>
-  (entry.sources as Array<{ firstRenderMs: number }>).map((source) => source.firstRenderMs),
-);
 console.log(
   JSON.stringify(
     {
@@ -446,8 +446,8 @@ console.log(
       manifest: resolve(outputDirectory, 'manifest.json'),
       deterministic: true,
       renderMs: {
-        min: Math.min(...timings),
-        max: Math.max(...timings),
+        min: Number(Math.min(...timings).toFixed(2)),
+        max: Number(Math.max(...timings).toFixed(2)),
         total: Number(timings.reduce((sum, value) => sum + value, 0).toFixed(2)),
       },
     },

@@ -519,6 +519,261 @@
   }
 }
 
+/* Keep primary editing controls above the Layers dock at desktop heights. */
+.inspector > .layers-dock {
+  height: clamp(176px, 24vh, 250px);
+  min-height: 176px;
+  max-height: 250px;
+}
+
+.effect-brush-section,
+.effect-controls-section {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.effect-brush-section > .inspector-section-heading,
+.effect-controls-section > .inspector-section-heading,
+.effect-brush-section > .slider-field:first-of-type,
+.effect-controls-section > .effect-range-control,
+.effect-controls-section > .effect-axis-control,
+.effect-controls-section > .inline-select,
+.effect-controls-section > .advanced-state-row,
+.effect-controls-section > .clone-source-control,
+.effect-controls-section > .meta-effect-controls,
+.effect-controls-section > .meta-effect-pool {
+  grid-column: 1 / -1;
+}
+
+.effect-range-control,
+.effect-axis-control {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.effect-range-control > legend,
+.effect-axis-control > legend {
+  grid-column: 1 / -1;
+}
+
+.image-brush-essential {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.image-brush-essential > header,
+.image-brush-essential > .image-brush-orientation-control,
+.image-brush-essential > .interface-advanced-only {
+  grid-column: 1 / -1;
+}
+
+@media (min-height: 860px) {
+  .image-brush-live-preview-stage {
+    height: 108px;
+    min-height: 108px;
+  }
+}
+
+@media (max-width: 1400px) {
+  .workspace {
+    grid-template-columns: 51px minmax(0, 1fr) 370px;
+  }
+}
+
+/* Retouch and MOSH inherit the same quiet inspector rhythm without changing their tools. */
+.retouch-panel,
+.mosh-lab {
+  min-width: 0;
+  padding-bottom: 14px;
+  background: var(--panel);
+}
+
+.retouch-panel button,
+.retouch-panel select,
+.retouch-panel input:not([type='range']),
+.mosh-lab button,
+.mosh-lab select,
+.mosh-lab input:not([type='range']) {
+  min-height: var(--inspector-control-height);
+}
+
+.retouch-panel button:hover:not(:disabled),
+.mosh-lab button:hover:not(:disabled) {
+  transform: none;
+}
+
+.retouch-panel :focus-visible,
+.mosh-lab :focus-visible,
+.effect-inspector :focus-visible {
+  outline: 2px solid var(--inspector-focus);
+  outline-offset: 2px;
+}
+
+.retouch-panel-header,
+.mosh-lab-head {
+  display: grid;
+  min-height: 76px;
+  align-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--inspector-border);
+  background: transparent;
+}
+
+.retouch-panel-header > strong,
+.mosh-lab-head strong {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 750;
+  letter-spacing: 0;
+}
+
+.retouch-panel-header .eyebrow,
+.mosh-lab-head .eyebrow {
+  color: var(--inspector-muted);
+  font-size: 9px;
+  letter-spacing: 0.07em;
+}
+
+.retouch-panel-header > p,
+.mosh-lab-head p {
+  max-width: 46ch;
+  margin: 0;
+  color: var(--inspector-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.retouch-tool-switcher {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--inspector-border);
+  background: transparent;
+}
+
+.retouch-tool-switcher > button {
+  min-width: 0;
+  box-shadow: none;
+}
+
+.retouch-tool-switcher > button.active {
+  border-color: var(--inspector-active);
+  color: var(--accent-strong);
+}
+
+.retouch-panel .panel-section {
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid var(--inspector-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.retouch-panel .panel-section > header {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+}
+
+.retouch-panel .panel-section > header > span {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  text-transform: none;
+}
+
+.retouch-panel .panel-section-content {
+  display: grid;
+  gap: 10px;
+  padding: 0 14px 13px;
+}
+
+.retouch-panel .slider-field,
+.mosh-lab .slider-field {
+  margin: 0;
+}
+
+.retouch-layer-note,
+.mosh-simple-hint,
+.mosh-stale-preview {
+  margin: 10px 14px;
+  border: 1px solid var(--inspector-border);
+  border-radius: 7px;
+  background: var(--panel-soft);
+}
+
+.mosh-lab-head {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.mosh-rack-toolbar,
+.mosh-seed-row {
+  margin: 0;
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--inspector-border);
+  background: transparent;
+}
+
+.mosh-rack {
+  display: grid;
+  gap: 9px;
+  padding: 12px 14px;
+}
+
+.mosh-card {
+  margin: 0;
+  border-color: var(--inspector-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-soft) 86%, transparent);
+  box-shadow: none;
+}
+
+.mosh-card-drag-header {
+  min-height: 42px;
+  border-bottom-color: var(--inspector-border);
+  background: transparent;
+}
+
+.new-effect-badge {
+  border-color: color-mix(in srgb, var(--inspector-new) 55%, transparent);
+  color: var(--inspector-new);
+}
+
+.danger,
+button.danger {
+  color: var(--inspector-danger);
+}
+
+@media (max-height: 820px) {
+  .retouch-panel-header,
+  .mosh-lab-head {
+    min-height: 64px;
+    padding: 9px 11px;
+  }
+
+  .retouch-tool-switcher,
+  .mosh-rack-toolbar,
+  .mosh-seed-row,
+  .mosh-rack {
+    padding-inline: 11px;
+  }
+
+  .retouch-panel .panel-section > header {
+    padding-inline: 11px;
+  }
+
+  .retouch-panel .panel-section-content {
+    gap: 8px;
+    padding: 0 11px 10px;
+  }
+}
+
 .inspector-section {
   display: grid;
   gap: 10px;
@@ -743,4 +998,59 @@
   .effect-inspector .slider-field {
     margin-bottom: 1px;
   }
+}
+
+/* Final compact desktop overrides: kept last so legacy dimensions cannot win. */
+.effect-inspector .inspector-section {
+  gap: 7px;
+  padding: 8px 11px 10px;
+}
+
+.effect-choice-section .effect-picker-trigger {
+  height: 34px;
+  min-height: 34px;
+}
+
+.effect-inspector .inspector-section-heading {
+  min-height: 28px;
+}
+
+.effect-inspector .compact-menu-trigger {
+  height: 28px;
+  min-height: 28px;
+}
+
+.effect-inspector .effect-range-control,
+.effect-inspector .effect-axis-control,
+.effect-inspector .effect-segmented-control {
+  gap: 5px;
+  padding: 6px;
+}
+
+.effect-inspector .effect-segmented-control button {
+  min-height: 28px;
+}
+
+.image-brush-compact .image-brush-head {
+  min-height: 48px;
+  padding: 0 14px;
+}
+
+.image-brush-compact .image-brush-head > strong {
+  margin: 0;
+}
+
+.image-brush-compact .image-brush-source-thumbnail {
+  height: 48px;
+  min-height: 48px;
+}
+
+.image-brush-compact .image-brush-source-thumbnail canvas {
+  width: 58px;
+  height: 48px;
+  min-height: 0;
+}
+
+.image-brush-compact .image-brush-live-preview-stage {
+  margin: 0;
 }

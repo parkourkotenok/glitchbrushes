@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "generate:effect-previews": "node node_modules/esbuild/bin/esbuild scripts/generate-effect-previews.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/generate-effect-previews.mjs && node node_modules/.tmp/generate-effect-previews.mjs",
+    "audit:controls": "vitest run src/controlSensitivity.test.ts",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",

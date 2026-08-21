@@ -505,7 +505,6 @@ function nearestVisibleColor(
 
 function enforceAlpha(
   processed: Uint8ClampedArray,
-  sourcePixels: Uint8ClampedArray,
   sourceAlpha: Uint8ClampedArray,
   width: number,
   height: number,
@@ -529,11 +528,18 @@ function enforceAlpha(
     }
     return output;
   }
+  // Bleed deliberately starts from the transformed trail. Whole-trail FX can move
+  // geometry, so rebuilding this mask from sourceAlpha would reintroduce clean,
+  // stationary silhouettes after the effect has displaced them.
+  const postFxAlpha = new Uint8ClampedArray(width * height);
+  for (let pixel = 0; pixel < postFxAlpha.length; pixel += 1) {
+    postFxAlpha[pixel] = processed[pixel * 4 + 3]!;
+  }
   const radius = Math.max(1, Math.min(32, Math.round(bleedAmount)));
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const pixel = y * width + x;
-      let maximum = sourceAlpha[pixel]!;
+      let maximum = postFxAlpha[pixel]!;
       for (let dy = -radius; dy <= radius; dy += 1) {
         for (let dx = -radius; dx <= radius; dx += 1) {
           if (dx * dx + dy * dy > radius * radius) continue;
@@ -541,14 +547,14 @@ function enforceAlpha(
           const sy = y + dy;
           if (sx < 0 || sy < 0 || sx >= width || sy >= height) continue;
           const distance = Math.hypot(dx, dy);
-          const faded = sourceAlpha[sy * width + sx]! * (1 - distance / (radius + 1));
+          const faded = postFxAlpha[sy * width + sx]! * (1 - distance / (radius + 1));
           maximum = Math.max(maximum, faded);
         }
       }
       const offset = pixel * 4;
       output[offset + 3] = Math.round(maximum);
       if (maximum > 0 && output[offset] + output[offset + 1] + output[offset + 2] === 0) {
-        const color = nearestVisibleColor(sourcePixels, sourceAlpha, width, height, x, y, radius);
+        const color = nearestVisibleColor(processed, postFxAlpha, width, height, x, y, radius);
         output[offset] = color[0];
         output[offset + 1] = color[1];
         output[offset + 2] = color[2];
@@ -600,7 +606,6 @@ export function processPreparedTipFx(
   }
   output = enforceAlpha(
     output,
-    prepared.pixels,
     prepared.sourceAlpha,
     prepared.width,
     prepared.height,

@@ -2000,10 +2000,11 @@ function GlitchBrushesEditor({
     imageBrushWorkerRef.current = null;
     setImageBrushProcessing(false);
     setImageBrushProgress(null);
+    clearImageBrushOverlay();
     if (!quiet && jobId) {
       setNotice('Image Brush Worker cancelled. Committed pixels and History were not changed.');
     }
-  }, []);
+  }, [clearImageBrushOverlay]);
 
   const clearImageBrushAssetCaches = useCallback(() => {
     imageBrushPreviewGenerationRef.current += 1;
@@ -2163,6 +2164,7 @@ function GlitchBrushesEditor({
           docRef.current !== sourceDocument
         ) {
           imageBrushWorkerCountersRef.current.obsolete += 1;
+          if (!imageBrushJobGateRef.current.currentJobId) clearImageBrushOverlay();
           return;
         }
         imageBrushJobGateRef.current.cancel(result.jobId);

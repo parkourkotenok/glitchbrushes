@@ -102,6 +102,27 @@ function tinyAsset() {
   return createImageBrushAsset('Tiny', 'tiny.png', 'image/png', pixels, 8, 8, false);
 }
 
+function separatedShapeAsset() {
+  const width = 18;
+  const height = 18;
+  const pixels = new Uint8ClampedArray(width * height * 4);
+  const fill = (left: number, top: number, right: number, bottom: number, color: number[]) => {
+    for (let y = top; y < bottom; y += 1) {
+      for (let x = left; x < right; x += 1) {
+        pixels.set(color, (y * width + x) * 4);
+      }
+    }
+  };
+  fill(2, 2, 6, 6, [238, 54, 66, 255]);
+  fill(11, 3, 16, 7, [52, 196, 244, 255]);
+  fill(6, 11, 11, 16, [248, 190, 48, 255]);
+  return createImageBrushAsset('Separated shapes', 'separated.png', 'image/png', pixels, width, height, false);
+}
+
+function alphaChannel(pixels: Uint8ClampedArray): Uint8Array {
+  return Uint8Array.from({ length: pixels.length / 4 }, (_, pixel) => pixels[pixel * 4 + 3]!);
+}
+
 function strokeRequest(
   mutationMode: typeof defaultImageBrushSettings.mutationMode,
   rack: ImageBrushFxItem[],
@@ -769,6 +790,80 @@ describe('Image Brush processing', () => {
     expect(first).not.toEqual(second);
     expect(first).toEqual(processImageBrushStroke(request).pixels);
   });
+
+  it('MOSH Flow Trail Bleed follows post-FX alpha without restoring stationary clean silhouettes', () => {
+    const asset = separatedShapeAsset();
+    const flowRack: ImageBrushFxItem[] = [
+      { id: 'flow-trail', effectId: 'flow-field', enabled: true, amount: 1, mix: 1 },
+    ];
+    const request = strokeRequest('whole-trail', flowRack);
+    request.assets = [{ id: asset.id, width: asset.width, height: asset.height, pixels: asset.pixels }];
+    request.activeAssetId = asset.id;
+    request.width = 120;
+    request.height = 64;
+    request.sourceBounds = { x: 0, y: 0, width: request.width, height: request.height };
+    request.pixels = new Uint8ClampedArray(request.width * request.height * 4);
+    request.stamps = request.stamps.map((stamp, index) => ({
+      ...stamp,
+      position: { x: 25 + index * 35, y: 32 },
+      previousPosition: { x: 25 + Math.max(0, index - 1) * 35, y: 32 },
+    }));
+    request.settings = {
+      ...request.settings,
+      size: 28,
+      mutationAmount: 1,
+      structuralDrift: 1,
+      effectVariation: 0,
+      alphaMode: 'bleed',
+      bleedAmount: 4,
+      fxStage: 'after',
+    };
+
+    const flowed = processImageBrushStroke(request);
+    const repeated = processImageBrushStroke({ ...request, pixels: request.pixels.slice() });
+    const clean = processImageBrushStroke({
+      ...request,
+      settings: { ...request.settings, mutationMode: 'clean' },
+      rack: [],
+    });
+
+    expect(flowed.pixels).toEqual(repeated.pixels);
+    expect(flowed.bounds).toEqual(clean.bounds);
+    expect(alphaChannel(flowed.pixels)).not.toEqual(alphaChannel(clean.pixels));
+    expect(alphaChannel(flowed.pixels).filter((alpha) => alpha > 0).length).toBeGreaterThan(0);
+    expect(flowed.pixels.some((value, index) => index % 4 === 3 && value > 0)).toBe(true);
+    expect(flowed.pixels.some((value, index) => index % 4 === 3 && value === 0)).toBe(true);
+
+    const before = new Uint8ClampedArray(flowed.pixels.length);
+    const patch = createPatch(0, before, flowed.pixels)!;
+    const history = new PatchHistory();
+    const canvas = flowed.pixels.slice();
+    history.push({ id: 'flow', label: 'Image Brush · MOSH Flow Trail', patches: [patch], timestamp: 1 });
+    history.undo(canvas);
+    expect(canvas).toEqual(before);
+    history.redo(canvas);
+    expect(canvas).toEqual(flowed.pixels);
+  });
+
+  it.each(['flow-field', 'motion-field', 'motion-transfer', 'feedback', 'edge-melt'] as const)(
+    'keeps %s whole-trail Alpha Bleed deterministic',
+    (effectId) => {
+      const request = strokeRequest('whole-trail', [
+        { id: `${effectId}-trail`, effectId, enabled: true, amount: 0.9, mix: 1 },
+      ]);
+      request.settings = {
+        ...request.settings,
+        alphaMode: 'bleed',
+        bleedAmount: 4,
+        fxStage: 'after',
+        mutationAmount: 1,
+      };
+      const first = processImageBrushStroke(request);
+      const second = processImageBrushStroke({ ...request, pixels: request.pixels.slice() });
+      expect(first.pixels).toEqual(second.pixels);
+      expect(first.pixels.some((value, index) => index % 4 === 3 && value > 0)).toBe(true);
+    },
+  );
 });
 
 describe('Image Brush presets, project and history contracts', () => {

@@ -51,9 +51,9 @@ Min/max pairs are shown as one Range control while preserving both serialized ke
 | Clone Corruption Brush  | Source interaction; Mode; Fragment size; Repeats; Mix              | Alignment; Fragmentation; Decay; scale/rotation/RGB variation by mode | `advancedBrush.ts` Clone block                       | 12 → 5 (+5 fine)           |
 | Line Freeze Brush       | Orientation; Source edge; Repeats; Stretch; Thickness              | RGB split; Jitter; Dropout                                            | `advancedBrush.ts` Line Freeze block                 | 9 → 5 (+3 fine)            |
 | Mirror Fold Brush       | Fold side; Axis; Offset; Mix                                       | Repetitions; RGB slip; Edge handling; Falloff; fallback angle         | `advancedBrushExperimental.ts`                       | 9 → 4 (+5 fine)            |
-| Halftone Collapse Brush | Cell size; Collapse; Ink gain; Colour; Grid direction              | Drift; channel shift; dot shape; background mix; fallback angle       | `advancedBrushExperimental.ts`                       | 10 → 5 (+5 fine)           |
 | Raster Loom Brush       | Strip width; Source offset; Weave depth; Direction; Mix            | Gap; RGB slip; Alternation; Edge fade; fallback angle                 | `advancedBrushExperimental.ts`                       | 10 → 5 (+5 fine)           |
 | Contour Crawl Brush     | Edge sensitivity; Trail length; Repeats; Decay; Mix                | Line width; RGB split; Side drift; polarity; fallback angle           | `advancedBrushExperimental.ts`                       | 10 → 5 (+5 fine)           |
+| JPEG Resample Brush     | Target size; Quality; Preset; Passes; Mix                           | Noise; Sharpen; Upscale filter; Chroma shift                           | `glitchAlgorithms/jpegResampleBrush.ts`              | 9 → 5 (+4 fine)            |
 | Slice Displacement      | Orientation; Count; Thickness range; Distance range; Edge handling | Edge reach                                                            | `glitchAlgorithms/structural.ts`                     | 8 → 5 (+1 fine)            |
 | Block Corruption        | Failure style; Block size; Coverage; Offset; Mix                   | Direction and mode-specific repeat/dropout/neighbour/stretch          | `structural.ts`                                      | 11 → 5 (+conditional fine) |
 | Datamosh Smear          | Direction; Trail length; Block shape; Decay; Chroma drift          | Persistence; Mix; Jitter; Luma hold                                   | `structural.ts`                                      | 10 → 5 (+4 fine)           |
@@ -85,11 +85,17 @@ consumers and activation conditions.
 | Evolution   | stack count/strength ranges, order, coherence                              | Random stack                  | Conditional              |
 | Evolution   | recipe A/B, interval, transition, random alternation                       | Alternating                   | Conditional              |
 | Evolution   | start/end recipe and curve                                                 | Stroke gradient               | Conditional              |
+| Evolution   | fade start/end opacity and fade curve                                      | Fade along stroke             | Conditional; locks Essential Opacity |
 | FX          | stage, enabled summary, rack Amount/Mix, effect-specific fields            | FX present / compatible stage | Essential or Conditional |
 | Advanced    | alpha mode; Bleed amount                                                   | Bleed only                    | Advanced / Conditional   |
 | Advanced    | trim/threshold and working-size actions                                    | asset present                 | Advanced                 |
 | Diagnostics | quality, budgets, cache/worker/timing fields                               | `?perf=1`                     | Developer-only           |
 
-The two experimental FX were measured on the alpha-art fixture: changing mutation amount changes
-both Pixel Embroidery and Xerox Decay output hashes and changed-pixel counts. Their serialized custom
-fields remain available in expanded FX cards.
+The experimental FX are covered by deterministic alpha-art fixtures. Changing mutation amount changes
+Pixel Embroidery and Xerox Decay output hashes and changed-pixel counts; JPEG Resample additionally
+verifies byte-exact alpha restoration and zero RGB in fully transparent pixels. Serialized custom fields
+remain available in expanded FX cards.
+
+## Current integrated status — 2026-08-22
+
+JPEG Resample now has a shared 28 px minimum and common High/Medium/Low/Melt presets across Effect, Mosh, and Image Brush. Progressive Decay uses stable-seed variants and gentler curves; Fade along stroke owns placement alpha while active and explicitly disables the duplicate Essential Opacity control. Current validation passes typecheck, 282/282 tests, and production build.

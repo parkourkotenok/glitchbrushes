@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Clipboard, MoreHorizontal, RefreshCcw, Shuffle, Sparkles } from 'lucide-react';
+import { Clipboard, LayoutGrid, MoreHorizontal, RefreshCcw, Shuffle, Sparkles } from 'lucide-react';
 import { AlgorithmControls } from './AlgorithmControls';
 import { EffectPicker } from './EffectPicker';
 import { SliderField } from './SliderField';
@@ -42,6 +42,7 @@ interface EffectPanelProps {
 
 export function EffectPanel(props: EffectPanelProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [browserOpen, setBrowserOpen] = useState(false);
   const menuRootRef = useRef<HTMLDivElement>(null);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const active = props.algorithms[props.algorithm];
@@ -81,6 +82,7 @@ export function EffectPanel(props: EffectPanelProps) {
       metaRecipeLocked={props.metaRecipeLocked}
       onMetaRecipeLockChange={props.onMetaRecipeLockChange}
       onNewMetaRecipe={props.onNewMetaRecipe}
+      jpegReferenceLongEdge={Math.max(16, Math.round(props.brush.size * 2))}
       group="primary"
     />
   );
@@ -90,7 +92,19 @@ export function EffectPanel(props: EffectPanelProps) {
       <section className="inspector-section effect-choice-section">
         <div className="inspector-section-heading">
           <h2>Choose a recipe</h2>
-          <div className="compact-menu" ref={menuRootRef}>
+          <div className="effect-choice-heading-actions">
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Browse effects"
+              title="Browse effects"
+              aria-haspopup="listbox"
+              aria-expanded={browserOpen}
+              onClick={() => setBrowserOpen((current) => !current)}
+            >
+              <LayoutGrid size={17} aria-hidden="true" />
+            </button>
+            <div className="compact-menu" ref={menuRootRef}>
             <button
               ref={menuTriggerRef}
               className="icon-button compact-menu-trigger"
@@ -159,6 +173,7 @@ export function EffectPanel(props: EffectPanelProps) {
                 </div>
               </div>
             )}
+            </div>
           </div>
         </div>
         <EffectPicker
@@ -167,6 +182,8 @@ export function EffectPanel(props: EffectPanelProps) {
           legacyItems={props.legacyAlgorithmList}
           descriptions={props.algorithmDescriptions}
           onChange={props.onChangeAlgorithm}
+          open={browserOpen}
+          onOpenChange={setBrowserOpen}
         />
       </section>
 
@@ -225,6 +242,7 @@ export function EffectPanel(props: EffectPanelProps) {
             metaRecipeLocked={props.metaRecipeLocked}
             onMetaRecipeLockChange={props.onMetaRecipeLockChange}
             onNewMetaRecipe={props.onNewMetaRecipe}
+            jpegReferenceLongEdge={Math.max(16, Math.round(props.brush.size * 2))}
             group="fine"
           />
           <details className="nested-inspector-details">

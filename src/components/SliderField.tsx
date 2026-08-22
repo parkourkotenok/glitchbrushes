@@ -18,6 +18,7 @@ export interface RangeControlProps {
   displayValue?: string;
   defaultValue?: number;
   disabled?: boolean;
+  numericInput?: boolean;
   helpId?: string;
   onChange(value: number): void;
 }
@@ -38,6 +39,7 @@ export function RangeControl({
   displayValue,
   defaultValue,
   disabled = false,
+  numericInput = false,
   helpId,
   onChange,
 }: RangeControlProps) {
@@ -77,10 +79,31 @@ export function RangeControl({
   return (
     <label className="slider-field">
       <span>{label}</span>
-      <output>
-        {displayValue ??
-          `${Number.isInteger(step) ? Math.round(draftValue) : draftValue.toFixed(2)}${unit ?? suffix}`}
-      </output>
+      {numericInput ? (
+        <span className="slider-field-number-wrap">
+          <input
+            aria-label={`${label} value`}
+            className="slider-field-number"
+            type="number"
+            min={min}
+            max={max}
+            step={step}
+            value={draftValue}
+            disabled={disabled}
+            onPointerDown={stopCardDrag}
+            onBlur={flushPending}
+            onChange={(event) =>
+              scheduleChange(Math.min(max, Math.max(min, Number(event.target.value))))
+            }
+          />
+          {unit ?? suffix}
+        </span>
+      ) : (
+        <output>
+          {displayValue ??
+            `${Number.isInteger(step) ? Math.round(draftValue) : draftValue.toFixed(2)}${unit ?? suffix}`}
+        </output>
+      )}
       <input
         aria-label={label}
         data-tooltip-id={resolvedHelpId}

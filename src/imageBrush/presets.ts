@@ -105,7 +105,7 @@ export const builtInImageBrushPresets: ImageBrushPreset[] = [
       fxStage: 'each',
       progressiveStart: 0.04,
       progressiveEnd: 0.96,
-      evolutionCurve: 'exponential',
+      evolutionCurve: 'linear',
       evolutionSpeed: 0.72,
       maxCorruption: 1,
       variantCount: 12,

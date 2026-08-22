@@ -829,102 +829,6 @@ const mirrorFoldBrush: GlitchAlgorithm = {
   },
 };
 
-const halftoneCollapseBrush: GlitchAlgorithm = {
-  id: 'halftone-collapse-brush',
-  name: 'Halftone Collapse',
-  family: 'advanced-brush',
-  experimental: true,
-  apply(context) {
-    const { settings, width, height } = context;
-    const bounds = clipRectangle(context.writeBounds ?? context.bounds, width, height);
-    if (!bounds.width || !bounds.height) return result(bounds, 0);
-    const snapshot = extractRegion(context.pixels, width, height, bounds);
-    const baseFrame = strokeFrame(context, settings.halftoneFallbackAngle);
-    let tangentX = baseFrame.tangentX;
-    let tangentY = baseFrame.tangentY;
-    if (settings.halftoneGridAngle === 'perpendicular') {
-      tangentX = baseFrame.normalX;
-      tangentY = baseFrame.normalY;
-    } else if (settings.halftoneGridAngle === 'fixed') {
-      const angle = (settings.halftoneFallbackAngle * Math.PI) / 180;
-      tangentX = Math.cos(angle);
-      tangentY = Math.sin(angle);
-    }
-    const normalX = -tangentY;
-    const normalY = tangentX;
-    const centerX = context.bounds.x + context.bounds.width / 2;
-    const centerY = context.bounds.y + context.bounds.height / 2;
-    const cell = clamp(Math.round(settings.halftoneCellSize), 3, 48);
-    const seedValue = createSeededRandom(`${context.seed}:halftone-collapse`).int(1, 0x7fffffff);
-    const movementShift = Math.min(
-      cell,
-      Math.hypot(context.movement?.x ?? 0, context.movement?.y ?? 0) * 0.2,
-    );
-    let touched = 0;
-    for (let y = bounds.y; y < bounds.y + bounds.height; y += 1) {
-      for (let x = bounds.x; x < bounds.x + bounds.width; x += 1) {
-        const influence = influenceAt(context, x, y);
-        if (influence <= 0.01) continue;
-        const relativeX = x - centerX;
-        const relativeY = y - centerY;
-        const u = relativeX * tangentX + relativeY * tangentY - movementShift;
-        const v = relativeX * normalX + relativeY * normalY;
-        const cellU = Math.round(u / cell);
-        const cellV = Math.round(v / cell);
-        const randomDrift = (scalarNoise(cellU, cellV, seedValue) - 0.5) * settings.halftoneDrift;
-        const centerU = cellU * cell + movementShift + randomDrift;
-        const centerV =
-          cellV * cell * (1 - clamp(settings.halftoneCollapse, 0, 1) * 0.78) + randomDrift * 0.25;
-        const sourceX = centerX + tangentX * centerU + normalX * centerV;
-        const sourceY = centerY + tangentY * centerU + normalY * centerV;
-        const luminosity = snapshotLuma(snapshot, sourceX, sourceY) / 255;
-        const radius =
-          cell *
-          clamp(
-            0.08 +
-              (1 - luminosity) * 0.38 +
-              settings.halftoneDotGain * 0.24 +
-              context.pressure * 0.08,
-            0.08,
-            0.58,
-          );
-        const localU = u - centerU;
-        const localV = v - centerV;
-        const distance =
-          settings.halftoneShape === 'square'
-            ? Math.max(Math.abs(localU), Math.abs(localV))
-            : Math.hypot(localU, localV);
-        const coverage = clamp(radius - distance + 1.25, 0, 1);
-        const destination = pixelToByteOffset(x, y, width);
-        const amount = clamp(influence * context.strength * context.pressure, 0, 1);
-        for (let channel = 0; channel < 3; channel += 1) {
-          const original =
-            snapshot.data[((y - bounds.y) * bounds.width + x - bounds.x) * 4 + channel]!;
-          const background =
-            original * settings.halftoneBackgroundMix + 255 * (1 - settings.halftoneBackgroundMix);
-          const channelOffset =
-            settings.halftoneColorMode === 'rgb'
-              ? (channel - 1) * settings.halftoneChannelOffset
-              : 0;
-          const dotColor =
-            settings.halftoneColorMode === 'rgb'
-              ? sampleSnapshot(
-                  snapshot,
-                  sourceX + tangentX * channelOffset,
-                  sourceY + tangentY * channelOffset,
-                  channel,
-                )
-              : luminosity * 255;
-          const incoming = background * (1 - coverage) + dotColor * coverage;
-          context.pixels[destination + channel] = blendChannel(original, incoming, amount);
-        }
-        touched += 1;
-      }
-    }
-    return result(bounds, touched);
-  },
-};
-
 const rasterLoomBrush: GlitchAlgorithm = {
   id: 'raster-loom-brush',
   name: 'Raster Loom',
@@ -1104,7 +1008,6 @@ export const advancedBrushAlgorithms: GlitchAlgorithm[] = [
   cloneCorruptionBrush,
   lineFreezeBrush,
   mirrorFoldBrush,
-  halftoneCollapseBrush,
   rasterLoomBrush,
   contourCrawlBrush,
 ];
@@ -1119,7 +1022,6 @@ export const advancedBrushEffectIds = advancedBrushAlgorithms.map(
   | 'clone-corruption-brush'
   | 'line-freeze-brush'
   | 'mirror-fold-brush'
-  | 'halftone-collapse-brush'
   | 'raster-loom-brush'
   | 'contour-crawl-brush'
 >;

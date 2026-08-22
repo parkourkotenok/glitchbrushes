@@ -6,4 +6,4 @@ Final strokes, read-bound estimation, inspector preview, and the live overlay re
 
 Legacy `sequence` projects migrate to trail placement + All/Cycle and `random-hose` to scatter placement + All/Random, retaining the legacy library set. New custom images become enabled; the demo is not auto-added when custom images exist; the source picker prevents disabling the final enabled image.
 
-Focused verification: `npm run typecheck`; `npm test -- --run src/imageBrush.test.ts src/productionUi.test.ts` (76 passing tests).
+Focused verification after the 2026-08-22 evolution update: `npm run typecheck`; `npm test -- --run src/imageBrush.test.ts src/productionUi.test.ts` (96 passing tests). Full validation passes 282/282 tests and production build. Multi-source selection remains independent from smooth Progressive Decay and Fade along stroke.

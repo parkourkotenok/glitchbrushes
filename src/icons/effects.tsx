@@ -68,17 +68,6 @@ function Glyph({ id }: { id: EffectIconId }) {
           <path d="M3 13h4M11 13h4" />
         </>
       );
-    case 'halftone-collapse-brush':
-      return (
-        <>
-          <circle cx="4" cy="4" r="1.5" />
-          <circle cx="9" cy="4" r="1" />
-          <circle cx="14" cy="4" r=".6" />
-          <circle cx="6" cy="9" r="2" />
-          <circle cx="11" cy="9" r="1.3" />
-          <circle cx="9" cy="14" r="2.4" />
-        </>
-      );
     case 'raster-loom-brush':
       return (
         <>
@@ -91,6 +80,14 @@ function Glyph({ id }: { id: EffectIconId }) {
         <>
           <path d="M3 14c2-7 4-9 7-9 2 0 3 2 5 2" />
           <path d="M5 16c2-6 4-8 7-8 2 0 3 2 4 2M2 11c2-6 4-9 7-9" />
+        </>
+      );
+    case 'jpeg-resample-brush':
+      return (
+        <>
+          <rect x="2" y="2" width="14" height="14" rx="1" />
+          <path d="M2 6h14M6 2v14M10 6v10M14 10v6" />
+          <path d="m11 4 3 2-3 2" />
         </>
       );
     case 'pixel-embroidery':
@@ -356,9 +353,9 @@ export const algorithmIconIds: Record<AlgorithmId, EffectIconId> = {
   'clone-corruption-brush': 'clone-corruption-brush',
   'line-freeze-brush': 'line-freeze-brush',
   'mirror-fold-brush': 'mirror-fold-brush',
-  'halftone-collapse-brush': 'halftone-collapse-brush',
   'raster-loom-brush': 'raster-loom-brush',
   'contour-crawl-brush': 'contour-crawl-brush',
+  'jpeg-resample-brush': 'jpeg-resample-brush',
   'slice-displacement': 'slice',
   'macroblock-shift': 'macroblock',
   'datamosh-smear': 'datamosh',
@@ -390,9 +387,9 @@ export const effectIconIds: readonly EffectIconId[] = [
   'clone-corruption-brush',
   'line-freeze-brush',
   'mirror-fold-brush',
-  'halftone-collapse-brush',
   'raster-loom-brush',
   'contour-crawl-brush',
+  'jpeg-resample-brush',
   'pixel-embroidery',
   'xerox-decay',
   'slice',

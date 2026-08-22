@@ -8,9 +8,9 @@ import {
   Download,
   Eye,
   GripVertical,
+  LayoutGrid,
   MapPin,
   Play,
-  Plus,
   RefreshCcw,
   Save,
   Square,
@@ -18,6 +18,11 @@ import {
   Upload,
   X,
 } from 'lucide-react';
+import {
+  jpegResamplePresetIds,
+  resolveJpegResamplePreset,
+  type JpegResamplePresetId,
+} from '../effects/jpegResamplePresets';
 import { EffectIcon } from '../icons/effects';
 import {
   dragActivationReached,
@@ -52,6 +57,7 @@ import { SliderField } from './SliderField';
 import { HelpButton } from './HelpButton';
 import { helpSlug } from '../help/registry';
 import type { InterfaceMode } from './InterfaceModeSwitch';
+import { CompactIconBrowser, type CompactIconBrowserGroup } from './CompactIconBrowser';
 
 interface MoshLabProps {
   interfaceMode: InterfaceMode;
@@ -64,6 +70,7 @@ interface MoshLabProps {
   hasBrushMask: boolean;
   hasPreview: boolean;
   previewStale: boolean;
+  documentLongEdge: number;
   onRackChange(rack: MoshEffectCard[]): void;
   onSeedChange(seed: string): void;
   onPreviewChange(enabled: boolean): void;
@@ -137,13 +144,17 @@ function CheckControl({
 function SettingsControls({
   card,
   update,
+  updateMany,
   onPickRegion,
   onClearRegion,
+  documentLongEdge,
 }: {
   card: MoshEffectCard;
   update<K extends keyof MoshEffectSettings>(key: K, value: MoshEffectSettings[K]): void;
+  updateMany(values: Partial<MoshEffectSettings>): void;
   onPickRegion(ownerEffectInstanceId: string, mode: 'source' | 'destination'): void;
   onClearRegion(ownerEffectInstanceId: string, mode: 'source' | 'destination' | 'both'): void;
+  documentLongEdge: number;
 }) {
   const settings = card.settings;
   if (card.effectId === 'pixel-sort') {
@@ -736,6 +747,135 @@ function SettingsControls({
       </>
     );
   }
+  if (card.effectId === 'jpeg-resample') {
+    const applyJpegPreset = (preset: JpegResamplePresetId) => {
+      const values = resolveJpegResamplePreset(preset, documentLongEdge);
+      updateMany({
+        jpegResampleQuality: values.quality,
+        jpegResamplePasses: values.passes,
+        jpegResampleNoise: values.noise,
+        jpegResampleNoiseAmount: values.noiseAmount,
+        jpegResampleSharpen: values.sharpen,
+        jpegResampleSharpenAmount: values.sharpenAmount,
+        jpegResampleChromaBleed: values.chromaBleed,
+        jpegResampleTargetLongEdge: values.targetLongEdge,
+        ...(values.noiseType ? { jpegResampleNoiseType: values.noiseType } : {}),
+        ...(values.upscale ? { jpegResampleUpscale: values.upscale } : {}),
+      });
+    };
+    return (
+      <>
+        <fieldset className="effect-segmented-control jpeg-resample-presets">
+          <legend>Quality presets</legend>
+          <div role="group" aria-label="JPEG Resample quality presets">
+            {jpegResamplePresetIds.map((preset) => (
+              <button key={preset} type="button" onClick={() => applyJpegPreset(preset)}>
+                {preset[0]!.toUpperCase() + preset.slice(1)}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+        <SliderField
+          label="Target size"
+          value={Math.max(28, settings.jpegResampleTargetLongEdge)}
+          min={28}
+          max={2048}
+          suffix=" px"
+          numericInput
+          onChange={(value) => update('jpegResampleTargetLongEdge', value)}
+        />
+        <SliderField
+          label="JPEG quality"
+          value={settings.jpegResampleQuality}
+          min={1}
+          max={100}
+          numericInput
+          onChange={(value) => update('jpegResampleQuality', value)}
+        />
+        <div className="mosh-check-row">
+          <CheckControl
+            label="Apply noise"
+            checked={settings.jpegResampleNoise}
+            onChange={(value) => update('jpegResampleNoise', value)}
+          />
+          <CheckControl
+            label="Apply sharpen"
+            checked={settings.jpegResampleSharpen}
+            onChange={(value) => update('jpegResampleSharpen', value)}
+          />
+        </div>
+        <details className="mosh-jpeg-advanced">
+          <summary>Advanced</summary>
+          <div className="mosh-jpeg-advanced-controls">
+            <SliderField
+              label="Recompression passes"
+              value={settings.jpegResamplePasses}
+              min={1}
+              max={4}
+              onChange={(value) => update('jpegResamplePasses', value)}
+            />
+            {settings.jpegResampleNoise && (
+              <>
+                <SliderField
+                  label="Noise amount"
+                  value={settings.jpegResampleNoiseAmount}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  onChange={(value) => update('jpegResampleNoiseAmount', value)}
+                />
+                <SelectControl
+                  label="Noise type"
+                  value={settings.jpegResampleNoiseType}
+                  onChange={(value) =>
+                    update(
+                      'jpegResampleNoiseType',
+                      value as MoshEffectSettings['jpegResampleNoiseType'],
+                    )
+                  }
+                >
+                  <option value="luma">Luma</option>
+                  <option value="rgb">RGB</option>
+                </SelectControl>
+              </>
+            )}
+            {settings.jpegResampleSharpen && (
+              <SliderField
+                label="Sharpen amount"
+                value={settings.jpegResampleSharpenAmount}
+                min={0}
+                max={1}
+                step={0.01}
+                onChange={(value) => update('jpegResampleSharpenAmount', value)}
+              />
+            )}
+            <SelectControl
+              label="Upscale"
+              value={settings.jpegResampleUpscale}
+              onChange={(value) =>
+                update('jpegResampleUpscale', value as MoshEffectSettings['jpegResampleUpscale'])
+              }
+            >
+              <option value="smooth">Smooth</option>
+              <option value="pixelated">Pixelated</option>
+            </SelectControl>
+            <SliderField
+              label="Chroma bleed"
+              value={settings.jpegResampleChromaBleed}
+              min={0}
+              max={1}
+              step={0.01}
+              onChange={(value) => update('jpegResampleChromaBleed', value)}
+            />
+          </div>
+        </details>
+        <p className="mosh-mini-note">
+          Uses the selected target&apos;s local bounds in the MOSH Worker; transparent alpha stays
+          intact.
+        </p>
+      </>
+    );
+  }
   if (card.effectId === 'edge-melt') {
     return (
       <>
@@ -905,6 +1045,7 @@ export function MoshLab({
   hasBrushMask,
   hasPreview,
   previewStale,
+  documentLongEdge,
   onRackChange,
   onSeedChange,
   onPreviewChange,
@@ -1106,6 +1247,27 @@ export function MoshLab({
       window.alert(error instanceof Error ? error.message : 'Invalid MOSH preset JSON.');
     }
   };
+  const moshBrowserGroups: CompactIconBrowserGroup<MoshEffectId>[] = [
+    {
+      id: 'mosh-effects',
+      label: 'MOSH EFFECTS',
+      items: moshEffectDefinitions.map((definition) => {
+        const shared = sharedEffectForMosh(definition.id);
+        return {
+          id: definition.id,
+          value: definition.id,
+          name: definition.name,
+          description: definition.description,
+          cost: shared?.cost?.toUpperCase() ?? 'MEDIUM',
+          detail: shared
+            ? `Image Brush: ${imageBrushStageLabel(shared.imageBrushStages)}`
+            : undefined,
+          badge: shared?.experimental ? 'NEW' : undefined,
+          icon: <EffectIcon id={definition.icon} size={21} />,
+        };
+      }),
+    },
+  ];
 
   return (
     <section className="mosh-lab">
@@ -1125,34 +1287,26 @@ export function MoshLab({
 
       <div className="mosh-rack-toolbar">
         <div className="mosh-add-wrap">
-          <button className="primary" onClick={() => setAddOpen((value) => !value)}>
-            <Plus size={14} /> Add Effect
+          <button
+            className="primary"
+            aria-label="Browse MOSH effects"
+            aria-expanded={addOpen}
+            aria-haspopup="listbox"
+            onClick={() => setAddOpen((value) => !value)}
+          >
+            <LayoutGrid size={14} /> Add Effect
           </button>
           {addOpen && (
-            <div className="mosh-add-menu">
-              {moshEffectDefinitions.map((definition) => {
-                const shared = sharedEffectForMosh(definition.id);
-                return (
-                  <button
-                    key={definition.id}
-                    onClick={() => {
-                      onRackChange([...rack, createMoshCard(definition.id)]);
-                      setAddOpen(false);
-                    }}
-                  >
-                    <EffectIcon id={definition.icon} size={17} />
-                    <span>
-                      <strong>{definition.name}</strong>
-                      <small>
-                        {definition.description}
-                        {shared
-                          ? ` Image Brush: ${imageBrushStageLabel(shared.imageBrushStages)}.`
-                          : ''}
-                      </small>
-                    </span>
-                  </button>
-                );
-              })}
+            <div className="mosh-add-menu compact-mosh-add-menu">
+              <CompactIconBrowser
+                groups={moshBrowserGroups}
+                ariaLabel="Add MOSH effect"
+                onDismiss={() => setAddOpen(false)}
+                onSelect={(item) => {
+                  onRackChange([...rack, createMoshCard(item.value)]);
+                  setAddOpen(false);
+                }}
+              />
             </div>
           )}
         </div>
@@ -1376,6 +1530,7 @@ export function MoshLab({
                     min={0}
                     max={1}
                     step={0.01}
+                    displayValue={`${Math.round(card.mix * 100)}%`}
                     defaultValue={1}
                     onChange={(mix) =>
                       updateCard(card.instanceId, (current) => ({
@@ -1566,8 +1721,16 @@ export function MoshLab({
                         settings: { ...current.settings, [key]: value },
                       }))
                     }
+                    updateMany={(values) =>
+                      updateCard(card.instanceId, (current) => ({
+                        ...current,
+                        activePresetId: 'custom',
+                        settings: { ...current.settings, ...values },
+                      }))
+                    }
                     onPickRegion={onPickRegion}
                     onClearRegion={onClearRegion}
+                    documentLongEdge={documentLongEdge}
                   />
                   <div className="mosh-card-actions">
                     <button

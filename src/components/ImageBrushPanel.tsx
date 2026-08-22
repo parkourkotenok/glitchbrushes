@@ -15,6 +15,7 @@ import {
   FileDown,
   FileUp,
   ImagePlus,
+  LayoutGrid,
   MoreHorizontal,
   Plus,
   RefreshCcw,
@@ -24,7 +25,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import { imageBrushFxLevelAmount } from '../imageBrush/performance';
+import { jpegResamplePresetIds, resolveJpegResamplePreset } from '../effects/jpegResamplePresets';
 import {
   builtInImageBrushPresets,
   loadImageBrushPresets,
@@ -36,7 +37,6 @@ import {
   applyImageBrushGlitchAmount,
   applyImageBrushStyleKeepingEssentials,
   imageBrushGlitchLevels,
-  imageBrushStaticStyleThumbnail,
   imageBrushStyleCategories,
   imageBrushStylePresentationFor,
   isImageBrushEssentialSetting,
@@ -44,6 +44,7 @@ import {
 import {
   createImageBrushFx,
   imageBrushFxDefinitions,
+  supportsImageBrushFxStages,
   type ImageBrushAsset,
   type ImageBrushAssetMode,
   type ImageBrushAssetOrder,
@@ -64,11 +65,13 @@ import { HelpButton } from './HelpButton';
 import { ImageBrushEssentialControls } from './ImageBrushEssentialControls';
 import { SliderField } from './SliderField';
 import {
+  buildImageBrushEvolutionRecipeOptions,
   effectiveImageBrushStages,
   imageBrushStageLabel,
   supportsImageBrushStages,
 } from '../effects/sharedRegistry';
 import { decodeImageBrushFilesOffThread } from '../imageBrush/decode';
+import { CompactIconBrowser, type CompactIconBrowserGroup } from './CompactIconBrowser';
 
 interface ProcessedBrushPreview {
   pixels: Uint8ClampedArray;
@@ -151,6 +154,28 @@ const fxIcons: Record<ImageBrushFxId, Parameters<typeof EffectIcon>[0]['id']> = 
   'motion-transfer': 'motion-transfer',
   'pixel-embroidery': 'pixel-embroidery',
   'xerox-decay': 'xerox-decay',
+  'jpeg-resample': 'jpeg-resample-brush',
+};
+
+const styleIcons: Record<string, Parameters<typeof EffectIcon>[0]['id']> = {
+  'clean-repeat': 'image-brush',
+  'glitched-repeat': 'slice',
+  'progressive-decay': 'pixel-sort',
+  'datamosh-trail': 'datamosh',
+  'pixel-sort-trail': 'pixel-sort',
+  'mosh-flow-trail': 'flow-field',
+  'chroma-feedback': 'chroma-drift',
+  'compression-breakdown': 'compression',
+  'broken-interface': 'macroblock',
+  'scatter-fragments': 'packet-loss',
+  'pixel-embroidery': 'pixel-embroidery',
+  'xerox-decay': 'xerox-decay',
+  'zine-stitch': 'mixed',
+  'random-glitch-chain': 'mixed',
+  'rgb-separation-trail': 'rgb-split',
+  'codec-damage-trail': 'compression',
+  'packet-loss-stream': 'packet-loss',
+  'whole-trail': 'flow-field',
 };
 
 const imageBrushFxHelpOptions: ControlHelpOption[] = imageBrushFxDefinitions.map((definition) => ({
@@ -158,22 +183,6 @@ const imageBrushFxHelpOptions: ControlHelpOption[] = imageBrushFxDefinitions.map
   label: definition.name,
   description: `${definition.description} Estimated ${definition.cost.replace('-', ' ')} processing cost.`,
 }));
-
-const mutationRecipeOptions = [
-  ['clean', 'Clean'],
-  ['mixed', 'Current FX stack'],
-  ['slice', 'Slice Displacement'],
-  ['block-corruption', 'Block Corruption'],
-  ['rgb-split', 'RGB Chunk Split'],
-  ['scanline', 'Scanline Tear'],
-  ['codec-block-damage', 'Codec Block Damage'],
-  ['pixel-sort', 'Pixel Sort'],
-  ['feedback', 'Feedback Echo'],
-  ['motion-field', 'Motion Field Mosh'],
-  ['datamosh', 'Datamosh Smear'],
-  ['chroma-drift', 'Chroma Drift'],
-  ['flow-field', 'Flow Field Displace'],
-] as const;
 
 type ImageBrushTab = 'placement' | 'evolution' | 'fx';
 
@@ -482,10 +491,50 @@ export function ImageBrushPanel({
   const legacyStyles = builtInImageBrushPresets.filter(
     (preset) => imageBrushStylePresentationFor(preset).catalog === 'legacy',
   );
+  const toStyleBrowserItems = (presets: ImageBrushPreset[]) =>
+    presets.map((preset) => {
+      const presentation = imageBrushStylePresentationFor(preset);
+      return {
+        id: preset.id,
+        value: preset,
+        name: preset.name,
+        description: presentation.description,
+        cost: presentation.cost,
+        badge: presentation.badge,
+        icon: <EffectIcon id={styleIcons[preset.id] ?? 'image-brush'} size={21} />,
+      };
+    });
+  const styleBrowserGroups: CompactIconBrowserGroup<ImageBrushPreset>[] = [
+    ...coreStyleGroups.map((group) => ({
+      id: `style-${group.category.toLowerCase()}`,
+      label: group.category,
+      items: toStyleBrowserItems(group.presets),
+    })),
+    {
+      id: 'style-more',
+      label: 'MORE',
+      items: toStyleBrowserItems(moreStyles),
+    },
+    {
+      id: 'style-custom',
+      label: 'MY STYLES',
+      items: toStyleBrowserItems(userPresets),
+    },
+    {
+      id: 'style-legacy',
+      label: 'LEGACY',
+      disclosure: true,
+      items: toStyleBrowserItems(legacyStyles),
+    },
+  ];
   const mutationCopy = mutationSummary(settings);
   const requiredFxStages = effectiveImageBrushStages(settings.fxStage, settings.mutationMode);
+  const mutationRecipeOptions = buildImageBrushEvolutionRecipeOptions(
+    imageBrushFxDefinitions,
+    requiredFxStages,
+  );
   const addEffectDefinition = imageBrushFxDefinitions.find((item) => item.id === addEffect);
-  const addEffectCompatible = supportsImageBrushStages(addEffect, requiredFxStages);
+  const addEffectCompatible = supportsImageBrushFxStages(addEffect, requiredFxStages);
   const enabledFx = rack.filter((item) => item.enabled);
   const estimatedCost = enabledFx.reduce<'low' | 'medium' | 'high' | 'very-high'>(
     (highest, item) => {
@@ -654,31 +703,6 @@ export function ImageBrushPanel({
     setStyleBrowserOpen(false);
     requestAnimationFrame(() => styleBrowserTriggerRef.current?.focus());
   };
-
-  const renderStyleCards = (presets: ImageBrushPreset[]) => (
-    <div className="image-brush-style-browser-cards">
-      {presets.map((preset) => {
-        const presentation = imageBrushStylePresentationFor(preset);
-        return (
-          <button
-            type="button"
-            key={preset.id}
-            className={preset.id === activeStyleId ? 'active' : ''}
-            aria-pressed={preset.id === activeStyleId}
-            onClick={() => chooseStyle(preset)}
-          >
-            <img src={imageBrushStaticStyleThumbnail(preset.id)} alt="" aria-hidden="true" />
-            <span>
-              <strong>{preset.name}</strong>
-              {presentation.badge === 'NEW' && <em className="new-effect-badge">NEW</em>}
-            </span>
-            <small>{presentation.description}</small>
-            <i>{presentation.cost}</i>
-          </button>
-        );
-      })}
-    </div>
-  );
 
   const saveCurrentPreset = () => {
     const name = window.prompt('Style name:', 'My Image Brush');
@@ -1043,7 +1067,7 @@ export function ImageBrushPanel({
             onClick={() => setStyleBrowserOpen((value) => !value)}
           >
             <span>{selectedPreset?.name ?? 'Custom'}</span>
-            <ChevronDown size={14} aria-hidden="true" />
+            <LayoutGrid size={14} aria-hidden="true" />
           </button>
           <div className="image-brush-split-button">
             <button
@@ -1083,34 +1107,18 @@ export function ImageBrushPanel({
           >
             <header>
               <strong>Style browser</strong>
-              <span>Static previews · no preview jobs</span>
+              <span>Icon catalog · no preview jobs</span>
             </header>
-            <div className="image-brush-style-browser-scroll">
-              {coreStyleGroups.map((group) => (
-                <section key={group.category} aria-label={`${group.category} styles`}>
-                  <h3>{group.category}</h3>
-                  {renderStyleCards(group.presets)}
-                </section>
-              ))}
-              {moreStyles.length > 0 && (
-                <section className="interface-advanced-only" aria-label="More styles">
-                  <h3>MORE</h3>
-                  {renderStyleCards(moreStyles)}
-                </section>
-              )}
-              {userPresets.length > 0 && (
-                <section aria-label="My styles">
-                  <h3>MY STYLES</h3>
-                  {renderStyleCards(userPresets)}
-                </section>
-              )}
-              {legacyStyles.length > 0 && (
-                <section className="interface-advanced-only" aria-label="Legacy styles">
-                  <h3>LEGACY</h3>
-                  {renderStyleCards(legacyStyles)}
-                </section>
-              )}
-            </div>
+            <CompactIconBrowser
+              groups={styleBrowserGroups}
+              selectedId={activeStyleId}
+              ariaLabel="Image Brush styles"
+              onDismiss={() => {
+                setStyleBrowserOpen(false);
+                requestAnimationFrame(() => styleBrowserTriggerRef.current?.focus());
+              }}
+              onSelect={(item) => chooseStyle(item.value)}
+            />
           </div>
         )}
         {randomizeMenuOpen && (
@@ -1303,6 +1311,15 @@ export function ImageBrushPanel({
             </optgroup>
           </select>
         </label>
+        <SelectField
+          label="Stamp opacity"
+          value={settings.opacityEvolutionMode}
+          onChange={(value) => update('opacityEvolutionMode', value)}
+          options={[
+            ['constant', 'Constant opacity'],
+            ['fade', 'Fade along stroke'],
+          ]}
+        />
         <p className="image-brush-inline-note">{mutationCopy[0]}</p>
       </section>
 
@@ -1392,7 +1409,7 @@ export function ImageBrushPanel({
               const tooSmall = active
                 ? Math.min(active.width, active.height) < definition.minSize
                 : true;
-              const incompatible = !supportsImageBrushStages(item.effectId, requiredFxStages);
+              const incompatible = !supportsImageBrushFxStages(item.effectId, requiredFxStages);
               const unavailable = tooSmall || incompatible;
               return (
                 <article
@@ -1441,22 +1458,6 @@ export function ImageBrushPanel({
                           workflow requires {imageBrushStageLabel(requiredFxStages)}.
                         </p>
                       )}
-                      <div className="image-brush-fx-levels">
-                        {Object.entries(imageBrushFxLevelAmount).map(([level, amount]) => (
-                          <button
-                            key={level}
-                            onClick={() =>
-                              updateRack(
-                                rack.map((entry) =>
-                                  entry.id === item.id ? { ...entry, amount } : entry,
-                                ),
-                              )
-                            }
-                          >
-                            {level}
-                          </button>
-                        ))}
-                      </div>
                       <SliderField
                         label="Amount"
                         value={item.amount}
@@ -1477,6 +1478,7 @@ export function ImageBrushPanel({
                         min={0}
                         max={1}
                         step={0.01}
+                        displayValue={`${Math.round(item.mix * 100)}%`}
                         onChange={(mix) =>
                           updateRack(
                             rack.map((entry) => (entry.id === item.id ? { ...entry, mix } : entry)),
@@ -1714,6 +1716,226 @@ export function ImageBrushPanel({
                               <option value="duotone">Duotone</option>
                             </select>
                           </label>
+                        </div>
+                      )}
+                      {item.effectId === 'jpeg-resample' && (
+                        <div className="image-brush-experimental-fx-controls">
+                          <fieldset className="effect-segmented-control jpeg-resample-presets">
+                            <legend>Quality presets</legend>
+                            <div role="group" aria-label="JPEG Resample quality presets">
+                              {jpegResamplePresetIds.map((preset) => (
+                                <button
+                                  key={preset}
+                                  type="button"
+                                  onClick={() => {
+                                    const referenceLongEdge = active
+                                      ? Math.max(active.width, active.height)
+                                      : 256;
+                                    const values = resolveJpegResamplePreset(
+                                      preset,
+                                      referenceLongEdge,
+                                    );
+                                    updateRack(
+                                      rack.map((entry) =>
+                                        entry.id === item.id
+                                          ? {
+                                              ...entry,
+                                              ...(values.forceFullAmount
+                                                ? { amount: 1, mix: 1 }
+                                                : {}),
+                                              jpegTargetLongEdge: values.targetLongEdge,
+                                              jpegQuality: values.quality,
+                                              jpegPasses: values.passes,
+                                              jpegNoise: values.noise,
+                                              jpegNoiseAmount: values.noiseAmount,
+                                              jpegSharpen: values.sharpen,
+                                              jpegSharpenAmount: values.sharpenAmount,
+                                              jpegChromaBleed: values.chromaBleed,
+                                              ...(values.noiseType
+                                                ? { jpegNoiseType: values.noiseType }
+                                                : {}),
+                                              ...(values.upscale
+                                                ? { jpegUpscale: values.upscale }
+                                                : {}),
+                                            }
+                                          : entry,
+                                      ),
+                                    );
+                                  }}
+                                >
+                                  {preset[0]!.toUpperCase() + preset.slice(1)}
+                                </button>
+                              ))}
+                            </div>
+                          </fieldset>
+                          <SliderField
+                            label="Target Size"
+                            value={Math.max(28, item.jpegTargetLongEdge ?? 96)}
+                            min={28}
+                            max={2048}
+                            step={1}
+                            suffix=" px"
+                            numericInput
+                            onChange={(jpegTargetLongEdge) =>
+                              updateRack(
+                                rack.map((entry) =>
+                                  entry.id === item.id ? { ...entry, jpegTargetLongEdge } : entry,
+                                ),
+                              )
+                            }
+                          />
+                          <SliderField
+                            label="JPEG Quality"
+                            value={item.jpegQuality ?? 34}
+                            min={1}
+                            max={100}
+                            step={1}
+                            numericInput
+                            onChange={(jpegQuality) =>
+                              updateRack(
+                                rack.map((entry) =>
+                                  entry.id === item.id ? { ...entry, jpegQuality } : entry,
+                                ),
+                              )
+                            }
+                          />
+                          <Toggle
+                            label="Apply Noise"
+                            checked={item.jpegNoise ?? false}
+                            onChange={(jpegNoise) =>
+                              updateRack(
+                                rack.map((entry) =>
+                                  entry.id === item.id ? { ...entry, jpegNoise } : entry,
+                                ),
+                              )
+                            }
+                          />
+                          <Toggle
+                            label="Apply Sharpen"
+                            checked={item.jpegSharpen ?? false}
+                            onChange={(jpegSharpen) =>
+                              updateRack(
+                                rack.map((entry) =>
+                                  entry.id === item.id ? { ...entry, jpegSharpen } : entry,
+                                ),
+                              )
+                            }
+                          />
+                          <details>
+                            <summary>Advanced JPEG</summary>
+                            <SliderField
+                              label="Recompression Passes"
+                              value={item.jpegPasses ?? 2}
+                              min={1}
+                              max={4}
+                              step={1}
+                              onChange={(jpegPasses) =>
+                                updateRack(
+                                  rack.map((entry) =>
+                                    entry.id === item.id ? { ...entry, jpegPasses } : entry,
+                                  ),
+                                )
+                              }
+                            />
+                            {item.jpegNoise && (
+                              <>
+                                <SliderField
+                                  label="Noise Amount"
+                                  value={item.jpegNoiseAmount ?? 0.08}
+                                  min={0}
+                                  max={1}
+                                  step={0.01}
+                                  onChange={(jpegNoiseAmount) =>
+                                    updateRack(
+                                      rack.map((entry) =>
+                                        entry.id === item.id
+                                          ? { ...entry, jpegNoiseAmount }
+                                          : entry,
+                                      ),
+                                    )
+                                  }
+                                />
+                                <label className="image-brush-select">
+                                  <span>Noise Type</span>
+                                  <select
+                                    value={item.jpegNoiseType ?? 'luma'}
+                                    onChange={(event) =>
+                                      updateRack(
+                                        rack.map((entry) =>
+                                          entry.id === item.id
+                                            ? {
+                                                ...entry,
+                                                jpegNoiseType: event.target.value as NonNullable<
+                                                  ImageBrushFxItem['jpegNoiseType']
+                                                >,
+                                              }
+                                            : entry,
+                                        ),
+                                      )
+                                    }
+                                  >
+                                    <option value="luma">Luma</option>
+                                    <option value="rgb">RGB</option>
+                                  </select>
+                                </label>
+                              </>
+                            )}
+                            {item.jpegSharpen && (
+                              <SliderField
+                                label="Sharpen Amount"
+                                value={item.jpegSharpenAmount ?? 0.25}
+                                min={0}
+                                max={1}
+                                step={0.01}
+                                onChange={(jpegSharpenAmount) =>
+                                  updateRack(
+                                    rack.map((entry) =>
+                                      entry.id === item.id
+                                        ? { ...entry, jpegSharpenAmount }
+                                        : entry,
+                                    ),
+                                  )
+                                }
+                              />
+                            )}
+                            <label className="image-brush-select">
+                              <span>Upscale</span>
+                              <select
+                                value={item.jpegUpscale ?? 'smooth'}
+                                onChange={(event) =>
+                                  updateRack(
+                                    rack.map((entry) =>
+                                      entry.id === item.id
+                                        ? {
+                                            ...entry,
+                                            jpegUpscale: event.target.value as NonNullable<
+                                              ImageBrushFxItem['jpegUpscale']
+                                            >,
+                                          }
+                                        : entry,
+                                    ),
+                                  )
+                                }
+                              >
+                                <option value="smooth">Smooth</option>
+                                <option value="pixelated">Pixelated</option>
+                              </select>
+                            </label>
+                            <SliderField
+                              label="Chroma Bleed"
+                              value={item.jpegChromaBleed ?? 0.08}
+                              min={0}
+                              max={0.35}
+                              step={0.01}
+                              onChange={(jpegChromaBleed) =>
+                                updateRack(
+                                  rack.map((entry) =>
+                                    entry.id === item.id ? { ...entry, jpegChromaBleed } : entry,
+                                  ),
+                                )
+                              }
+                            />
+                          </details>
                         </div>
                       )}
                       <div className="image-brush-fx-order">
@@ -1984,6 +2206,42 @@ export function ImageBrushPanel({
       </section>
 
       <div className="image-brush-evolution-fields" hidden={activeTab !== 'evolution'}>
+        {settings.opacityEvolutionMode === 'fade' && (
+          <>
+            <p className="image-brush-control-lock-note">
+              Essentials → Opacity is locked while stroke fade is active.
+            </p>
+            <SliderField
+              label="Fade start opacity"
+              value={settings.opacityFadeStart}
+              min={0}
+              max={1}
+              step={0.01}
+              defaultValue={1}
+              onChange={(value) => update('opacityFadeStart', value)}
+            />
+            <SliderField
+              label="Fade end opacity"
+              value={settings.opacityFadeEnd}
+              min={0}
+              max={1}
+              step={0.01}
+              defaultValue={0.05}
+              onChange={(value) => update('opacityFadeEnd', value)}
+            />
+            <SelectField
+              label="Fade curve"
+              value={settings.opacityFadeCurve}
+              onChange={(value) => update('opacityFadeCurve', value)}
+              options={[
+                ['linear', 'Linear'],
+                ['ease-in', 'Ease In'],
+                ['ease-out', 'Ease Out'],
+                ['exponential', 'Exponential'],
+              ]}
+            />
+          </>
+        )}
         {settings.mutationMode !== 'clean' && (
           <SliderField
             label="Mutation amount"

@@ -7,6 +7,10 @@ import canvasWorkspaceSource from './components/CanvasWorkspace.tsx?raw';
 import effectPanelSource from './components/EffectPanel.tsx?raw';
 import effectPreviewSource from './components/EffectPreviewStage.tsx?raw';
 import effectPickerSource from './components/EffectPicker.tsx?raw';
+import compactIconBrowserSource from './components/CompactIconBrowser.tsx?raw';
+import splitterSource from './components/ControlsLayersSplitter.tsx?raw';
+import moshLabSource from './components/MoshLab.tsx?raw';
+import sharedRegistrySource from './effects/sharedRegistry.ts?raw';
 import imageBrushEssentialSource from './components/ImageBrushEssentialControls.tsx?raw';
 import interfaceModeSource from './components/InterfaceModeSwitch.tsx?raw';
 import imageBrushPanelSource from './components/ImageBrushPanel.tsx?raw';
@@ -32,6 +36,30 @@ import { builtInImageBrushPresets } from './imageBrush/presets';
 import { defaultImageBrushSettings } from './imageBrush/types';
 
 describe('production editor cleanup', () => {
+  it('uses one accessible compact icon browser across Effect, Mosh and Image Brush', () => {
+    expect(effectPanelSource).toContain('LayoutGrid');
+    expect(effectPanelSource).toContain('aria-label="Browse effects"');
+    expect(effectPickerSource).toContain('<CompactIconBrowser');
+    expect(moshLabSource).toContain('<CompactIconBrowser');
+    expect(imageBrushPanelSource).toContain('<CompactIconBrowser');
+    expect(compactIconBrowserSource).toContain('role="listbox"');
+    expect(compactIconBrowserSource).toContain('role="option"');
+    expect(compactIconBrowserSource).toContain("event.key === 'Escape'");
+    expect(compactIconBrowserSource).toContain("'ArrowLeft'");
+    expect(compactIconBrowserSource).toContain("'ArrowRight'");
+    expect(compactIconBrowserSource).toContain('compact-icon-browser-tooltip');
+    expect(imageBrushPanelSource).not.toContain('<img');
+  });
+
+  it('derives Evolution recipes from the shared registry and mounts the dock splitter', () => {
+    expect(imageBrushPanelSource).toContain('buildImageBrushEvolutionRecipeOptions');
+    expect(sharedRegistrySource).toContain('NEW · ');
+    expect(appSource).toContain('<ControlsLayersSplitter');
+    expect(splitterSource).toContain('setPointerCapture(event.pointerId)');
+    expect(splitterSource).toContain('localStorage.setItem');
+    expect(splitterSource).toContain('new ResizeObserver');
+  });
+
   it('does not import, route or render the HEX editor in the production App', () => {
     expect(appSource).not.toContain('import { HexEditor }');
     expect(appSource).not.toContain("activePanel === 'hex'");
@@ -124,8 +152,8 @@ describe('production editor cleanup', () => {
 
   it('uses a static visual Style browser and keeps raw recipe editing Advanced-only', () => {
     expect(imageBrushPanelSource).toContain('aria-label="Image Brush style browser"');
-    expect(imageBrushPanelSource).toContain('Static previews · no preview jobs');
-    expect(imageBrushPanelSource).toContain('imageBrushStaticStyleThumbnail');
+    expect(imageBrushPanelSource).toContain('CompactIconBrowser');
+    expect(imageBrushPanelSource).not.toContain('imageBrushStaticStyleThumbnail');
     expect(imageBrushPanelSource).not.toContain('new Worker');
     expect(imageBrushSimpleSource).toContain('preGeneratedStyleThumbnails');
     expect(imageBrushSimpleSource).toContain("catalog: 'legacy'");
@@ -135,6 +163,12 @@ describe('production editor cleanup', () => {
     expect(imageBrushPresetSource).toContain('Pixel Embroidery');
     expect(imageBrushPresetSource).toContain('Xerox Decay');
     expect(imageBrushPresetSource).toContain('Zine Stitch');
+  });
+
+  it('keeps Image Brush FX controls compact without the five duplicate amount presets', () => {
+    expect(imageBrushPanelSource).not.toContain('image-brush-fx-levels');
+    expect(imageBrushPanelSource).toContain('label="Amount"');
+    expect(imageBrushPanelSource).toContain('label="Mix"');
   });
 
   it('removes duplicate Image Brush production blocks and exposes persistent accessible tabs', () => {
@@ -243,15 +277,17 @@ describe('production editor cleanup', () => {
     const experimentalImageFx = imageBrushFxDefinitions.filter((item) => item.experimental);
     expect(experimentalAlgorithms.map((item) => item.id)).toEqual([
       'mirror-fold-brush',
-      'halftone-collapse-brush',
       'raster-loom-brush',
       'contour-crawl-brush',
+      'jpeg-resample-brush',
     ]);
-    expect(experimentalImageFx.map((item) => item.id)).toEqual(['pixel-embroidery', 'xerox-decay']);
+    expect(experimentalImageFx.map((item) => item.id)).toEqual([
+      'jpeg-resample',
+      'pixel-embroidery',
+      'xerox-decay',
+    ]);
     expect(effectPickerSource).toContain('NEW / EXPERIMENTAL');
-    expect(effectPickerSource).toContain(
-      'item.experimental && <em className="new-effect-badge">NEW</em>',
-    );
+    expect(effectPickerSource).toContain(".map((item) => asBrowserItem(item, 'NEW'))");
     expect(effectPickerSource).toContain(
       'value.experimental && <em className="new-effect-badge">NEW</em>',
     );
@@ -261,10 +297,11 @@ describe('production editor cleanup', () => {
       'definition.experimental && <em className="new-effect-badge">NEW</em>',
     );
     const experimentalImageFxIds = new Set<string>(experimentalImageFx.map((item) => item.id));
+    const dedicatedExperimentalStyleIds = new Set(['pixel-embroidery', 'xerox-decay']);
     for (const item of [...experimentalAlgorithms, ...experimentalImageFx]) {
       expect(defaultAlgorithmSettings.structuralMixPool).not.toContain(item.id);
       expect(defaultImageBrushSettings.effectPool).not.toContain(item.id);
-      if (experimentalImageFxIds.has(item.id)) {
+      if (experimentalImageFxIds.has(item.id) && dedicatedExperimentalStyleIds.has(item.id)) {
         expect(builtInImageBrushPresets.some((preset) => preset.id === item.id)).toBe(true);
       } else {
         expect(

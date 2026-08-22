@@ -1,6 +1,8 @@
 import type { Point, Rectangle } from '../types';
+import { processJpegResample } from '../effects/jpegResampleCore';
 import { clamp } from '../utils/geometry';
 import { createSeededRandom, type RandomSource } from '../utils/prng';
+import { countChangedPixels } from '../utils/pixels';
 import {
   moshEffectDefinitions,
   type MoshEffectCard,
@@ -173,6 +175,63 @@ function effectMask(
     }
   }
   return mask;
+}
+
+interface PixelBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function nonEmptyMaskBounds(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  context: ProcessContext,
+): PixelBounds | null {
+  let left = width;
+  let top = height;
+  let right = -1;
+  let bottom = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (!mask[y * width + x]) continue;
+      left = Math.min(left, x);
+      top = Math.min(top, y);
+      right = Math.max(right, x);
+      bottom = Math.max(bottom, y);
+    }
+    if (y % 32 === 0) guard(context);
+  }
+  return right < left || bottom < top
+    ? null
+    : { x: left, y: top, width: right - left + 1, height: bottom - top + 1 };
+}
+
+function copyRegion(
+  pixels: Uint8ClampedArray,
+  imageWidth: number,
+  bounds: PixelBounds,
+): Uint8ClampedArray {
+  const region = new Uint8ClampedArray(bounds.width * bounds.height * 4);
+  for (let y = 0; y < bounds.height; y += 1) {
+    const start = pixelOffset(bounds.x, bounds.y + y, imageWidth);
+    region.set(pixels.subarray(start, start + bounds.width * 4), y * bounds.width * 4);
+  }
+  return region;
+}
+
+function writeRegion(
+  output: Uint8ClampedArray,
+  imageWidth: number,
+  bounds: PixelBounds,
+  region: Uint8ClampedArray,
+): void {
+  for (let y = 0; y < bounds.height; y += 1) {
+    const start = pixelOffset(bounds.x, bounds.y + y, imageWidth);
+    output.set(region.subarray(y * bounds.width * 4, (y + 1) * bounds.width * 4), start);
+  }
 }
 
 function mixOutput(
@@ -1016,6 +1075,62 @@ function flowField(
   return previous;
 }
 
+/**
+ * JPEG codec work is deliberately restricted to the target's bounding region.
+ * The MOSH worker owns this engine, so no browser encoder, main-thread work, or
+ * unnecessary full-canvas synchronous codec pass is introduced here.
+ */
+function jpegResample(
+  input: Uint8ClampedArray,
+  card: MoshEffectCard,
+  context: ProcessContext,
+): Uint8ClampedArray {
+  const mask = effectMask(
+    input,
+    context.width,
+    context.height,
+    card,
+    context.selectionMask,
+    context.brushMask,
+  );
+  const bounds = mask
+    ? nonEmptyMaskBounds(mask, context.width, context.height, context)
+    : { x: 0, y: 0, width: context.width, height: context.height };
+  if (!bounds) return input.slice();
+  guard(context);
+  const local = copyRegion(input, context.width, bounds);
+  const settings = card.settings;
+  const result = processJpegResample(
+    local,
+    bounds.width,
+    bounds.height,
+    {
+      targetLongEdge: settings.jpegResampleTargetLongEdge,
+      quality: settings.jpegResampleQuality,
+      passes: settings.jpegResamplePasses,
+      mix: 1,
+      noise: settings.jpegResampleNoise,
+      noiseAmount: settings.jpegResampleNoiseAmount,
+      noiseType: settings.jpegResampleNoiseType,
+      sharpen: settings.jpegResampleSharpen,
+      sharpenAmount: settings.jpegResampleSharpenAmount,
+      upscale: settings.jpegResampleUpscale,
+      chromaBleed: settings.jpegResampleChromaBleed,
+    },
+    `${context.seed}:${card.instanceId}:jpeg-resample`,
+    {
+      onPass(pass, passes) {
+        guard(context);
+        reportProgress(card, context, pass, passes);
+      },
+    },
+  );
+  guard(context);
+  const output = input.slice();
+  writeRegion(output, context.width, bounds, result.pixels);
+  return output;
+}
+
 function reportProgress(
   card: MoshEffectCard,
   context: ProcessContext,
@@ -1046,25 +1161,12 @@ const processors: Record<
   'motion-transfer': motionTransfer,
   'chroma-drift': chromaDrift,
   'dct-damage': dctDamage,
+  'jpeg-resample': jpegResample,
   'edge-melt': edgeMelt,
   'flow-field': flowField,
 };
 
-export function countChangedPixels(before: Uint8ClampedArray, after: Uint8ClampedArray): number {
-  let changed = 0;
-  const length = Math.min(before.length, after.length);
-  for (let offset = 0; offset < length; offset += 4) {
-    if (
-      before[offset] !== after[offset] ||
-      before[offset + 1] !== after[offset + 1] ||
-      before[offset + 2] !== after[offset + 2] ||
-      before[offset + 3] !== after[offset + 3]
-    ) {
-      changed += 1;
-    }
-  }
-  return changed;
-}
+export { countChangedPixels } from '../utils/pixels';
 
 export function processMoshStack(
   pixels: Uint8ClampedArray,

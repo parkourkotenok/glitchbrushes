@@ -72,3 +72,7 @@ Zoom оставался неизменным в обеих сериях. Test ha
 - `npm run build`
 - Региональный Brush result byte-exact совпадает с crop полноразмерного обработанного результата в regression test.
 - History unique/shared-buffer accounting и static lifecycle assertions для surface version, mask reuse, production launcher и Worker `self.close()` покрыты тестами.
+
+## Integrated follow-up — 2026-08-22
+
+Этот документ сохраняет замеры этапа 2026-08-21 и не выдаёт их за новый benchmark. Последующие изменения оставили JPEG-кодек и Image Brush processing в Worker, добавили bounded JPEG resolution ≥28 px, stable-seed Progressive Decay и opacity fade без нового main-thread render loop. Текущий worktree проходит typecheck, 282/282 теста и production build; актуальные функциональные изменения перечислены в `README.md` и `AGENT_WORKLOG.md`.

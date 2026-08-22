@@ -53,3 +53,7 @@ The production regression suite additionally covers required-asset selection, de
 ## Browser limitation
 
 The desktop app's direct Edge browser binding was unavailable because the ChatGPT Edge extension is not installed. The repository's headed CDP/WebDriver acceptance scripts were used instead; Firefox was headed, and the visual multi-viewport capture was performed with Edge's existing CDP harness.
+
+## Current integrated status — 2026-08-22
+
+The command table above remains evidence for its original acceptance run. The current worktree additionally passes typecheck, 282/282 tests, and production build. In-app acceptance for JPEG Melt and Fade along stroke confirmed correct controls, disabled Essential Opacity, stable scroll position, and zero console errors.

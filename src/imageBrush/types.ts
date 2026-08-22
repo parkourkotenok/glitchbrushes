@@ -1,4 +1,9 @@
 import type { Point, Rectangle } from '../types';
+import {
+  imageBrushFxDefinitions as sharedImageBrushFxDefinitions,
+  supportsImageBrushStages,
+  type SharedImageBrushStage,
+} from '../effects/sharedRegistry';
 
 export type ImageBrushMode = 'stamp' | 'trail' | 'scatter' | 'sequence' | 'random-hose';
 /** Source selection is project state, deliberately separate from placement mode. */
@@ -30,6 +35,7 @@ export type StampMutationMode =
   | 'whole-trail';
 export type StampEvolutionCurve =
   'constant' | 'linear' | 'ease-in' | 'ease-out' | 'exponential' | 'pulse' | 'random-walk';
+export type StampOpacityEvolutionMode = 'constant' | 'fade';
 export type StampAlphaMode = 'preserve' | 'inside' | 'bleed' | 'corrupt';
 export type StampFxStage = 'before' | 'each' | 'after' | 'before-after';
 export type StampSpacingUnit = 'percent' | 'pixels';
@@ -63,7 +69,8 @@ export type ImageBrushFxId =
   | 'flow-field'
   | 'motion-transfer'
   | 'pixel-embroidery'
-  | 'xerox-decay';
+  | 'xerox-decay'
+  | 'jpeg-resample';
 
 export interface ImageBrushFxItem {
   id: string;
@@ -85,6 +92,16 @@ export interface ImageBrushFxItem {
   xeroxBanding?: number;
   xeroxBlackCrush?: number;
   xeroxColorMode?: 'mono' | 'duotone';
+  jpegTargetLongEdge?: number;
+  jpegQuality?: number;
+  jpegPasses?: number;
+  jpegNoise?: boolean;
+  jpegNoiseAmount?: number;
+  jpegNoiseType?: 'luma' | 'rgb';
+  jpegSharpen?: boolean;
+  jpegSharpenAmount?: number;
+  jpegUpscale?: 'smooth' | 'pixelated';
+  jpegChromaBleed?: number;
 }
 
 export interface ImageBrushSettings {
@@ -94,6 +111,10 @@ export interface ImageBrushSettings {
   spacing: number;
   spacingUnit: StampSpacingUnit;
   opacity: number;
+  opacityEvolutionMode: StampOpacityEvolutionMode;
+  opacityFadeStart: number;
+  opacityFadeEnd: number;
+  opacityFadeCurve: StampEvolutionCurve;
   flow: number;
   angle: number;
   rotationMode: StampRotationMode;
@@ -414,6 +435,15 @@ export interface ImageBrushPreviewRequest {
   evolutionOffset: number;
 }
 
+const defaultImageBrushEffectPool: ImageBrushFxId[] = sharedImageBrushFxDefinitions
+  .filter(
+    (definition) =>
+      !definition.legacy &&
+      !definition.experimental &&
+      definition.imageBrushStages.includes('tip'),
+  )
+  .map((definition) => definition.id);
+
 export const defaultImageBrushSettings: ImageBrushSettings = {
   glitchAmount: 'clean',
   mode: 'trail',
@@ -421,6 +451,10 @@ export const defaultImageBrushSettings: ImageBrushSettings = {
   spacing: 48,
   spacingUnit: 'percent',
   opacity: 1,
+  opacityEvolutionMode: 'constant',
+  opacityFadeStart: 1,
+  opacityFadeEnd: 0.05,
+  opacityFadeCurve: 'linear',
   flow: 1,
   angle: 0,
   rotationMode: 'follow',
@@ -461,16 +495,7 @@ export const defaultImageBrushSettings: ImageBrushSettings = {
   maximumEffects: 3,
   lockEffectPool: false,
   allowRepeatedCombinations: false,
-  effectPool: [
-    'slice',
-    'block-corruption',
-    'rgb-split',
-    'scanline',
-    'codec-block-damage',
-    'pixel-sort',
-    'datamosh',
-    'chroma-drift',
-  ],
+  effectPool: [...defaultImageBrushEffectPool],
   accumulation: 0.68,
   recovery: 0.08,
   alphaStability: 0.88,
@@ -506,7 +531,14 @@ export const defaultImageBrushSettings: ImageBrushSettings = {
   variantCount: 8,
 };
 
-export { imageBrushFxDefinitions } from '../effects/sharedRegistry';
+export const imageBrushFxDefinitions = sharedImageBrushFxDefinitions;
+
+export function supportsImageBrushFxStages(
+  effectId: ImageBrushFxId,
+  required: readonly SharedImageBrushStage[],
+): boolean {
+  return supportsImageBrushStages(effectId, required);
+}
 
 export function createImageBrushFx(effectId: ImageBrushFxId): ImageBrushFxItem {
   const base: ImageBrushFxItem = {
@@ -538,6 +570,21 @@ export function createImageBrushFx(effectId: ImageBrushFxId): ImageBrushFxItem {
       xeroxBanding: 0.14,
       xeroxBlackCrush: 0.36,
       xeroxColorMode: 'mono',
+    };
+  }
+  if (effectId === 'jpeg-resample') {
+    return {
+      ...base,
+      jpegTargetLongEdge: 96,
+      jpegQuality: 34,
+      jpegPasses: 2,
+      jpegNoise: false,
+      jpegNoiseAmount: 0.08,
+      jpegNoiseType: 'luma',
+      jpegSharpen: false,
+      jpegSharpenAmount: 0.25,
+      jpegUpscale: 'smooth',
+      jpegChromaBleed: 0.08,
     };
   }
   return base;

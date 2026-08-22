@@ -19,7 +19,6 @@ import type {
 
 const experimentalBrushIds = [
   'mirror-fold-brush',
-  'halftone-collapse-brush',
   'raster-loom-brush',
   'contour-crawl-brush',
 ] as const satisfies readonly AlgorithmId[];
@@ -542,7 +541,6 @@ describe('experimental directional brush effects', () => {
       const fallback = advancedContext(
         {
           mirrorFoldFallbackAngle: 37,
-          halftoneFallbackAngle: 37,
           rasterLoomFallbackAngle: 37,
           contourCrawlFallbackAngle: 37,
         },
@@ -558,7 +556,6 @@ describe('experimental directional brush effects', () => {
     const signatures = ['seed-a', 'seed-b', 'seed-c'].map((seed) => {
       const context = advancedContext({
         mirrorFoldRgbSlip: 9,
-        halftoneDrift: 14,
         rasterLoomStripWidth: 9,
         contourCrawlSideDrift: 12,
       });
@@ -575,8 +572,6 @@ describe('experimental directional brush effects', () => {
       const context = advancedContext({
         mirrorFoldRepetitions: 99,
         mirrorFoldOffset: 999,
-        halftoneCellSize: 999,
-        halftoneDrift: 999,
         rasterLoomStripWidth: 999,
         rasterLoomSourceOffset: 999,
         contourCrawlRepeatCount: 99,

@@ -9,6 +9,7 @@ import {
   legacyAlgorithmList,
 } from '../src/glitchAlgorithms/index';
 import type { GlitchContext } from '../src/types/index';
+import { jpegResampleBrushAlgorithm } from '../src/glitchAlgorithms/jpegResampleBrush';
 
 const width = 180;
 const height = 112;
@@ -90,7 +91,9 @@ try {
       },
       feedbackMemory: original.slice(),
     };
-    algorithms[item.id].apply(context);
+    const renderer =
+      item.id === 'jpeg-resample-brush' ? jpegResampleBrushAlgorithm : algorithms[item.id];
+    renderer.apply(context);
     const difference = new Uint8ClampedArray(pixels.length);
     for (let offset = 0; offset < pixels.length; offset += 4) {
       difference[offset] = Math.min(255, Math.abs(pixels[offset]! - original[offset]!) * 3);

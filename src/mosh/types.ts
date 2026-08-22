@@ -7,6 +7,7 @@ export type MoshEffectId =
   | 'motion-transfer'
   | 'chroma-drift'
   | 'dct-damage'
+  | 'jpeg-resample'
   | 'edge-melt'
   | 'flow-field';
 
@@ -77,6 +78,16 @@ export interface MoshEffectSettings {
   chromaQuality: number;
   randomBlockReplacement: number;
   neighborInheritance: number;
+  jpegResampleTargetLongEdge: number;
+  jpegResampleQuality: number;
+  jpegResamplePasses: number;
+  jpegResampleNoise: boolean;
+  jpegResampleNoiseAmount: number;
+  jpegResampleNoiseType: 'luma' | 'rgb';
+  jpegResampleSharpen: boolean;
+  jpegResampleSharpenAmount: number;
+  jpegResampleUpscale: 'smooth' | 'pixelated';
+  jpegResampleChromaBleed: number;
   edgeThreshold: number;
   edgeSensitivity: number;
   edgeDirection: 'away' | 'toward' | 'tangent' | 'down' | 'up';
@@ -221,6 +232,16 @@ export const defaultMoshSettings: MoshEffectSettings = {
   chromaQuality: 0.48,
   randomBlockReplacement: 0.12,
   neighborInheritance: 0.2,
+  jpegResampleTargetLongEdge: 128,
+  jpegResampleQuality: 32,
+  jpegResamplePasses: 2,
+  jpegResampleNoise: false,
+  jpegResampleNoiseAmount: 0.08,
+  jpegResampleNoiseType: 'luma',
+  jpegResampleSharpen: false,
+  jpegResampleSharpenAmount: 0.25,
+  jpegResampleUpscale: 'smooth',
+  jpegResampleChromaBleed: 0.12,
   edgeThreshold: 54,
   edgeSensitivity: 1.15,
   edgeDirection: 'down',
@@ -291,6 +312,14 @@ export const moshEffectDefinitions: MoshEffectDefinition[] = [
     targets: ['whole', 'brush', 'selection', 'luminance', 'edge'],
   },
   {
+    id: 'jpeg-resample',
+    name: 'JPEG Resample',
+    description: 'Worker-only JPEG recompression over a bounded local region.',
+    icon: 'jpeg-resample-brush',
+    passes: (settings) => settings.jpegResamplePasses,
+    targets: ['whole', 'brush', 'selection', 'luminance', 'edge'],
+  },
+  {
     id: 'edge-melt',
     name: 'Edge Melt',
     description: 'Carry silhouettes and boundaries into coherent streaks.',
@@ -313,7 +342,7 @@ export function createMoshCard(effectId: MoshEffectId, expanded = true): MoshEff
     instanceId: `${effectId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     effectId,
     enabled: true,
-    mix: 1,
+    mix: effectId === 'jpeg-resample' ? 0.9 : 1,
     expanded,
     target: 'whole',
     settings: { ...defaultMoshSettings },
@@ -402,6 +431,18 @@ export const moshPresetParameterKeys: Record<MoshEffectId, Array<keyof MoshEffec
     'chromaQuality',
     'randomBlockReplacement',
     'neighborInheritance',
+  ],
+  'jpeg-resample': [
+    'jpegResampleTargetLongEdge',
+    'jpegResampleQuality',
+    'jpegResamplePasses',
+    'jpegResampleNoise',
+    'jpegResampleNoiseAmount',
+    'jpegResampleNoiseType',
+    'jpegResampleSharpen',
+    'jpegResampleSharpenAmount',
+    'jpegResampleUpscale',
+    'jpegResampleChromaBleed',
   ],
   'edge-melt': [
     'edgeThreshold',
@@ -722,6 +763,55 @@ const rawMoshPresets: MoshPreset[] = [
       coefficientDropout: 0.48,
       randomBlockReplacement: 0.38,
       neighborInheritance: 0.62,
+    },
+  },
+  {
+    name: 'Soft Recompress',
+    effectId: 'jpeg-resample',
+    settings: { jpegResampleTargetLongEdge: 256, jpegResampleQuality: 52, jpegResamplePasses: 1 },
+  },
+  {
+    name: 'Thumbnail Decode',
+    effectId: 'jpeg-resample',
+    settings: { jpegResampleTargetLongEdge: 48, jpegResampleQuality: 30, jpegResamplePasses: 2 },
+  },
+  {
+    name: 'Repeated Artifact',
+    effectId: 'jpeg-resample',
+    settings: { jpegResampleTargetLongEdge: 96, jpegResampleQuality: 16, jpegResamplePasses: 4 },
+  },
+  {
+    name: 'Chroma Leak',
+    effectId: 'jpeg-resample',
+    settings: {
+      jpegResampleTargetLongEdge: 128,
+      jpegResampleQuality: 24,
+      jpegResamplePasses: 2,
+      jpegResampleChromaBleed: 0.42,
+    },
+  },
+  {
+    name: 'Grainy Cache',
+    effectId: 'jpeg-resample',
+    settings: {
+      jpegResampleTargetLongEdge: 72,
+      jpegResampleQuality: 19,
+      jpegResamplePasses: 3,
+      jpegResampleNoise: true,
+      jpegResampleNoiseAmount: 0.22,
+      jpegResampleNoiseType: 'rgb',
+    },
+  },
+  {
+    name: 'Hard Upscale',
+    effectId: 'jpeg-resample',
+    settings: {
+      jpegResampleTargetLongEdge: 40,
+      jpegResampleQuality: 38,
+      jpegResamplePasses: 2,
+      jpegResampleSharpen: true,
+      jpegResampleSharpenAmount: 0.38,
+      jpegResampleUpscale: 'pixelated',
     },
   },
   {

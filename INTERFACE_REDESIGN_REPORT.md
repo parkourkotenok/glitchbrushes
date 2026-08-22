@@ -158,3 +158,7 @@ The UI runner additionally verified:
 - The retro visual language deliberately retains some uppercase micro-labels in the canvas chrome;
   the inspector hierarchy is calmer, but this was not a full application-wide redesign.
 - Firefox's current BiDi path does not expose the page's rAF sample array, as noted above.
+
+## Current integrated status — 2026-08-22
+
+The redesigned inspector now also uses the shared Compact Icon Browser for Effect, Mosh Add Effect, and Image Brush Style, plus a persistent accessible Controls/Layers splitter. Image Brush Evolution exposes smooth Progressive Decay and Fade along stroke; fade disables Essential Opacity with an explicit explanation. Current validation passes typecheck, 282/282 tests, production build, and an in-app UI smoke with zero console errors.

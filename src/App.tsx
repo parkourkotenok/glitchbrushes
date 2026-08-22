@@ -28,6 +28,7 @@ import { BrushesTabs, InspectorTabs } from './components/InspectorTabs';
 import { EffectPanel } from './components/EffectPanel';
 import { RetouchPanel } from './components/RetouchPanel';
 import { LayersDock } from './components/LayersDock';
+import { ControlsLayersSplitter } from './components/ControlsLayersSplitter';
 import { LandingScreen } from './components/LandingScreen';
 import { InterfaceModeSwitch, type InterfaceMode } from './components/InterfaceModeSwitch';
 import { ShortcutsModal, ExportModal, ProjectModal } from './components/Modals';
@@ -37,7 +38,7 @@ import {
   defaultAlgorithmSettings,
   legacyAlgorithmList,
 } from './glitchAlgorithms';
-import { migrateAlgorithmSelection } from './glitchAlgorithms/migration';
+import { migrateImportedAlgorithmSelection } from './glitchAlgorithms/migration';
 import { deriveAdvancedBrushOverlays } from './glitchAlgorithms/advancedBrushConfig';
 import { randomizeEffectSettings, resetEffectSettings } from './components/effectControlRegistry';
 import type { BrushProgress } from './brush/engine';
@@ -76,6 +77,7 @@ import {
   composeActiveLayerPixels,
   composeImageLayers,
   composeLayerPixels,
+  composeLayerPixelsRegion,
   composeLayerStack,
   composeLayerStackBelowActive,
   createImageLayerStack,
@@ -93,7 +95,7 @@ import {
   type SerializedLayerStack,
 } from './layers/sparseLayers';
 import { algorithmIconIds } from './icons/effects';
-import { countChangedPixels } from './mosh/engine';
+import { countChangedPixels } from './utils/pixels';
 import {
   removeImageBrushAsset as removeImageBrushAssetFromLibrary,
   normalizeImageBrushAssetSelection,
@@ -650,6 +652,7 @@ function GlitchBrushesEditor({
   const imageBrushStorageHydratedRef = useRef(false);
   const imageBrushStorageWarningRef = useRef(false);
   const inspectorScrollRef = useRef<HTMLDivElement>(null);
+  const controlsLayersPaneRef = useRef<HTMLDivElement>(null);
   const inspectorScrollPositionsRef = useRef<Record<InspectorPanelId, number>>({
     effect: 0,
     retouch: 0,
@@ -1120,6 +1123,7 @@ function GlitchBrushesEditor({
       if (processedRegion.length !== bounds.width * bounds.height * 4) {
         throw new Error('Regional Worker result size did not match its write bounds.');
       }
+      const sourceIsRegional = sourceBefore.length === processedRegion.length;
       for (let row = 0; row < bounds.height; row += 1) {
         const localRowStart = row * bounds.width * 4;
         const destinationRowStart = ((bounds.y + row) * current.width + bounds.x) * 4;
@@ -1133,7 +1137,8 @@ function GlitchBrushesEditor({
         let column = 0;
         while (column < bounds.width) {
           const localOffset = localRowStart + column * 4;
-          const sourceOffset = destinationRowStart + column * 4;
+          const sourceOffset =
+            (sourceIsRegional ? localRowStart : destinationRowStart) + column * 4;
           if (
             sourceBefore[sourceOffset] === processedRegion[localOffset] &&
             sourceBefore[sourceOffset + 1] === processedRegion[localOffset + 1] &&
@@ -1147,7 +1152,8 @@ function GlitchBrushesEditor({
           column += 1;
           while (column < bounds.width) {
             const nextLocal = localRowStart + column * 4;
-            const nextSource = destinationRowStart + column * 4;
+            const nextSource =
+              (sourceIsRegional ? localRowStart : destinationRowStart) + column * 4;
             if (
               sourceBefore[nextSource] === processedRegion[nextLocal] &&
               sourceBefore[nextSource + 1] === processedRegion[nextLocal + 1] &&
@@ -2556,7 +2562,24 @@ function GlitchBrushesEditor({
       const capturedBrush = { ...brushRef.current };
       const capturedBounds = { ...stroke.bounds };
       const capturedMovement = { ...stroke.movement };
-      const sourcePixels = processingSourcePixels(stroke.sourceLayerId, stroke.sourceMode);
+      const jpegWriteBounds =
+        capturedAlgorithm === 'jpeg-resample-brush'
+          ? structuralWriteBounds(
+              capturedBounds,
+              current.width,
+              current.height,
+              capturedAlgorithm,
+              capturedSettings,
+            )
+          : null;
+      const sourcePixels =
+        jpegWriteBounds && stroke.sourceMode === 'selected-layer'
+          ? composeLayerPixelsRegion(
+              layerStackRef.current,
+              stroke.sourceLayerId,
+              jpegWriteBounds,
+            )
+          : processingSourcePixels(stroke.sourceLayerId, stroke.sourceMode);
       const capturedCloneSource = cloneSource ? { ...cloneSource } : undefined;
       const capturedFeedbackMemory =
         capturedAlgorithm === 'feedback-brush' && feedbackMemoryRef.current
@@ -2688,7 +2711,20 @@ function GlitchBrushesEditor({
         bumpDocument();
       };
 
-      const pixels = sourcePixels.slice().buffer;
+      const requestBounds = jpegWriteBounds
+        ? {
+            x: capturedBounds.x - jpegWriteBounds.x,
+            y: capturedBounds.y - jpegWriteBounds.y,
+            width: capturedBounds.width,
+            height: capturedBounds.height,
+          }
+        : capturedBounds;
+      const requestPixels = jpegWriteBounds
+        ? stroke.sourceMode === 'selected-layer'
+          ? sourcePixels.slice()
+          : cropRgbaRegion(sourcePixels, current.width, jpegWriteBounds)
+        : sourcePixels.slice();
+      const pixels = requestPixels.buffer;
       const maskBuffer = mask.buffer;
       const transfers: Transferable[] = [pixels, maskBuffer];
       if (capturedFeedbackMemory) transfers.push(capturedFeedbackMemory);
@@ -2697,12 +2733,12 @@ function GlitchBrushesEditor({
           type: 'process',
           request: {
             jobId,
-            width: current.width,
-            height: current.height,
+            width: jpegWriteBounds?.width ?? current.width,
+            height: jpegWriteBounds?.height ?? current.height,
             pixels,
             mask: maskBuffer,
-            maskBounds: capturedBounds,
-            bounds: capturedBounds,
+            maskBounds: requestBounds,
+            bounds: requestBounds,
             algorithm: capturedAlgorithm,
             settings: capturedSettings,
             brush: capturedBrush,
@@ -2711,6 +2747,9 @@ function GlitchBrushesEditor({
             movement: capturedMovement,
             cloneSource: capturedCloneSource,
             feedbackMemory: capturedFeedbackMemory,
+            origin: jpegWriteBounds
+              ? { x: jpegWriteBounds.x, y: jpegWriteBounds.y }
+              : undefined,
             tool: capturedTool,
           },
         },
@@ -4277,7 +4316,7 @@ function GlitchBrushesEditor({
       const project = JSON.parse(await file.text()) as {
         image: { width: number; height: number; fileName: string; embedded?: string | null };
         seed: string;
-        algorithm: AlgorithmId;
+        algorithm: unknown;
         brush: BrushSettings;
         settings: AlgorithmSettings;
         layerStack?: SerializedLayerStack;
@@ -4333,7 +4372,11 @@ function GlitchBrushesEditor({
       bumpLayers();
       current.dirty = true;
       setSeed(project.seed);
-      const migratedAlgorithm = migrateAlgorithmSelection(project.algorithm, project.settings);
+      const migratedAlgorithm = migrateImportedAlgorithmSelection(
+        project.algorithm,
+        project.settings,
+        new Set(Object.keys(algorithms)),
+      );
       setAlgorithm(migratedAlgorithm.algorithm);
       setBrush(project.brush);
       setSettings({ ...defaultAlgorithmSettings, ...migratedAlgorithm.settings });
@@ -4358,7 +4401,11 @@ function GlitchBrushesEditor({
       resetHistory();
       updateWorkingCanvas();
       bumpDocumentSurface();
-      setNotice('Project imported. History starts from the imported result.');
+      setNotice(
+        migratedAlgorithm.warning
+          ? `Project imported. ${migratedAlgorithm.warning} History starts from the imported result.`
+          : 'Project imported. History starts from the imported result.',
+      );
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Project import failed.');
     }
@@ -4698,6 +4745,7 @@ function GlitchBrushesEditor({
             )}
           </div>
 
+          <div className="controls-layers-pane" ref={controlsLayersPaneRef}>
           <div className="inspector-scroll" ref={inspectorScrollRef}>
             <div
               id="workspace-panel-brushes"
@@ -4800,6 +4848,7 @@ function GlitchBrushesEditor({
                   hasBrushMask={brushContext.affectedPixels > 0}
                   hasPreview={Boolean(moshPreviewBufferRef.current)}
                   previewStale={moshPreviewStale}
+                  documentLongEdge={Math.max(docRef.current.width, docRef.current.height)}
                   onRackChange={changeMoshRack}
                   onSeedChange={setMoshSeed}
                   onPreviewChange={(enabled) => {
@@ -4892,6 +4941,8 @@ function GlitchBrushesEditor({
             </section>
             )}
           </div>
+          <ControlsLayersSplitter containerRef={controlsLayersPaneRef} />
+          <div className="controls-layers-layers">
           <LayersDock
             layerStack={layerStack}
             layerVersion={layerVersion}
@@ -4919,6 +4970,8 @@ function GlitchBrushesEditor({
             onSelectLayer={selectEditableLayer}
             onRunLayerOperation={runLayerOperation}
           />
+          </div>
+          </div>
         </aside>
       </div>
 

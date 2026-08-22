@@ -59,3 +59,7 @@ Keep Random Glitch Chain, RGB Separation Trail, Codec Damage Trail, and Packet L
 ## Verification result
 
 The curated harness completed with 18 built-in recipes × 2 source images, asserting a repeat render for each cell. Its sheet has no timestamps or nondeterministic data; only manifest timing observations vary by machine.
+
+## Current integrated status — 2026-08-22
+
+The 18-style catalog and source-preservation contract remain intact. Progressive Decay now uses a stable structural seed and gentler pacing, while Fade along stroke is an independent Evolution setting rather than a catalog replacement. Current full validation passes typecheck, 282/282 tests, and production build.

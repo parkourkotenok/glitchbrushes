@@ -74,8 +74,17 @@ export function ImageBrushEssentialControls({
         max={1}
         step={0.01}
         defaultValue={1}
+        disabled={settings.opacityEvolutionMode === 'fade'}
+        displayValue={
+          settings.opacityEvolutionMode === 'fade' ? 'Controlled by stroke fade' : undefined
+        }
         onChange={(value) => onUpdate('opacity', value)}
       />
+      {settings.opacityEvolutionMode === 'fade' && (
+        <p className="image-brush-control-lock-note" role="status">
+          Opacity is locked because Evolution → Fade along stroke controls it.
+        </p>
+      )}
       <SliderField
         helpId="image-brush.glitch-amount"
         label="Glitch Amount"

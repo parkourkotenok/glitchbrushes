@@ -1,4 +1,9 @@
 import { MousePointer2, RotateCcw, X } from 'lucide-react';
+import {
+  jpegResamplePresetIds,
+  resolveJpegResamplePreset,
+  type JpegResamplePresetId,
+} from '../effects/jpegResamplePresets';
 import type { AlgorithmId, AlgorithmSettings, Rectangle } from '../types';
 import { SliderField } from './SliderField';
 import { AxisPair, Toggle } from './ui/controls';
@@ -23,6 +28,7 @@ interface AlgorithmControlsProps {
   metaRecipeLocked: boolean;
   onMetaRecipeLockChange(value: boolean): void;
   onNewMetaRecipe(): void;
+  jpegReferenceLongEdge?: number;
 }
 
 function RangePair({
@@ -152,6 +158,34 @@ function CustomControl({
 }: AlgorithmControlsProps & {
   control: Extract<EffectControl, { kind: 'custom' }>;
 }) {
+  if (control.component === 'jpeg-resample-presets') {
+    const applyPreset = (preset: JpegResamplePresetId) => {
+      const values = resolveJpegResamplePreset(preset, props.jpegReferenceLongEdge ?? 256);
+      props.update('jpegResampleQuality', values.quality);
+      props.update('jpegResamplePasses', values.passes);
+      props.update('jpegResampleNoise', values.noise);
+      props.update('jpegResampleNoiseAmount', values.noiseAmount);
+      props.update('jpegResampleSharpen', values.sharpen);
+      props.update('jpegResampleSharpenAmount', values.sharpenAmount);
+      props.update('jpegResampleChromaBleed', values.chromaBleed);
+      props.update('jpegResampleTargetLongEdge', values.targetLongEdge);
+      if (values.noiseType) props.update('jpegResampleNoiseType', values.noiseType);
+      if (values.upscale) props.update('jpegResampleUpscale', values.upscale);
+      if (values.forceFullAmount) props.update('jpegResampleMix', 1);
+    };
+    return (
+      <fieldset className="effect-segmented-control jpeg-resample-presets">
+        <legend>Quality presets</legend>
+        <div role="group" aria-label="JPEG Resample quality presets">
+          {jpegResamplePresetIds.map((preset) => (
+            <button key={preset} type="button" onClick={() => applyPreset(preset)}>
+              {preset[0]!.toUpperCase() + preset.slice(1)}
+            </button>
+          ))}
+        </div>
+      </fieldset>
+    );
+  }
   if (control.component === 'feedback-memory') {
     return (
       <div className={`advanced-state-row ${props.feedbackMemoryReady ? 'ready' : ''}`}>
@@ -231,15 +265,28 @@ function CustomControl({
 
 function renderControl(control: EffectControl, props: AlgorithmControlsProps) {
   if (control.kind === 'slider') {
+    const value =
+      control.key === 'jpegResampleTargetLongEdge'
+        ? Math.max(28, props.settings.jpegResampleTargetLongEdge)
+        : props.settings[control.key];
     return (
       <SliderField
         key={control.key}
         label={control.label}
-        value={props.settings[control.key]}
+        value={value}
         min={control.min}
         max={control.max}
         step={control.step}
         suffix={control.suffix}
+        numericInput={
+          props.algorithm === 'jpeg-resample-brush' &&
+          (control.key === 'jpegResampleTargetLongEdge' || control.key === 'jpegResampleQuality')
+        }
+        displayValue={
+          control.key === 'jpegResampleMix'
+            ? `${Math.round(props.settings.jpegResampleMix * 100)}%`
+            : undefined
+        }
         defaultValue={control.resetValue}
         onChange={(value) => props.update(control.key, value)}
       />

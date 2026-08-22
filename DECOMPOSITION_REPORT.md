@@ -87,8 +87,9 @@ npm install
 npm run dev
 npm run typecheck
 npm test            # vitest
-bunx vitest run     # тот же набор на Bun
-npm run test:raw    # bun test src/raw (быстро)
 npm run build
-npx prettier --check "src/**/*.ts"
 ```
+
+## Current integrated status — 2026-08-22
+
+Команды выше синхронизированы с текущим `package.json`; несуществующие `test:raw` и Bun-команды удалены. Последняя полная проверка: typecheck, 282/282 теста и production build. Актуальные пользовательские функции описаны в `README.md`, подробная хронология — в `AGENT_WORKLOG.md`.

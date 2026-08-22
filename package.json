@@ -16,6 +16,7 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
+    "jpeg-js": "0.4.4",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

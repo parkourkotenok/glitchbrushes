@@ -1,4 +1,5 @@
 import { algorithms } from '../glitchAlgorithms';
+import { jpegResampleBrushAlgorithm } from '../glitchAlgorithms/jpegResampleBrush';
 import { structuralWriteBounds } from '../glitchAlgorithms/structuralUtils';
 import type { AlgorithmId, AlgorithmSettings, BrushSettings, Point, Rectangle } from '../types';
 import { pixelToByteOffset } from '../utils/geometry';
@@ -21,6 +22,8 @@ export interface BrushProcessRequest {
   movement: Point;
   cloneSource?: Rectangle;
   feedbackMemory?: ArrayBuffer;
+  /** Document-space origin when `pixels` is a cropped worker-only buffer. */
+  origin?: Point;
   tool: 'brush' | 'restore';
 }
 
@@ -90,7 +93,10 @@ export function processBrushEffect(
       mask[destination] = compactMask[source]! / 255;
     }
   }
-  const activeAlgorithm = algorithms[request.algorithm];
+  const activeAlgorithm =
+    request.algorithm === 'jpeg-resample-brush'
+      ? jpegResampleBrushAlgorithm
+      : algorithms[request.algorithm];
   const writeBounds =
     request.tool === 'restore' || activeAlgorithm.family === 'pixel'
       ? request.bounds
@@ -160,7 +166,13 @@ export function processBrushEffect(
   return {
     jobId: request.jobId,
     pixels: resultPixels,
-    writeBounds,
+    writeBounds: request.origin
+      ? {
+          ...writeBounds,
+          x: writeBounds.x + request.origin.x,
+          y: writeBounds.y + request.origin.y,
+        }
+      : writeBounds,
     affectedPixels,
   };
 }

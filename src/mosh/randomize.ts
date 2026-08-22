@@ -103,6 +103,14 @@ export const moshRandomizerSchemas: Record<MoshEffectId, RandomizableParameter[]
     p('randomBlockReplacement', 0, 1, 0.02, 0.24, 0.01, 'weighted-low'),
     p('neighborInheritance', 0, 1, 0.04, 0.42, 0.01, 'weighted-low'),
   ],
+  'jpeg-resample': [
+    p('jpegResampleTargetLongEdge', 28, 2048, 48, 384, 1, 'weighted-low'),
+    p('jpegResampleQuality', 1, 100, 18, 58, 1, 'centered'),
+    p('jpegResamplePasses', 1, 4, 1, 3, 1, 'weighted-low'),
+    p('jpegResampleNoiseAmount', 0, 1, 0, 0.24, 0.01, 'weighted-low'),
+    p('jpegResampleSharpenAmount', 0, 1, 0, 0.42, 0.01, 'weighted-low'),
+    p('jpegResampleChromaBleed', 0, 1, 0.04, 0.34, 0.01, 'weighted-low'),
+  ],
   'edge-melt': [
     p('edgeThreshold', 1, 255, 24, 112, 1, 'weighted-low'),
     p('edgeSensitivity', 0.1, 3, 0.65, 1.8, 0.01, 'centered'),
@@ -210,6 +218,11 @@ function randomizeChoices(
     ] as const);
   } else if (effectId === 'dct-damage') {
     settings.dctBlockSize = choice(random, [8, 16] as const);
+  } else if (effectId === 'jpeg-resample') {
+    settings.jpegResampleNoise = random.next() < 0.42;
+    settings.jpegResampleNoiseType = choice(random, ['luma', 'rgb'] as const);
+    settings.jpegResampleSharpen = random.next() < 0.38;
+    settings.jpegResampleUpscale = choice(random, ['smooth', 'pixelated'] as const);
   } else if (effectId === 'edge-melt') {
     settings.edgeDirection = choice(random, ['away', 'toward', 'tangent', 'down', 'up'] as const);
     settings.preserveStrongEdges = random.next() < 0.7;

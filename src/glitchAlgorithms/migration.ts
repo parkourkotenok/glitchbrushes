@@ -6,6 +6,10 @@ export interface MigratedAlgorithmSelection {
   migratedFrom: AlgorithmId | null;
 }
 
+export interface ImportedAlgorithmSelection extends MigratedAlgorithmSelection {
+  warning: string | null;
+}
+
 export function migrateAlgorithmSelection(
   algorithm: AlgorithmId,
   settings: Partial<AlgorithmSettings> = {},
@@ -46,6 +50,26 @@ export function migrateAlgorithmSelection(
     };
   }
   return { algorithm, settings: { ...settings }, migratedFrom: null };
+}
+
+export function migrateImportedAlgorithmSelection(
+  algorithm: unknown,
+  settings: Partial<AlgorithmSettings>,
+  knownAlgorithms: ReadonlySet<string>,
+): ImportedAlgorithmSelection {
+  const importedId = typeof algorithm === 'string' ? algorithm : '';
+  if (!knownAlgorithms.has(importedId)) {
+    return {
+      algorithm: 'slice-displacement',
+      settings: {},
+      migratedFrom: null,
+      warning: `Unknown effect "${importedId || 'missing'}" was replaced with Slice Displacement.`,
+    };
+  }
+  return {
+    ...migrateAlgorithmSelection(importedId as AlgorithmId, settings),
+    warning: null,
+  };
 }
 
 export function migratePreset(preset: Preset): Preset {

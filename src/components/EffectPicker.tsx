@@ -1,8 +1,13 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { GlitchAlgorithm } from '../types';
 import { EffectIcon, algorithmIconIds } from '../icons/effects';
 import { EffectPreviewStage } from './EffectPreviewStage';
 import { sharedEffectForAlgorithm } from '../effects/sharedRegistry';
+import {
+  CompactIconBrowser,
+  type CompactIconBrowserGroup,
+  type CompactIconBrowserItem,
+} from './CompactIconBrowser';
 
 interface EffectPickerProps {
   value: GlitchAlgorithm;
@@ -10,6 +15,8 @@ interface EffectPickerProps {
   descriptions: Record<string, string>;
   legacyItems?: GlitchAlgorithm[];
   onChange(id: GlitchAlgorithm['id']): void;
+  open?: boolean;
+  onOpenChange?(open: boolean): void;
 }
 
 export function EffectPicker({
@@ -18,14 +25,19 @@ export function EffectPicker({
   descriptions,
   legacyItems = [],
   onChange,
+  open: controlledOpen,
+  onOpenChange,
 }: EffectPickerProps) {
-  const [open, setOpen] = useState(false);
-  const [showLegacy, setShowLegacy] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = (next: boolean | ((current: boolean) => boolean)) => {
+    const resolved = typeof next === 'function' ? next(open) : next;
+    if (controlledOpen === undefined) setInternalOpen(resolved);
+    onOpenChange?.(resolved);
+  };
   const [previewId, setPreviewId] = useState(value.id);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const optionRefs = useRef<Partial<Record<GlitchAlgorithm['id'], HTMLButtonElement | null>>>({});
-  const listboxId = useId();
 
   const closeAndRestoreFocus = () => {
     setOpen(false);
@@ -50,65 +62,86 @@ export function EffectPicker({
 
   useEffect(() => {
     if (!open) return;
-    requestAnimationFrame(() => optionRefs.current[value.id]?.focus());
+    setPreviewId(value.id);
   }, [open, value.id]);
 
   useEffect(() => setPreviewId(value.id), [value.id]);
   const previewItem = [...items, ...legacyItems].find((item) => item.id === previewId) ?? value;
   const sharedPreviewItem = sharedEffectForAlgorithm(previewId);
 
-  const renderGroup = (label: string, group: GlitchAlgorithm[], meta = false) =>
-    group.length ? (
-      <div className="effect-picker-group" key={label}>
-        <span>{label}</span>
-        {group.map((item) => (
-          <button
-            aria-selected={item.id === value.id}
-            className={item.id === value.id ? 'selected' : ''}
-            key={item.id}
-            ref={(node) => {
-              optionRefs.current[item.id] = node;
-            }}
-            onClick={() => {
-              onChange(item.id);
-              closeAndRestoreFocus();
-            }}
-            onPointerEnter={() => setPreviewId(item.id)}
-            onFocus={() => setPreviewId(item.id)}
-            role="option"
-            tabIndex={-1}
-          >
-            <EffectIcon id={algorithmIconIds[item.id]} size={18} />
-            <span>
-              <strong>
-                {item.name}
-                {meta && <em className="meta-effect-badge">META</em>}
-                {item.experimental && <em className="new-effect-badge">NEW</em>}
-              </strong>
-              <small>{descriptions[item.id]}</small>
-            </span>
-          </button>
-        ))}
-      </div>
-    ) : null;
+  const asBrowserItem = (item: GlitchAlgorithm, badge?: 'NEW' | 'META' | 'LEGACY') => {
+    const shared = sharedEffectForAlgorithm(item.id);
+    return {
+      id: item.id,
+      value: item,
+      name: item.name,
+      description: shared?.description ?? descriptions[item.id],
+      cost: (
+        shared?.cost ??
+        (item.family === 'advanced-brush' ? 'high' : item.family === 'pixel' ? 'low' : 'medium')
+      ).toUpperCase(),
+      badge,
+      icon: <EffectIcon id={algorithmIconIds[item.id]} size={21} />,
+    } satisfies CompactIconBrowserItem<GlitchAlgorithm>;
+  };
+  const groups: CompactIconBrowserGroup<GlitchAlgorithm>[] = [
+    {
+      id: 'experimental',
+      label: 'NEW / EXPERIMENTAL',
+      items: items.filter((item) => item.experimental).map((item) => asBrowserItem(item, 'NEW')),
+    },
+    {
+      id: 'advanced',
+      label: 'ADVANCED BRUSH EFFECTS',
+      items: items
+        .filter((item) => item.family === 'advanced-brush' && !item.experimental)
+        .map((item) => asBrowserItem(item)),
+    },
+    {
+      id: 'structural',
+      label: 'STRUCTURAL GLITCH STAMPS',
+      items: items
+        .filter(
+          (item) =>
+            item.family !== 'pixel' &&
+            item.family !== 'advanced-brush' &&
+            !item.experimental &&
+            item.id !== 'structural-mixed',
+        )
+        .map((item) => asBrowserItem(item)),
+    },
+    {
+      id: 'meta',
+      label: 'META / COMBINATION EFFECTS',
+      items: items
+        .filter((item) => item.id === 'structural-mixed')
+        .map((item) => asBrowserItem(item, 'META')),
+    },
+    {
+      id: 'legacy',
+      label: 'LEGACY EFFECTS',
+      disclosure: true,
+      items: legacyItems.map((item) => asBrowserItem(item, 'LEGACY')),
+    },
+  ];
 
   return (
     <div className={`effect-picker ${open ? 'open' : ''}`} ref={rootRef}>
-      <button
-        ref={triggerRef}
-        aria-expanded={open}
-        aria-haspopup="listbox"
-        aria-controls={listboxId}
-        className="effect-picker-trigger"
-        onClick={() => setOpen((current) => !current)}
-      >
-        <EffectIcon id={algorithmIconIds[value.id]} size={19} />
-        <span>{value.name}</span>
-        {value.experimental && <em className="new-effect-badge">NEW</em>}
-        <span aria-hidden="true">⌄</span>
-      </button>
+      <div className="effect-picker-selected-row">
+        <button
+          ref={triggerRef}
+          aria-expanded={open}
+          aria-haspopup="listbox"
+          className="effect-picker-trigger"
+          onClick={() => setOpen((current) => !current)}
+        >
+          <EffectIcon id={algorithmIconIds[value.id]} size={19} />
+          <span>{value.name}</span>
+          {value.experimental && <em className="new-effect-badge">NEW</em>}
+        </button>
+      </div>
       {open && (
-        <div className="effect-picker-menu">
+        <div className="effect-picker-menu compact-effect-picker-menu">
           <div className="effect-picker-preview-pinned">
             <EffectPreviewStage
               algorithm={previewId}
@@ -124,68 +157,17 @@ export function EffectPicker({
               experimental={previewItem.experimental}
             />
           </div>
-          <div
-            className="effect-picker-options"
-            id={listboxId}
-            role="listbox"
-            aria-label="Effects"
-            onKeyDown={(event) => {
-              const visible = [...items, ...(showLegacy ? legacyItems : [])];
-              const current = visible.findIndex(
-                (item) => optionRefs.current[item.id] === document.activeElement,
-              );
-              let next = current;
-              if (event.key === 'ArrowDown') next = Math.min(visible.length - 1, current + 1);
-              else if (event.key === 'ArrowUp') next = Math.max(0, current - 1);
-              else if (event.key === 'Home') next = 0;
-              else if (event.key === 'End') next = visible.length - 1;
-              else return;
-              event.preventDefault();
-              optionRefs.current[visible[Math.max(0, next)]?.id ?? value.id]?.focus();
+          <CompactIconBrowser
+            groups={groups}
+            selectedId={value.id}
+            ariaLabel="Effects"
+            onPreview={(item) => setPreviewId(item.id as GlitchAlgorithm['id'])}
+            onSelect={(item) => {
+              onChange(item.value.id);
+              closeAndRestoreFocus();
             }}
-          >
-            {renderGroup(
-              'NEW / EXPERIMENTAL',
-              items.filter((item) => item.experimental),
-            )}
-            {renderGroup(
-              'ADVANCED BRUSH EFFECTS',
-              items.filter((item) => item.family === 'advanced-brush' && !item.experimental),
-            )}
-            {renderGroup(
-              'STRUCTURAL GLITCH STAMPS',
-              items.filter(
-                (item) =>
-                  item.family !== 'pixel' &&
-                  item.family !== 'advanced-brush' &&
-                  !item.experimental &&
-                  item.id !== 'structural-mixed',
-              ),
-            )}
-            {renderGroup(
-              'META / COMBINATION EFFECTS',
-              items.filter((item) => item.id === 'structural-mixed'),
-              true,
-            )}
-            {legacyItems.length > 0 && (
-              <div className="effect-picker-legacy-toggle">
-                <button
-                  aria-expanded={showLegacy}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setShowLegacy((current) => !current);
-                  }}
-                >
-                  {showLegacy ? 'Hide Legacy Effects' : 'Show Legacy Effects'}
-                </button>
-                <small>
-                  Older byte-level effects. They are simpler and less structural than the main
-                  glitch tools.
-                </small>
-              </div>
-            )}
-            {showLegacy && renderGroup('LEGACY EFFECTS', legacyItems)}
-          </div>
+            onDismiss={closeAndRestoreFocus}
+          />
         </div>
       )}
     </div>

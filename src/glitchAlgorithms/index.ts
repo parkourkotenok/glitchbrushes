@@ -387,9 +387,24 @@ const mixed: GlitchAlgorithm = {
   },
 };
 
+/**
+ * Main-thread catalog descriptor only. The real codec-backed implementation is
+ * selected inside brush/engine.ts, which is loaded by the Effect Worker.
+ */
+const jpegResampleBrushDescriptor: GlitchAlgorithm = {
+  id: 'jpeg-resample-brush',
+  name: 'JPEG Resample',
+  family: 'advanced-brush',
+  experimental: true,
+  apply() {
+    throw new Error('JPEG Resample processing is only available in the Effect Worker.');
+  },
+};
+
 export const algorithms: Record<AlgorithmId, GlitchAlgorithm> = Object.fromEntries(
   [
     ...advancedBrushAlgorithms,
+    jpegResampleBrushDescriptor,
     ...structuralAlgorithms,
     ...legacyStructuralAlgorithms,
     ...baseAlgorithms,
@@ -397,7 +412,11 @@ export const algorithms: Record<AlgorithmId, GlitchAlgorithm> = Object.fromEntri
   ].map((algorithm) => [algorithm.id, algorithm]),
 ) as Record<AlgorithmId, GlitchAlgorithm>;
 
-export const algorithmList = [...advancedBrushAlgorithms, ...structuralAlgorithms];
+export const algorithmList = [
+  ...advancedBrushAlgorithms,
+  jpegResampleBrushDescriptor,
+  ...structuralAlgorithms,
+];
 
 export const legacyAlgorithmList = [paletteCollapse, channelShift, byteSwap];
 
@@ -589,16 +608,6 @@ export const defaultAlgorithmSettings = {
   mirrorFoldEdgeMode: 'mirror' as const,
   mirrorFoldFalloff: 0.35,
   mirrorFoldFallbackAngle: 0,
-  halftoneCellSize: 10,
-  halftoneCollapse: 0.58,
-  halftoneDotGain: 0.52,
-  halftoneColorMode: 'mono' as const,
-  halftoneGridAngle: 'stroke' as const,
-  halftoneDrift: 5,
-  halftoneChannelOffset: 2,
-  halftoneShape: 'circle' as const,
-  halftoneBackgroundMix: 0.18,
-  halftoneFallbackAngle: 0,
   rasterLoomStripWidth: 7,
   rasterLoomSourceOffset: 24,
   rasterLoomWeaveDepth: 0.7,
@@ -619,4 +628,15 @@ export const defaultAlgorithmSettings = {
   contourCrawlEdgePolarity: 'both' as const,
   contourCrawlMix: 0.9,
   contourCrawlFallbackAngle: 0,
+  jpegResampleTargetLongEdge: 128,
+  jpegResampleQuality: 32,
+  jpegResamplePasses: 2,
+  jpegResampleMix: 0.9,
+  jpegResampleNoise: false,
+  jpegResampleNoiseAmount: 0.08,
+  jpegResampleNoiseType: 'luma' as const,
+  jpegResampleSharpen: false,
+  jpegResampleSharpenAmount: 0.25,
+  jpegResampleUpscale: 'smooth' as const,
+  jpegResampleChromaBleed: 0.12,
 };

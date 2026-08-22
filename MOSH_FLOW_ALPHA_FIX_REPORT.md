@@ -52,3 +52,7 @@ coverage is the restored stationary clean mask; the fixed output keeps only post
 
 `artifacts/mosh-flow-alpha/mosh-flow-trail-fixed.png` remains the separate actual post-fix
 browser committed-canvas screenshot; it is intentionally not overwritten by the engine fixture.
+
+## Current integrated status — 2026-08-22
+
+The alpha fix remains covered after the shared JPEG Resample and Image Brush evolution changes. Current integrated validation passes typecheck, 282/282 tests, and the production build; the evidence hashes above remain historical fixture evidence and were not regenerated.

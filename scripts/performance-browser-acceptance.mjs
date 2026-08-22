@@ -13,6 +13,8 @@ const effectName =
 const strokeProfile =
   process.argv.find((arg) => arg.startsWith('--stroke='))?.split('=')[1] ?? 'short';
 const imageFxId = process.argv.find((arg) => arg.startsWith('--image-fx='))?.split('=')[1] ?? '';
+const moshEffectId = process.argv.find((arg) => arg.startsWith('--mosh-effect='))?.split('=')[1] ?? '';
+const uiAcceptance = process.argv.includes('--ui-acceptance');
 const mutationMode =
   process.argv.find((arg) => arg.startsWith('--mutation='))?.split('=')[1] ?? 'clean';
 const delay = (ms) => new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
@@ -97,6 +99,237 @@ function summarize(values = []) {
   return { count: sorted.length, p50: at(0.5), p95: at(0.95), max: sorted.at(-1) ?? 0 };
 }
 
+async function exerciseMosh(evaluate, capabilities) {
+  const opened = await evaluate(`(() => {
+    const button = [...document.querySelectorAll('nav button')].find((entry) => entry.textContent.trim() === 'Mosh');
+    button?.click();
+    return Boolean(button);
+  })()`);
+  if (!opened) throw new Error('Could not open Mosh Lab.');
+  await waitFor(() => evaluate(`Boolean(document.querySelector('.mosh-lab'))`));
+  await evaluate(`(() => {
+    const button = [...document.querySelectorAll('.mosh-rack-toolbar button')]
+      .find((entry) => entry.textContent.includes('Add Effect'));
+    button?.click();
+    return Boolean(button);
+  })()`);
+  await waitFor(() => evaluate(`document.querySelectorAll('.mosh-add-menu [role="option"]').length > 0`));
+  const added = await evaluate(`(() => {
+    const option = [...document.querySelectorAll('.mosh-add-menu [role="option"]')]
+      .find((entry) => entry.getAttribute('aria-label')?.includes('JPEG Resample.'));
+    option?.click();
+    return Boolean(option);
+  })()`);
+  if (!added) throw new Error(`Could not add MOSH effect: ${moshEffectId}`);
+  await waitFor(() =>
+    evaluate(`[...document.querySelectorAll('.mosh-card')].some((entry) => entry.textContent.includes('JPEG Resample'))`),
+  );
+
+  const historyCount = () => evaluate(`(() => {
+    const history = [...document.querySelectorAll('.status-data span')]
+      .find((entry) => entry.textContent.trim().startsWith('HISTORY'));
+    return Number.parseInt(history?.querySelector('strong')?.textContent ?? '-1', 10);
+  })()`);
+  const beforeHistory = await historyCount();
+  const before = JSON.parse(
+    await evaluate(`document.documentElement.getAttribute('data-glitchbrush-performance')`),
+  );
+  const previewOpened = await evaluate(`(() => {
+    const button = [...document.querySelectorAll('.mosh-rack-toolbar button')]
+      .find((entry) => entry.textContent.trim() === 'Preview');
+    button?.click();
+    return Boolean(button);
+  })()`);
+  if (!previewOpened) throw new Error('MOSH Preview control was not found.');
+  await waitFor(() =>
+    evaluate(`document.querySelector('.status-message')?.textContent.includes('preview ready')`),
+    60000,
+  );
+  const cancelled = await evaluate(`(() => {
+    const button = [...document.querySelectorAll('.mosh-rack-toolbar button')]
+      .find((entry) => entry.textContent.includes('Cancel') && !entry.disabled);
+    button?.click();
+    return Boolean(button);
+  })()`);
+  if (!cancelled) throw new Error('MOSH preview Cancel was not available.');
+  await waitFor(() => evaluate(`document.querySelector('.status-message')?.textContent.includes('preview cancelled')`));
+  const cancelKeptHistory = (await historyCount()) === beforeHistory;
+
+  const applyDurations = [];
+  for (let index = 0; index < 10; index += 1) {
+    const historyBeforeApply = await historyCount();
+    const startedAt = performance.now();
+    const clicked = await evaluate(`(() => {
+      const button = [...document.querySelectorAll('.mosh-rack-toolbar button')]
+        .find((entry) => entry.textContent.trim() === 'Apply' && !entry.disabled);
+      button?.click();
+      return Boolean(button);
+    })()`);
+    if (!clicked) throw new Error(`MOSH Apply ${index + 1} was not available.`);
+    await waitFor(async () => (await historyCount()) > historyBeforeApply, 60000);
+    applyDurations.push(performance.now() - startedAt);
+  }
+  const after = JSON.parse(
+    await evaluate(`document.documentElement.getAttribute('data-glitchbrush-performance')`),
+  );
+  const delta = (name) => (after.counts[name] ?? 0) - (before.counts[name] ?? 0);
+  const scenarioRafGaps = after.rafGaps.slice(before.rafGaps.length);
+  return {
+    browser: capabilities,
+    effect: moshEffectId,
+    applies: 10,
+    previewCancelKeptHistory: cancelKeptHistory,
+    historyDelta: (await historyCount()) - beforeHistory,
+    canvasFullSyncDelta: delta('glitchbrushes:canvas-full-sync'),
+    fitToScreenDelta: delta('glitchbrushes:fit-to-screen'),
+    applyLatency: summarize(applyDurations),
+    rafGaps: summarize(scenarioRafGaps),
+    rafGapsOver50ms: scenarioRafGaps.filter((gap) => gap >= 50).length,
+  };
+}
+
+async function exerciseUi(evaluate, stroke, capabilities) {
+  const openEffects = async () => {
+    await evaluate(`document.querySelector('.effect-picker-trigger')?.click()`);
+    await waitFor(() =>
+      evaluate(`document.querySelectorAll('.compact-effect-picker-menu [role="option"]').length > 0`),
+    );
+  };
+  await openEffects();
+  const effectAudit = await evaluate(`(() => {
+    const options = [...document.querySelectorAll('.compact-effect-picker-menu [role="option"]')];
+    const labels = options.map((entry) => entry.getAttribute('aria-label'));
+    const experimental = [...document.querySelectorAll('.compact-icon-browser-group[aria-label="NEW / EXPERIMENTAL"] [role="option"]')]
+      .map((entry) => entry.getAttribute('aria-label'));
+    return {
+      labels,
+      experimental,
+      tooltipCount: document.querySelectorAll('.compact-effect-picker-menu [role="tooltip"]').length,
+      legacyInitiallyCollapsed: !document.querySelector('.compact-icon-browser-group[aria-label="LEGACY EFFECTS"] .compact-icon-browser-grid'),
+      halftoneAbsent: !labels.some((label) => label?.includes('Halftone Collapse')),
+      experimentalUnique: experimental.every((label) => labels.filter((entry) => entry === label).length === 1),
+    };
+  })()`);
+  const previewFocus = await evaluate(`(() => {
+    const jpeg = [...document.querySelectorAll('.compact-effect-picker-menu [role="option"]')]
+      .find((entry) => entry.getAttribute('aria-label')?.includes('JPEG Resample.'));
+    jpeg?.focus();
+    return document.activeElement?.getAttribute('aria-label');
+  })()`);
+  await waitFor(() =>
+    evaluate(`[...document.querySelectorAll('.shared-effect-preview img')].some((entry) => entry.src.includes('jpeg-resample-brush'))`),
+  );
+  const previewAndKeyboard = await evaluate(`(() => {
+    const before = document.activeElement?.getAttribute('aria-label');
+    document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    const after = document.activeElement?.getAttribute('aria-label');
+    return { previewFocus: ${JSON.stringify(previewFocus)}, before, after, moved: before !== after };
+  })()`);
+  await evaluate(`document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await waitFor(() => evaluate(`!document.querySelector('.compact-effect-picker-menu')`));
+
+  const selectedExperimental = [];
+  for (const name of ['Mirror Fold', 'Raster Loom', 'Contour Crawl', 'JPEG Resample']) {
+    await openEffects();
+    const selected = await evaluate(`(() => {
+      const option = [...document.querySelectorAll('.compact-effect-picker-menu [role="option"]')]
+        .find((entry) => entry.getAttribute('aria-label')?.includes(${JSON.stringify(`${name}.`)}));
+      option?.click();
+      return Boolean(option);
+    })()`);
+    if (!selected) throw new Error(`Could not select NEW effect: ${name}`);
+    await waitFor(() =>
+      evaluate(`document.querySelector('.effect-picker-trigger')?.textContent.includes(${JSON.stringify(name)})`),
+    );
+    selectedExperimental.push(name);
+  }
+
+  await evaluate(`([...document.querySelectorAll('nav button')].find((entry) => entry.textContent.trim() === 'Mosh'))?.click()`);
+  await waitFor(() => evaluate(`Boolean(document.querySelector('.mosh-lab'))`));
+  await evaluate(`([...document.querySelectorAll('.mosh-rack-toolbar button')].find((entry) => entry.textContent.includes('Add Effect')))?.click()`);
+  await waitFor(() => evaluate(`Boolean(document.querySelector('.mosh-add-menu .compact-icon-browser'))`));
+  const moshAudit = await evaluate(`(() => {
+    const jpeg = [...document.querySelectorAll('.mosh-add-menu [role="option"]')]
+      .find((entry) => entry.getAttribute('aria-label')?.includes('JPEG Resample.'));
+    return { sameBrowser: Boolean(document.querySelector('.mosh-add-menu .compact-icon-browser')), jpegLabel: jpeg?.getAttribute('aria-label') };
+  })()`);
+  await evaluate(`document.querySelector('.mosh-add-menu [role="listbox"]')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await waitFor(() => evaluate(`!document.querySelector('.mosh-add-menu')`));
+
+  await evaluate(`([...document.querySelectorAll('nav button')].find((entry) => entry.textContent.trim() === 'Image Brush'))?.click()`);
+  await waitFor(() => evaluate(`Boolean(document.querySelector('.image-brush-lab'))`));
+  await evaluate(`document.querySelector('.image-brush-style-browser-trigger')?.click()`);
+  await waitFor(() => evaluate(`Boolean(document.querySelector('.image-brush-style-browser .compact-icon-browser'))`));
+  const styleAudit = await evaluate(`(() => {
+    const browser = document.querySelector('.image-brush-style-browser');
+    const options = [...browser.querySelectorAll('[role="option"]')];
+    const next = options.find((entry) => entry.getAttribute('aria-selected') !== 'true' && !entry.disabled);
+    const name = next?.querySelector('[role="tooltip"] strong')?.textContent;
+    next?.click();
+    return { noPreviewImages: browser.querySelectorAll('img, canvas').length === 0, optionCount: options.length, selectedName: name };
+  })()`);
+  await waitFor(() => evaluate(`!document.querySelector('.image-brush-style-browser')`));
+
+  await waitFor(() =>
+    evaluate(`Number(document.querySelector('.controls-layers-splitter')?.getAttribute('aria-valuenow')) > 0`),
+  );
+  const splitterBefore = await evaluate(`Number(document.querySelector('.controls-layers-splitter')?.getAttribute('aria-valuenow'))`);
+  const splitterRect = await evaluate(`(() => { const rect = document.querySelector('.controls-layers-splitter').getBoundingClientRect(); return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }; })()`);
+  await stroke(
+    { x: splitterRect.x + splitterRect.width / 2, y: splitterRect.y + splitterRect.height / 2 },
+    { x: splitterRect.x + splitterRect.width / 2, y: splitterRect.y - 52 },
+  );
+  await waitFor(() =>
+    evaluate(`Number(document.querySelector('.controls-layers-splitter')?.getAttribute('aria-valuenow')) !== ${splitterBefore}`),
+  );
+  const draggedHeight = await evaluate(`Number(document.querySelector('.controls-layers-splitter')?.getAttribute('aria-valuenow'))`);
+  const persistedHeight = await evaluate(`Number(localStorage.getItem('glitch-brushes.controls-pane-height.v1'))`);
+  await evaluate(`location.reload()`);
+  await waitFor(() => evaluate(`document.readyState === 'complete' && Boolean(document.querySelector('.controls-layers-splitter'))`));
+  await waitFor(() =>
+    evaluate(`Number(document.querySelector('.controls-layers-splitter')?.getAttribute('aria-valuenow')) === ${persistedHeight}`),
+  );
+  const reloadedHeight = await evaluate(`Number(document.querySelector('.controls-layers-splitter')?.getAttribute('aria-valuenow'))`);
+  const resized = await evaluate(`(async () => {
+    const pane = document.querySelector('.controls-layers-pane');
+    pane.style.height = '360px';
+    pane.style.minHeight = '360px';
+    pane.style.maxHeight = '360px';
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    return {
+      clientHeight: pane.clientHeight,
+      controlsHeight: Number(document.querySelector('.controls-layers-splitter')?.getAttribute('aria-valuenow')),
+    };
+  })()`);
+  await evaluate(`(() => {
+    const pane = document.querySelector('.controls-layers-pane');
+    pane.style.height = '';
+    pane.style.minHeight = '';
+    pane.style.maxHeight = '';
+  })()`);
+  await evaluate(`document.querySelector('.controls-layers-splitter')?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+  await waitFor(() => evaluate(`Number(localStorage.getItem('glitch-brushes.controls-pane-height.v1')) !== ${persistedHeight}`));
+  const resetHeight = await evaluate(`Number(document.querySelector('.controls-layers-splitter')?.getAttribute('aria-valuenow'))`);
+
+  return {
+    browser: capabilities,
+    effectAudit,
+    previewAndKeyboard,
+    selectedExperimental,
+    moshAudit,
+    styleAudit,
+    splitter: {
+      before: splitterBefore,
+      dragged: draggedHeight,
+      persisted: persistedHeight,
+      reloaded: reloadedHeight,
+      resizeClientHeight: resized.clientHeight,
+      resizeClamped: resized.controlsHeight,
+      reset: resetHeight,
+    },
+  };
+}
+
 async function stopBrowser(child) {
   if (child.exitCode !== null) return;
   child.kill();
@@ -116,6 +349,8 @@ async function exercise(evaluate, stroke, capabilities) {
       `document.querySelector('.topbar-file')?.textContent.includes('parkour-kotenok-road.jpg')`,
     ),
   );
+  if (uiAcceptance) return exerciseUi(evaluate, stroke, capabilities);
+  if (moshEffectId) return exerciseMosh(evaluate, capabilities);
   if (imageFxId) {
     const openedImageBrush = await evaluate(`(() => {
       const button = [...document.querySelectorAll('nav button')].find((entry) => entry.textContent.trim() === 'Image Brush');
@@ -197,11 +432,11 @@ async function exercise(evaluate, stroke, capabilities) {
   })()`);
     if (!opened) throw new Error('Could not open the effect picker.');
     await waitFor(() =>
-      evaluate(`document.querySelectorAll('.effect-picker-group button').length > 0`),
+      evaluate(`document.querySelectorAll('.compact-effect-picker-menu [role="option"]').length > 0`),
     );
     const selected = await evaluate(`(() => {
-    const option = [...document.querySelectorAll('.effect-picker-group button')]
-      .find((button) => button.querySelector('strong')?.textContent.trim().startsWith(${JSON.stringify(effectName)}));
+    const option = [...document.querySelectorAll('.compact-effect-picker-menu [role="option"]')]
+      .find((button) => button.getAttribute('aria-label')?.includes(${JSON.stringify(`${effectName}.`)}));
     if (!option) return false;
     option.click();
     return true;
@@ -280,7 +515,15 @@ async function exercise(evaluate, stroke, capabilities) {
   const historyReady = await evaluate(
     `(() => { const button = document.querySelector('button[aria-label="Undo"]'); if (!button || button.disabled) return false; button.click(); return true; })()`,
   );
-  if (!historyReady) throw new Error('Undo was not available after the acceptance strokes.');
+  if (!historyReady) {
+    const state = await evaluate(`({
+      notice: document.querySelector('.status-message')?.textContent.trim(),
+      activeLayer: document.querySelector('.layer-row.active, .layer-row[aria-selected="true"]')?.textContent.trim(),
+      pointerEvents: getComputedStyle(document.querySelector('.work-canvas')).pointerEvents,
+      metrics: JSON.parse(document.documentElement.getAttribute('data-glitchbrush-performance'))
+    })`);
+    throw new Error(`Undo was not available after the acceptance strokes: ${JSON.stringify(state)}`);
+  }
   await delay(350);
   const undoneHash = await hashCanvas();
   const redoReady = await evaluate(
@@ -339,10 +582,11 @@ async function runEdge() {
       '--no-first-run',
       '--no-default-browser-check',
       '--disable-features=msEdgeFirstRunExperience',
+      '--headless=new',
       '--window-size=1500,980',
       appUrl,
     ],
-    { stdio: 'ignore', windowsHide: false },
+    { stdio: 'ignore', windowsHide: true },
   );
   let rpc;
   try {
@@ -414,6 +658,7 @@ async function runFirefox() {
     [
       '--no-remote',
       '--wait-for-browser',
+      '--headless',
       '--profile',
       profile,
       `--remote-debugging-port=${port}`,
@@ -421,7 +666,7 @@ async function runFirefox() {
       '--height=980',
       appUrl,
     ],
-    { stdio: 'ignore', windowsHide: false },
+    { stdio: 'ignore', windowsHide: true },
   );
   let rpc;
   try {

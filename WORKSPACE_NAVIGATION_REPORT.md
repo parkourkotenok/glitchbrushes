@@ -12,3 +12,7 @@
 
 - `npm run typecheck` passed.
 - `npm test -- --run src/workspaceNavigation.test.ts src/productionUi.test.ts` passed: 2 files, 24 tests.
+
+## Current integrated status — 2026-08-22
+
+Navigation remains unchanged after the Compact Icon Browser, Controls/Layers splitter, shared JPEG Resample, smooth Progressive Decay, and stroke-opacity fade work. Current full validation is `npm run typecheck`, 282/282 tests, and `npm run build`.

@@ -598,6 +598,62 @@ describe('MOSH LAB algorithms', () => {
     expect(origins.at(-1)).toEqual([24, 16]);
   });
 
+  it('runs JPEG Resample deterministically on only the masked local crop and preserves alpha', () => {
+    const width = 48;
+    const height = 32;
+    const source = image(width, height);
+    const brushMask = new Uint8Array(width * height);
+    for (let y = 9; y < 21; y += 1) {
+      for (let x = 13; x < 31; x += 1) brushMask[y * width + x] = 255;
+    }
+    for (let offset = 3; offset < source.length; offset += 8) source[offset] = 128;
+    const changedOutsideCrop = source.slice();
+    changedOutsideCrop[0] = 255;
+    changedOutsideCrop[1] = 0;
+    changedOutsideCrop[2] = 255;
+    const jpeg = {
+      ...card('jpeg-resample', {
+        jpegResampleTargetLongEdge: 8,
+        jpegResampleQuality: 14,
+        jpegResamplePasses: 3,
+        jpegResampleNoise: true,
+        jpegResampleNoiseAmount: 0.2,
+        jpegResampleNoiseType: 'rgb',
+        jpegResampleChromaBleed: 0.28,
+      }),
+      target: 'brush' as const,
+      mix: 1,
+    };
+    const first = processMoshStack(source, width, height, [jpeg], 'jpeg-local', { brushMask }).pixels;
+    const repeat = processMoshStack(source, width, height, [jpeg], 'jpeg-local', { brushMask }).pixels;
+    const outsideChanged = processMoshStack(changedOutsideCrop, width, height, [jpeg], 'jpeg-local', {
+      brushMask,
+    }).pixels;
+    expect(first).toEqual(repeat);
+    let insideChanges = 0;
+    for (let index = 0; index < width * height; index += 1) {
+      const offset = index * 4;
+      expect(first[offset + 3]).toBe(source[offset + 3]);
+      if (brushMask[index]) {
+        if (
+          first[offset] !== source[offset] ||
+          first[offset + 1] !== source[offset + 1] ||
+          first[offset + 2] !== source[offset + 2]
+        )
+          insideChanges += 1;
+      } else {
+        expect(first.slice(offset, offset + 4)).toEqual(source.slice(offset, offset + 4));
+      }
+    }
+    expect(insideChanges).toBeGreaterThan(0);
+    for (let y = 9; y < 21; y += 1) {
+      for (let x = 13; x < 31; x += 1) {
+        const offset = (y * width + x) * 4;
+        expect(outsideChanged.slice(offset, offset + 4)).toEqual(first.slice(offset, offset + 4));
+      }
+    }
+  });
+
   it('changes output when the rack order changes', () => {
     const pixels = image();
     const sort = card('pixel-sort', { intervalMode: 'full-row', sortProperty: 'red' });
@@ -621,6 +677,7 @@ describe('MOSH LAB algorithms', () => {
       'motion-field',
       'chroma-drift',
       'dct-damage',
+      'jpeg-resample',
       'edge-melt',
       'flow-field',
     ];
@@ -705,6 +762,37 @@ describe('direct brush Worker engine', () => {
     expect(() => processBrushEffect(brushRequest(), { shouldCancel: () => true })).toThrow(
       BrushCancelledError,
     );
+  });
+
+  it('runs JPEG Resample from a cropped Effect buffer and restores document-space bounds', () => {
+    const width = 32;
+    const height = 28;
+    const pixels = image(width, height);
+    const mask = new Uint8Array(24 * 20).fill(255);
+    const request: BrushProcessRequest = {
+      ...brushRequest(),
+      jobId: 'jpeg-local-effect',
+      width,
+      height,
+      pixels: pixels.buffer,
+      originalPixels: undefined,
+      mask: mask.buffer,
+      maskBounds: { x: 4, y: 4, width: 24, height: 20 },
+      bounds: { x: 4, y: 4, width: 24, height: 20 },
+      origin: { x: 100, y: 80 },
+      algorithm: 'jpeg-resample-brush',
+      settings: {
+        ...defaultAlgorithmSettings,
+        jpegResampleTargetLongEdge: 12,
+        jpegResampleQuality: 12,
+        jpegResamplePasses: 2,
+      },
+    };
+    const result = processBrushEffect(request);
+    expect(request.pixels.byteLength).toBe(width * height * 4);
+    expect(result.writeBounds).toEqual({ x: 100, y: 80, width, height });
+    expect(result.pixels).toHaveLength(width * height * 4);
+    expect(result.affectedPixels).toBeGreaterThan(0);
   });
 });
 

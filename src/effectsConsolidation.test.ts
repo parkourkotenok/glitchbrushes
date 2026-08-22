@@ -5,10 +5,14 @@ import {
   defaultAlgorithmSettings,
   legacyAlgorithmList,
 } from './glitchAlgorithms';
-import { migrateAlgorithmSelection } from './glitchAlgorithms/migration';
+import {
+  migrateAlgorithmSelection,
+  migrateImportedAlgorithmSelection,
+} from './glitchAlgorithms/migration';
 import { selectStructuralMixRecipe } from './glitchAlgorithms/structural';
 import { imageBrushFxDefinitions } from './imageBrush/types';
 import { migrateImageBrushFxId } from './imageBrush/assets';
+import { buildImageBrushEvolutionRecipeOptions } from './effects/sharedRegistry';
 import type { AlgorithmSettings, GlitchContext } from './types';
 
 function sourceImage(width = 128, height = 96): Uint8ClampedArray {
@@ -59,6 +63,35 @@ function hash(bytes: Uint8ClampedArray): number {
 }
 
 describe('effect consolidation and migration', () => {
+  it('builds Evolution recipes from the registry and filters future FX by stage', () => {
+    const options = buildImageBrushEvolutionRecipeOptions(
+      [
+        { id: 'production-fx', name: 'Production', imageBrushStages: ['tip', 'trail'] },
+        {
+          id: 'future-fx',
+          name: 'Future',
+          imageBrushStages: ['tip', 'trail'],
+          experimental: true,
+        },
+        { id: 'stamp-only', name: 'Stamp only', imageBrushStages: ['stamp'] },
+      ] as const,
+      ['trail'],
+    );
+    expect(options).toEqual([
+      ['clean', 'Clean'],
+      ['mixed', 'Current FX stack'],
+      ['production-fx', 'Production'],
+      ['future-fx', 'NEW · Future'],
+    ]);
+    const productionOptions = buildImageBrushEvolutionRecipeOptions(
+      imageBrushFxDefinitions,
+      ['trail'],
+    );
+    expect(productionOptions.map(([id]) => id)).toEqual(
+      expect.arrayContaining(['pixel-embroidery', 'xerox-decay', 'jpeg-resample']),
+    );
+  });
+
   it('shows only the two consolidated structural effects and hides useful legacy effects by default', () => {
     const primaryIds = algorithmList.map((item) => item.id);
     expect(primaryIds).toContain('block-corruption');
@@ -104,6 +137,22 @@ describe('effect consolidation and migration', () => {
     expect(migrateImageBrushFxId('tile-scramble')).toBe('codec-block-damage');
     expect(migrateImageBrushFxId('pixel-noise')).toBe('palette');
     expect(migrateImageBrushFxId('bit-flip')).toBe('palette');
+  });
+
+  it('falls back safely when a project references a removed experimental effect', () => {
+    expect(
+      migrateImportedAlgorithmSelection(
+        'halftone-collapse-brush',
+        { microIntensity: 0.1 },
+        new Set(Object.keys(algorithms)),
+      ),
+    ).toEqual({
+      algorithm: 'slice-displacement',
+      settings: {},
+      migratedFrom: null,
+      warning:
+        'Unknown effect "halftone-collapse-brush" was replaced with Slice Displacement.',
+    });
   });
 
   it('renders all seven Block Corruption modes as changed, distinct results', () => {

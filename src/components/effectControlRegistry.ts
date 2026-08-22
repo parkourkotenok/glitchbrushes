@@ -63,7 +63,8 @@ export interface ToggleEffectControl extends ControlBase {
 }
 export interface CustomEffectControl extends ControlBase {
   kind: 'custom';
-  component: 'clone-source' | 'feedback-memory' | 'meta-recipe' | 'channel-shift';
+  component:
+    'clone-source' | 'feedback-memory' | 'meta-recipe' | 'channel-shift' | 'jpeg-resample-presets';
 }
 export type EffectControl =
   | SliderEffectControl
@@ -340,28 +341,6 @@ export const effectControlRegistry: Partial<Record<AlgorithmId, readonly EffectC
     slider('mirrorFoldFalloff', 'Falloff', 'fine', 0, 1, 0.01),
     slider('mirrorFoldFallbackAngle', 'Still-stroke angle', 'fine', -180, 180, 1, '°'),
   ],
-  'halftone-collapse-brush': [
-    slider('halftoneCellSize', 'Cell size', 'primary', 3, 48, 1, ' px'),
-    slider('halftoneCollapse', 'Collapse', 'primary', 0, 1, 0.01),
-    slider('halftoneDotGain', 'Ink gain', 'primary', 0, 1, 0.01),
-    segmented('halftoneColorMode', 'Colour', 'primary', [
-      option('mono', 'Mono'),
-      option('rgb', 'RGB'),
-    ]),
-    select('halftoneGridAngle', 'Grid direction', 'primary', [
-      option('stroke', 'Along stroke'),
-      option('perpendicular', 'Across stroke'),
-      option('fixed', 'Fixed'),
-    ]),
-    slider('halftoneDrift', 'Drift', 'fine', 0, 40, 1, ' px'),
-    slider('halftoneChannelOffset', 'Channel shift', 'fine', 0, 12, 1, ' px'),
-    segmented('halftoneShape', 'Dot shape', 'fine', [
-      option('circle', 'Circle'),
-      option('square', 'Square'),
-    ]),
-    slider('halftoneBackgroundMix', 'Background mix', 'fine', 0, 1, 0.01),
-    slider('halftoneFallbackAngle', 'Still-stroke angle', 'fine', -180, 180, 1, '°'),
-  ],
   'raster-loom-brush': [
     slider('rasterLoomStripWidth', 'Strip width', 'primary', 2, 64, 1, ' px'),
     slider('rasterLoomSourceOffset', 'Source offset', 'primary', 1, 120, 1, ' px'),
@@ -392,6 +371,47 @@ export const effectControlRegistry: Partial<Record<AlgorithmId, readonly EffectC
       option('both', 'Both'),
     ]),
     slider('contourCrawlFallbackAngle', 'Still-stroke angle', 'fine', -180, 180, 1, '°'),
+  ],
+  'jpeg-resample-brush': [
+    custom('jpeg-resample-presets', 'primary'),
+    slider('jpegResampleQuality', 'JPEG quality', 'primary', 1, 100, 1),
+    slider('jpegResampleTargetLongEdge', 'Codec resolution', 'primary', 28, 2048, 1, ' px'),
+    slider('jpegResampleMix', 'Mix', 'primary', 0, 1, 0.01),
+    toggle('jpegResampleNoise', 'Apply noise', 'primary'),
+    toggle('jpegResampleSharpen', 'Apply sharpen', 'primary'),
+    slider('jpegResamplePasses', 'Recompression passes', 'fine', 1, 4, 1),
+    slider(
+      'jpegResampleNoiseAmount',
+      'Noise amount',
+      'fine',
+      0,
+      1,
+      0.01,
+      '',
+      (s) => s.jpegResampleNoise,
+    ),
+    select(
+      'jpegResampleNoiseType',
+      'Noise colour',
+      'fine',
+      [option('luma', 'Luma'), option('rgb', 'RGB')],
+      (s) => s.jpegResampleNoise,
+    ),
+    slider(
+      'jpegResampleSharpenAmount',
+      'Sharpen amount',
+      'fine',
+      0,
+      1,
+      0.01,
+      '',
+      (s) => s.jpegResampleSharpen,
+    ),
+    segmented('jpegResampleUpscale', 'Upscale', 'fine', [
+      option('smooth', 'Smooth'),
+      option('pixelated', 'Pixelated'),
+    ]),
+    slider('jpegResampleChromaBleed', 'Chroma bleed', 'fine', 0, 1, 0.01),
   ],
   'slice-displacement': [
     segmented('sliceOrientation', 'Orientation', 'primary', orientation),

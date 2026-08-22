@@ -1,10 +1,12 @@
 import { algorithms, defaultAlgorithmSettings } from '../glitchAlgorithms';
+import { processJpegResample } from '../effects/jpegResampleCore';
 import {
   effectiveImageBrushStages,
   sharedEffectForImageBrush,
   supportsImageBrushStages,
 } from '../effects/sharedRegistry';
-import { countChangedPixels, processMoshStack } from '../mosh/engine';
+import { processMoshStack } from '../mosh/engine';
+import { countChangedPixels } from '../utils/pixels';
 import { defaultMoshSettings, type MoshEffectCard, type MoshEffectId } from '../mosh/types';
 import type { Point, Rectangle } from '../types';
 import { clamp, unionRect } from '../utils/geometry';
@@ -12,6 +14,7 @@ import { createSeededRandom } from '../utils/prng';
 import { anchorPoint, rotationForStamp } from './path';
 import {
   imageBrushFxDefinitions,
+  supportsImageBrushFxStages,
   type ImageBrushAsset,
   type ImageBrushFxId,
   type ImageBrushFxItem,
@@ -331,6 +334,32 @@ function applyNativeImageBrushFx(
     return applyPixelEmbroidery(input, width, height, item, seed);
   }
   if (item.effectId === 'xerox-decay') return applyXeroxDecay(input, width, height, item, seed);
+  if (item.effectId === 'jpeg-resample') {
+    const amount = clamp(item.amount, 0.01, 1);
+    const longEdge = Math.max(width, height);
+    const target = clamp(Math.round(item.jpegTargetLongEdge ?? 96), Math.min(28, longEdge), 2048);
+    return processJpegResample(
+      input,
+      width,
+      height,
+      {
+        // Amount remains meaningful for procedural mutation while Mix is applied
+        // once by the shared rack compositor below.
+        targetLongEdge: Math.round(longEdge + (target - longEdge) * amount),
+        quality: Math.round(100 + (clamp(item.jpegQuality ?? 34, 1, 100) - 100) * amount),
+        passes: Math.max(1, Math.round(1 + (clamp(item.jpegPasses ?? 2, 1, 4) - 1) * amount)),
+        mix: 1,
+        noise: item.jpegNoise ?? false,
+        noiseAmount: item.jpegNoiseAmount ?? 0.08,
+        noiseType: item.jpegNoiseType ?? 'luma',
+        sharpen: item.jpegSharpen ?? false,
+        sharpenAmount: item.jpegSharpenAmount ?? 0.25,
+        upscale: item.jpegUpscale ?? 'smooth',
+        chromaBleed: item.jpegChromaBleed ?? 0.08,
+      },
+      seed,
+    ).pixels;
+  }
   return null;
 }
 
@@ -342,6 +371,7 @@ function applyStructuralFx(
   seed: string,
   direction: Point,
 ): Uint8ClampedArray {
+  if (item.effectId === 'jpeg-resample') return input.slice();
   const algorithmId = sharedEffectForImageBrush(item.effectId)?.algorithmId;
   if (!algorithmId) return input.slice();
   const output = input.slice();
@@ -412,6 +442,7 @@ function applyMoshFx(
   seed: string,
   direction: Point,
 ): Uint8ClampedArray {
+  if (item.effectId === 'jpeg-resample') return input.slice();
   const effectId = sharedEffectForImageBrush(item.effectId)?.moshId;
   if (!effectId) return input.slice();
   const amount = clamp(item.amount, 0.01, 1);
@@ -695,17 +726,44 @@ function curveAmount(
   seed: string,
   index: number,
 ): number {
+  progress = clamp(progress, 0, 1);
   if (curve === 'constant') return 1;
-  if (curve === 'ease-in') return progress * progress;
-  if (curve === 'ease-out') return 1 - (1 - progress) ** 2;
+  if (curve === 'ease-in') return progress ** 1.6;
+  if (curve === 'ease-out') return 1 - (1 - progress) ** 1.6;
   if (curve === 'exponential')
-    return progress <= 0 ? 0 : (Math.exp(progress * 4) - 1) / (Math.exp(4) - 1);
-  if (curve === 'pulse') return 0.5 + Math.sin(progress * Math.PI * 4) * 0.5;
+    return progress <= 0 ? 0 : (Math.exp(progress * 1.75) - 1) / (Math.exp(1.75) - 1);
+  if (curve === 'pulse')
+    return clamp(
+      progress + Math.sin(progress * Math.PI * 2) * Math.sin(progress * Math.PI) * 0.08,
+      0,
+      1,
+    );
   if (curve === 'random-walk') {
-    const random = createSeededRandom(`${seed}:walk:${Math.floor(index / 2)}`);
-    return clamp(progress * 0.65 + random.next() * 0.55, 0, 1);
+    const segment = Math.floor(index / 4);
+    const segmentProgress = (index % 4) / 4;
+    const from = createSeededRandom(`${seed}:walk:${segment}`).next() - 0.5;
+    const to = createSeededRandom(`${seed}:walk:${segment + 1}`).next() - 0.5;
+    const smooth = segmentProgress * segmentProgress * (3 - 2 * segmentProgress);
+    const drift = from + (to - from) * smooth;
+    return clamp(progress + drift * Math.sin(progress * Math.PI) * 0.12, 0, 1);
   }
   return progress;
+}
+
+export function imageBrushOpacityForStamp(
+  settings: ImageBrushSettings,
+  index: number,
+  total: number,
+  seed: string,
+): number {
+  if (settings.opacityEvolutionMode !== 'fade') return clamp(settings.opacity, 0, 1);
+  const progress = total <= 1 ? 0 : clamp(index / Math.max(1, total - 1), 0, 1);
+  const curved = curveAmount(settings.opacityFadeCurve, progress, seed, index);
+  return clamp(
+    settings.opacityFadeStart + (settings.opacityFadeEnd - settings.opacityFadeStart) * curved,
+    0,
+    1,
+  );
 }
 
 export function imageBrushMutationStrength(
@@ -720,7 +778,9 @@ export function imageBrushMutationStrength(
   if (settings.mutationMode === 'progressive') {
     const start = Math.min(settings.progressiveStart, settings.progressiveEnd);
     const end = Math.max(settings.progressiveStart, settings.progressiveEnd);
-    const speedExponent = 2.5 - settings.evolutionSpeed * 2;
+    // Evolution speed changes pacing gently; the old 2.5…0.5 range made most
+    // damage arrive in one or two visibly abrupt stamps.
+    const speedExponent = 1.25 - clamp(settings.evolutionSpeed, 0, 1) * 0.5;
     const paced = clamp(curve ** speedExponent, 0, 1);
     return clamp(start + (end - start) * paced, 0, settings.maxCorruption);
   }
@@ -748,16 +808,17 @@ function scaledRack(
   }));
 }
 
-const mutationEffectPool: ImageBrushFxId[] = [
-  'slice',
-  'block-corruption',
-  'rgb-split',
-  'scanline',
-  'pixel-sort',
-  'codec-block-damage',
-  'datamosh',
-  'chroma-drift',
-];
+function mutationEffectPool(settings: ImageBrushSettings): ImageBrushFxId[] {
+  const stages = effectiveImageBrushStages(settings.fxStage, settings.mutationMode);
+  return imageBrushFxDefinitions
+    .filter(
+      (definition) =>
+        !('legacy' in definition && definition.legacy) &&
+        !definition.experimental &&
+        supportsImageBrushFxStages(definition.id, stages),
+    )
+    .map((definition) => definition.id);
+}
 
 function shuffled<T>(values: T[], random: ReturnType<typeof createSeededRandom>): T[] {
   const output = [...values];
@@ -777,12 +838,14 @@ function proceduralRack(
 ): ImageBrushFxItem[] {
   const random = createSeededRandom(seed);
   const enabledIds = rack.filter((item) => item.enabled).map((item) => item.effectId);
-  const configured = settings.effectPool.length ? settings.effectPool : mutationEffectPool;
+  const configured = settings.effectPool.length
+    ? settings.effectPool
+    : mutationEffectPool(settings);
   const sourcePool =
     settings.lockEffectPool && enabledIds.length
       ? [...new Set(enabledIds)]
       : [...new Set(configured)];
-  const fullPool = sourcePool.length ? sourcePool : mutationEffectPool;
+  const fullPool = sourcePool.length ? sourcePool : mutationEffectPool(settings);
   const diversityPoolSize = clamp(
     Math.round(1 + (fullPool.length - 1) * settings.effectVariation),
     1,
@@ -1051,7 +1114,9 @@ function variantForStamp(
     }
     const cached = pool[poolIndex];
     if (cached) return cached;
-    const variantSeed = `${seed}:${strokeId}:progressive:${poolIndex}`;
+    // Keep the corruption topology stable across the pool. Only its strength
+    // should evolve; changing the seed at every level caused visible jumps.
+    const variantSeed = `${seed}:${strokeId}:progressive`;
     const variantAmount = imageBrushMutationStrength(
       settings,
       poolIndex,
@@ -1215,15 +1280,22 @@ export function prepareImageBrushLiveSourceVariants(
     .filter((asset) => asset.width > 0 && asset.height > 0);
   if (!assets.length) return [];
   const copies = Math.max(1, Math.round(request.settings.stampsPerStep));
-  const totalPlacements = Math.min(request.settings.maxGeneratedStamps, request.stamps.length * copies);
+  const totalPlacements = Math.min(
+    request.settings.maxGeneratedStamps,
+    request.stamps.length * copies,
+  );
   const useAllAssets = request.assetMode === 'all';
   const order = request.assetOrder ?? 'cycle';
   const placements = new Map<string, number>();
   const scanLimit = Math.max(totalPlacements, assets.length * 24);
-  for (let flatIndex = 0; flatIndex < scanLimit && placements.size < assets.length; flatIndex += 1) {
+  for (
+    let flatIndex = 0;
+    flatIndex < scanLimit && placements.size < assets.length;
+    flatIndex += 1
+  ) {
     const random = createSeededRandom(`${request.seed}:${request.strokeId}:layout:${flatIndex}`);
     const asset = !useAllAssets
-      ? assets.find((candidate) => candidate.id === request.activeAssetId) ?? assets[0]!
+      ? (assets.find((candidate) => candidate.id === request.activeAssetId) ?? assets[0]!)
       : order === 'random'
         ? random.pick(assets)
         : assets[flatIndex % assets.length]!;
@@ -1234,7 +1306,7 @@ export function prepareImageBrushLiveSourceVariants(
     request.settings.mutationMode,
   );
   const compatibleRack = request.rack.filter((item) =>
-    supportsImageBrushStages(item.effectId, requiredFxStages),
+    supportsImageBrushFxStages(item.effectId, requiredFxStages),
   );
   const cleanCache = new Map<string, PreparedTip>();
   const fixedCache = new Map<string, PreparedTip>();
@@ -1247,7 +1319,9 @@ export function prepareImageBrushLiveSourceVariants(
   };
   return assets.map((asset, assetIndex) => {
     const flatIndex = placements.get(asset.id) ?? totalPlacements + assetIndex;
-    const pathStamp = request.stamps[Math.min(request.stamps.length - 1, Math.floor(flatIndex / copies))] ?? {
+    const pathStamp = request.stamps[
+      Math.min(request.stamps.length - 1, Math.floor(flatIndex / copies))
+    ] ?? {
       position: { x: request.width / 2, y: request.height / 2 },
       previousPosition: { x: request.width / 2, y: request.height / 2 },
       direction: { x: 1, y: 0 },
@@ -1446,7 +1520,7 @@ export function processImageBrushStroke(
     request.settings.mutationMode,
   );
   const compatibleRack = request.rack.filter((item) =>
-    supportsImageBrushStages(item.effectId, requiredFxStages),
+    supportsImageBrushFxStages(item.effectId, requiredFxStages),
   );
   const sourceDocument = request.pixels;
   const sourceBounds = request.sourceBounds ?? {
@@ -1497,7 +1571,8 @@ export function processImageBrushStroke(
   const placements: Placement[] = [];
   let affectedBounds: Rectangle | null = null;
   let placementIndex = 0;
-  outer: for (const pathStamp of request.stamps) {
+  outer: for (let pathIndex = 0; pathIndex < request.stamps.length; pathIndex += 1) {
+    const pathStamp = request.stamps[pathIndex]!;
     for (let copy = 0; copy < copies; copy += 1) {
       if (placementIndex >= totalPlacements) break outer;
       guard(options);
@@ -1508,8 +1583,8 @@ export function processImageBrushStroke(
         request.assetMode === 'all' ||
         (!request.assetMode &&
           (request.settings.mode === 'sequence' || request.settings.mode === 'random-hose'));
-      const assetOrder = request.assetOrder ??
-        (request.settings.mode === 'random-hose' ? 'random' : 'cycle');
+      const assetOrder =
+        request.assetOrder ?? (request.settings.mode === 'random-hose' ? 'random' : 'cycle');
       if (useAllAssets && assetOrder === 'cycle')
         asset = assetList[flatIndex % assetList.length] ?? active;
       if (useAllAssets && assetOrder === 'random')
@@ -1544,12 +1619,18 @@ export function processImageBrushStroke(
         ? request.settings.minPressureOpacity +
           (1 - request.settings.minPressureOpacity) * pathStamp.pressure
         : 1;
+      const strokeOpacity = imageBrushOpacityForStamp(
+        request.settings,
+        pathIndex,
+        request.stamps.length,
+        request.seed,
+      );
       const opacity = clamp(
-        request.settings.opacity *
+        strokeOpacity *
           request.settings.flow *
           pressureOpacity *
           (1 - random.next() * request.settings.opacityJitter),
-        0.01,
+        0,
         1,
       );
       const direction = request.settings.followDirection

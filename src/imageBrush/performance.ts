@@ -176,11 +176,26 @@ export function imageBrushFxCacheKey(
     evolutionCurve: settings.evolutionCurve,
     fxStage: settings.fxStage,
     variantCount: Math.min(settings.variantCount, settings.maxCachedVariants),
-    rack: rack.map(({ effectId, enabled, amount, mix }) => ({
-      effectId,
-      enabled,
-      amount,
-      mix,
+    rack: rack.map((item) => ({
+      effectId: item.effectId,
+      enabled: item.enabled,
+      amount: item.amount,
+      mix: item.mix,
+      jpeg:
+        item.effectId === 'jpeg-resample'
+          ? {
+              targetLongEdge: item.jpegTargetLongEdge,
+              quality: item.jpegQuality,
+              passes: item.jpegPasses,
+              noise: item.jpegNoise,
+              noiseAmount: item.jpegNoiseAmount,
+              noiseType: item.jpegNoiseType,
+              sharpen: item.jpegSharpen,
+              sharpenAmount: item.jpegSharpenAmount,
+              upscale: item.jpegUpscale,
+              chromaBleed: item.jpegChromaBleed,
+            }
+          : undefined,
     })),
     seed,
   });

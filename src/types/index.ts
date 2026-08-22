@@ -6,9 +6,9 @@ export type AlgorithmId =
   | 'clone-corruption-brush'
   | 'line-freeze-brush'
   | 'mirror-fold-brush'
-  | 'halftone-collapse-brush'
   | 'raster-loom-brush'
   | 'contour-crawl-brush'
+  | 'jpeg-resample-brush'
   | 'slice-displacement'
   | 'macroblock-shift'
   | 'datamosh-smear'
@@ -48,9 +48,9 @@ export type EffectIconId =
   | 'clone-corruption-brush'
   | 'line-freeze-brush'
   | 'mirror-fold-brush'
-  | 'halftone-collapse-brush'
   | 'raster-loom-brush'
   | 'contour-crawl-brush'
+  | 'jpeg-resample-brush'
   | 'pixel-embroidery'
   | 'xerox-decay'
   | 'slice'
@@ -307,16 +307,6 @@ export interface AlgorithmSettings {
   mirrorFoldEdgeMode: 'clamp' | 'mirror' | 'wrap';
   mirrorFoldFalloff: number;
   mirrorFoldFallbackAngle: number;
-  halftoneCellSize: number;
-  halftoneCollapse: number;
-  halftoneDotGain: number;
-  halftoneColorMode: 'mono' | 'rgb';
-  halftoneGridAngle: 'stroke' | 'perpendicular' | 'fixed';
-  halftoneDrift: number;
-  halftoneChannelOffset: number;
-  halftoneShape: 'circle' | 'square';
-  halftoneBackgroundMix: number;
-  halftoneFallbackAngle: number;
   rasterLoomStripWidth: number;
   rasterLoomSourceOffset: number;
   rasterLoomWeaveDepth: number;
@@ -337,6 +327,17 @@ export interface AlgorithmSettings {
   contourCrawlEdgePolarity: 'dark' | 'light' | 'both';
   contourCrawlMix: number;
   contourCrawlFallbackAngle: number;
+  jpegResampleTargetLongEdge: number;
+  jpegResampleQuality: number;
+  jpegResamplePasses: number;
+  jpegResampleMix: number;
+  jpegResampleNoise: boolean;
+  jpegResampleNoiseAmount: number;
+  jpegResampleNoiseType: 'luma' | 'rgb';
+  jpegResampleSharpen: boolean;
+  jpegResampleSharpenAmount: number;
+  jpegResampleUpscale: 'smooth' | 'pixelated';
+  jpegResampleChromaBleed: number;
 }
 
 export interface GlitchContext {

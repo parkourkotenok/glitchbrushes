@@ -311,6 +311,7 @@ const effectCurves: Record<ImageBrushFxId, readonly number[]> = {
   'motion-transfer': [0.01, 0.08, 0.22, 0.42, 0.64, 0.84],
   'pixel-embroidery': [0.01, 0.14, 0.3, 0.52, 0.74, 0.94],
   'xerox-decay': [0.01, 0.12, 0.28, 0.5, 0.74, 0.98],
+  'jpeg-resample': [0.01, 0.12, 0.28, 0.5, 0.72, 0.94],
 };
 
 export function applyImageBrushGlitchAmount(

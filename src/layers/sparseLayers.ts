@@ -612,6 +612,47 @@ export function composeLayerPixels(stack: LayerStack, layerId: string): Uint8Cla
   return output;
 }
 
+/** Compose one selected layer directly into a cropped RGBA buffer. */
+export function composeLayerPixelsRegion(
+  stack: LayerStack,
+  layerId: string,
+  bounds: Rectangle,
+): Uint8ClampedArray {
+  const region = normalizeCompositeBounds(stack, bounds);
+  if (!region) return new Uint8ClampedArray(0);
+  const width = region.right - region.left;
+  const height = region.bottom - region.top;
+  const output = new Uint8ClampedArray(width * height * 4);
+  const layer = stack.layers.find((candidate) => candidate.id === layerId);
+  if (!layer?.visible) return output;
+  const raster = layer.raster;
+  for (let y = region.top; y < region.bottom; y += 1) {
+    for (let x = region.left; x < region.right; x += 1) {
+      const destination = ((y - region.top) * width + x - region.left) * 4;
+      if (
+        raster &&
+        x >= raster.x &&
+        y >= raster.y &&
+        x < raster.x + raster.width &&
+        y < raster.y + raster.height
+      ) {
+        const source = ((y - raster.y) * raster.width + x - raster.x) * 4;
+        compositePixel(output, destination, raster.pixels, source, layer.opacity, layer.blendMode);
+      }
+      const tileX = Math.floor(x / LAYER_TILE_SIZE);
+      const tileY = Math.floor(y / LAYER_TILE_SIZE);
+      const tile = layer.tiles.get(tileKey(tileX, tileY));
+      if (!tile) continue;
+      const localX = x - tileX * LAYER_TILE_SIZE;
+      const localY = y - tileY * LAYER_TILE_SIZE;
+      if (localX >= tile.width || localY >= tile.height) continue;
+      const source = (localY * tile.width + localX) * 4;
+      compositePixel(output, destination, tile.pixels, source, layer.opacity, layer.blendMode);
+    }
+  }
+  return output;
+}
+
 export function composeLayerStackBelowActive(
   stack: LayerStack,
   background: Uint8ClampedArray,

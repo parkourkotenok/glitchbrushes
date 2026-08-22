@@ -22,6 +22,18 @@ const entry = (value: SharedEffectRegistryItem) => value;
 
 export const sharedEffectRegistry: ReadonlyArray<SharedEffectRegistryItem> = [
   entry({
+    id: 'jpeg-resample',
+    name: 'JPEG Resample',
+    minSize: 2,
+    description: 'Re-encodes a bounded local buffer through deterministic JPEG codec passes.',
+    cost: 'high',
+    algorithmId: 'jpeg-resample-brush',
+    moshId: 'jpeg-resample',
+    imageBrushStages: ['tip', 'stamp', 'trail'],
+    visibleInImageBrush: true,
+    experimental: true,
+  }),
+  entry({
     id: 'pixel-embroidery',
     name: 'Pixel Embroidery',
     minSize: 6,
@@ -313,4 +325,37 @@ export function imageBrushStageLabel(stages: readonly SharedImageBrushStage[]): 
       stage === 'tip' ? 'Tip FX' : stage === 'stamp' ? 'Per Stamp FX' : 'Whole Trail FX',
     )
     .join(' / ');
+}
+
+export function buildImageBrushEvolutionRecipeOptions<T extends string>(
+  definitions: ReadonlyArray<{
+    id: T;
+    name: string;
+    imageBrushStages: readonly SharedImageBrushStage[];
+    experimental?: boolean;
+    legacy?: boolean;
+  }>,
+  requiredStages: readonly SharedImageBrushStage[],
+): ReadonlyArray<readonly [T | 'clean' | 'mixed', string]> {
+  return [
+    ['clean', 'Clean'],
+    ['mixed', 'Current FX stack'],
+    ...definitions
+      .filter(
+        (definition) =>
+          !definition.legacy &&
+          requiredStages.every((stage) => definition.imageBrushStages.includes(stage)),
+      )
+      .sort(
+        (left, right) =>
+          Number(Boolean(left.experimental)) - Number(Boolean(right.experimental)),
+      )
+      .map(
+        (definition) =>
+          [
+            definition.id,
+            `${definition.experimental ? 'NEW · ' : ''}${definition.name}`,
+          ] as const,
+      ),
+  ];
 }

@@ -32,6 +32,7 @@ import { cropRgbaRegion, estimateImageBrushReadBounds } from './imageBrush/bound
 import { shouldPostImageBrushProgress } from './imageBrush/progress';
 import {
   compositeRgbaPixel,
+  imageBrushOpacityForStamp,
   imageBrushMutationStrength,
   prepareImageBrushLiveSourceVariants,
   prepareBrushTip,
@@ -775,6 +776,44 @@ describe('Image Brush processing', () => {
     expect(progressive.metrics.cacheVariants).toBeLessThanOrEqual(4);
   });
 
+  it('paces progressive decay smoothly instead of dropping most damage into the final stamps', () => {
+    const settings = {
+      ...defaultImageBrushSettings,
+      mutationMode: 'progressive' as const,
+      progressiveStart: 0,
+      progressiveEnd: 1,
+      maxCorruption: 1,
+      evolutionSpeed: 0.5,
+    };
+    for (const evolutionCurve of ['linear', 'ease-in', 'ease-out', 'exponential'] as const) {
+      settings.evolutionCurve = evolutionCurve;
+      const strengths = Array.from({ length: 9 }, (_, index) =>
+        imageBrushMutationStrength(settings, index, 9, 0, 'smooth-decay'),
+      );
+      const steps = strengths.slice(1).map((value, index) => value - strengths[index]!);
+      expect(Math.min(...steps)).toBeGreaterThanOrEqual(0);
+      expect(Math.max(...steps)).toBeLessThan(0.3);
+    }
+  });
+
+  it('fades stamp opacity along the stroke and ignores the locked essential opacity', () => {
+    const settings = {
+      ...defaultImageBrushSettings,
+      opacity: 0.2,
+      opacityEvolutionMode: 'fade' as const,
+      opacityFadeStart: 1,
+      opacityFadeEnd: 0.1,
+      opacityFadeCurve: 'linear' as const,
+    };
+    const values = [0, 1, 2].map((index) =>
+      imageBrushOpacityForStamp(settings, index, 3, 'opacity-fade'),
+    );
+    expect(values[0]).toBeCloseTo(1);
+    expect(values[1]).toBeCloseTo(0.55);
+    expect(values[2]).toBeCloseTo(0.1);
+    expect(values[0]).not.toBe(settings.opacity);
+  });
+
   it('Random Effect Stack builds a deterministic procedural result per stamp', () => {
     const request = strokeRequest('random-stack', rack);
     request.settings.effectPool = ['slice', 'block-corruption', 'rgb-split'];
@@ -828,6 +867,122 @@ describe('Image Brush processing', () => {
     for (let pixel = 0; pixel < 36; pixel += 1) {
       expect(processed.pixels[pixel * 4 + 3]).toBe(pixels[pixel * 4 + 3]);
     }
+  });
+
+  it('runs JPEG Resample deterministically on a bounded tip without alpha halos', () => {
+    const width = 18;
+    const height = 14;
+    const pixels = new Uint8ClampedArray(width * height * 4);
+    for (let y = 2; y < height - 2; y += 1) {
+      for (let x = 2; x < width - 2; x += 1) {
+        const offset = (y * width + x) * 4;
+        pixels[offset] = (x * 31 + y * 7) & 255;
+        pixels[offset + 1] = (x * 9 + y * 37) & 255;
+        pixels[offset + 2] = (x * 19 + y * 11) & 255;
+        pixels[offset + 3] = 48 + ((x * 17 + y * 13) % 208);
+      }
+    }
+    const jpeg = {
+      ...createImageBrushFx('jpeg-resample'),
+      amount: 1,
+      mix: 1,
+      jpegTargetLongEdge: 8,
+      jpegQuality: 18,
+      jpegPasses: 3,
+      jpegNoise: true,
+      jpegNoiseAmount: 0.16,
+    };
+    const first = processBrushTipFx(
+      pixels,
+      width,
+      height,
+      [jpeg],
+      { alphaMode: 'preserve', bleedAmount: 0 },
+      'jpeg-tip',
+    );
+    const second = processBrushTipFx(
+      pixels,
+      width,
+      height,
+      [jpeg],
+      { alphaMode: 'preserve', bleedAmount: 0 },
+      'jpeg-tip',
+    );
+    expect(first.pixels).toEqual(second.pixels);
+    expect(pixelDistance(first.pixels, pixels)).toBeGreaterThan(0);
+    for (let pixel = 0; pixel < width * height; pixel += 1) {
+      expect(first.pixels[pixel * 4 + 3]).toBe(pixels[pixel * 4 + 3]);
+      if (pixels[pixel * 4 + 3] === 0) {
+        expect(first.pixels.slice(pixel * 4, pixel * 4 + 4)).toEqual(new Uint8ClampedArray(4));
+      }
+    }
+  });
+
+  it('normalizes legacy Image Brush JPEG targets below 28px to the 28px visual floor', () => {
+    const width = 40;
+    const height = 32;
+    const pixels = new Uint8ClampedArray(width * height * 4);
+    for (let offset = 0; offset < pixels.length; offset += 4) {
+      const pixel = offset / 4;
+      pixels[offset] = (pixel * 17) & 255;
+      pixels[offset + 1] = (pixel * 29) & 255;
+      pixels[offset + 2] = (pixel * 43) & 255;
+      pixels[offset + 3] = 255;
+    }
+    const base = {
+      ...createImageBrushFx('jpeg-resample'),
+      amount: 1,
+      mix: 1,
+      jpegQuality: 1,
+      jpegPasses: 4,
+    };
+    const legacy = processBrushTipFx(
+      pixels,
+      width,
+      height,
+      [{ ...base, jpegTargetLongEdge: 8 }],
+      { alphaMode: 'preserve', bleedAmount: 0 },
+      'jpeg-floor',
+    );
+    const floor = processBrushTipFx(
+      pixels,
+      width,
+      height,
+      [{ ...base, jpegTargetLongEdge: 28 }],
+      { alphaMode: 'preserve', bleedAmount: 0 },
+      'jpeg-floor',
+    );
+    expect(legacy.pixels).toEqual(floor.pixels);
+  });
+
+  it('supports JPEG Resample in Per Stamp and Whole Trail worker renders', () => {
+    const jpeg = {
+      ...createImageBrushFx('jpeg-resample'),
+      amount: 1,
+      mix: 0.9,
+      jpegTargetLongEdge: 8,
+      jpegQuality: 20,
+      jpegPasses: 2,
+      jpegUpscale: 'pixelated' as const,
+    };
+    const perStamp = strokeRequest('per-stamp', [jpeg]);
+    perStamp.settings = {
+      ...perStamp.settings,
+      fxStage: 'each',
+      lockEffectPool: true,
+      minimumEffects: 1,
+      maximumEffects: 1,
+    };
+    expect(processImageBrushStroke(perStamp).pixels).toEqual(
+      processImageBrushStroke(perStamp).pixels,
+    );
+
+    const wholeTrail = strokeRequest('whole-trail', [jpeg]);
+    wholeTrail.settings = { ...wholeTrail.settings, fxStage: 'after', alphaMode: 'preserve' };
+    const result = processImageBrushStroke(wholeTrail);
+    expect(result.regionOnly).toBe(true);
+    expect(result.metrics.fullDocumentCopies).toBe(0);
+    expect(result.pixels).toEqual(processImageBrushStroke(wholeTrail).pixels);
   });
 
   it('Alpha Bleed is bounded by configured padding', () => {
@@ -1135,13 +1290,8 @@ describe('Image Brush presets, project and history contracts', () => {
     for (let nonce = 0; nonce < 24; nonce += 1) {
       expect(
         ['sequence', 'random-hose'].includes(
-          randomizeImageBrush(
-            defaultImageBrushSettings,
-            [],
-            'modern-placement',
-            'wild',
-            nonce,
-          ).settings.mode,
+          randomizeImageBrush(defaultImageBrushSettings, [], 'modern-placement', 'wild', nonce)
+            .settings.mode,
         ),
       ).toBe(false);
     }
@@ -1446,8 +1596,9 @@ describe('experimental Image Brush FX', () => {
     return pixels;
   }
 
-  it('lists both FX first with persistent metadata, every supported stage, and dedicated Styles', () => {
-    expect(imageBrushFxDefinitions.slice(0, 2).map((item) => item.id)).toEqual([
+  it('lists experimental FX first with persistent metadata and every supported stage', () => {
+    expect(imageBrushFxDefinitions.slice(0, 3).map((item) => item.id)).toEqual([
+      'jpeg-resample',
       'pixel-embroidery',
       'xerox-decay',
     ]);

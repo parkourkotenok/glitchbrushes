@@ -9,6 +9,7 @@ import {
   composeLayerStack,
   composeLayerStackRegionInto,
   composeLayerPixels,
+  composeLayerPixelsRegion,
   createImageLayerStack,
   createLayerStack,
   deleteActiveLayer,
@@ -76,6 +77,23 @@ describe('sparse tiled layer stack', () => {
     ).toBe(1);
     expect(activeLayer(stack).tiles.size).toBe(1);
     expect(composeLayerStack(stack, original)).toEqual(target);
+  });
+
+  it('composes a selected layer crop without allocating a document-sized result', () => {
+    const stack = createImageLayerStack(8, 6, 'Photo', opaque(8, 6, [30, 60, 90, 255]));
+    const layer = activeLayer(stack);
+    layer.opacity = 0.72;
+    setLayerPixel(stack, layer, 4, 3, [220, 20, 70, 180]);
+    const bounds = { x: 2, y: 1, width: 4, height: 3 };
+    const full = composeLayerPixels(stack, layer.id);
+    const expected = new Uint8ClampedArray(bounds.width * bounds.height * 4);
+    for (let row = 0; row < bounds.height; row += 1) {
+      const source = ((bounds.y + row) * stack.width + bounds.x) * 4;
+      expected.set(full.subarray(source, source + bounds.width * 4), row * bounds.width * 4);
+    }
+    const region = composeLayerPixelsRegion(stack, layer.id, bounds);
+    expect(region).toHaveLength(bounds.width * bounds.height * 4);
+    expect(region).toEqual(expected);
   });
 
   it('supports add, duplicate, reorder, delete, merge and flatten operations', () => {

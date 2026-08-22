@@ -1,5 +1,7 @@
 # NEW LAB — experimental brushes report (2026-08-21)
 
+> Historical report. Halftone Collapse was retired from the production build in the subsequent compact-browser/JPEG Resample pass; its rows below document the earlier benchmark only.
+
 ## Реализовано
 
 Все шесть инструментов помечены общим metadata-флагом `experimental: true`; React-компоненты не содержат отдельного списка экспериментальных ID.
@@ -108,3 +110,7 @@ Worker latency остаётся асинхронной и не входит в m
 - Очень длинные плотные Evolving trail с большим исходным stamp могут заметно дольше считаться в Worker; UI остаётся отзывчивым, а рабочую копию можно уменьшить через Optimize Stamp Image.
 - Experimental-инструменты намеренно не участвуют в автоматических комбинациях до пользовательского одобрения.
 - Сознательно отложены: Ribbon Warp, Ink Bleed, Cellular Fracture, Posterize Melt, Chromatic Ribbon, Alpha Ghost, Stencil Cutout, Tile Mosaic, Shadow Offset, Turbulence Trail и Rubber Stamp Offset.
+
+## Current integrated status — 2026-08-22
+
+Этот отчёт фиксирует первоначальный NEW LAB. После него Halftone Collapse полностью удалён из production и мигрирует на Slice Displacement; добавлен общий JPEG Resample для Effect/Mosh/Image Brush, а Image Brush получил smooth Progressive Decay и независимый Fade along stroke. Текущая проверка: typecheck, 282/282 теста и production build.

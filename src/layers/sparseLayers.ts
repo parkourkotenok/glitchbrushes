@@ -39,6 +39,8 @@ export interface LayerStack {
   height: number;
   activeLayerId: string;
   soloLayerId: string | null;
+  /** True while the immutable built-in white Background is below the editable stack. */
+  backgroundVisible: boolean;
   layers: SparseLayer[];
 }
 
@@ -84,6 +86,7 @@ export function createLayerStack(width: number, height: number): LayerStack {
     height,
     activeLayerId: first.id,
     soloLayerId: null,
+    backgroundVisible: true,
     layers: [first],
   };
 }
@@ -100,13 +103,21 @@ export function createImageLayerStack(
   height: number,
   name: string,
   pixels: Uint8ClampedArray,
+  opaque = rasterIsOpaque(pixels),
 ): LayerStack {
   if (pixels.length !== width * height * 4) {
     throw new Error('Initial image dimensions do not match the canvas.');
   }
   const image = createLayer(1, name, 'image');
-  image.raster = { x: 0, y: 0, width, height, opaque: rasterIsOpaque(pixels), pixels };
-  return { width, height, activeLayerId: image.id, soloLayerId: null, layers: [image] };
+  image.raster = { x: 0, y: 0, width, height, opaque, pixels };
+  return {
+    width,
+    height,
+    activeLayerId: image.id,
+    soloLayerId: null,
+    backgroundVisible: true,
+    layers: [image],
+  };
 }
 
 export function addImageLayer(
@@ -129,6 +140,57 @@ export function addImageLayer(
   return layer;
 }
 
+export interface RasterLayerInput {
+  name: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  pixels: Uint8ClampedArray;
+  visible?: boolean;
+  opacity?: number;
+  blendMode?: LayerBlendMode;
+}
+
+/** Build a document stack from already-decoded raster layers (PSD import). */
+export function createRasterLayerStack(
+  width: number,
+  height: number,
+  inputs: RasterLayerInput[],
+): LayerStack {
+  if (!inputs.length) throw new Error('The document has no raster layers to import.');
+  const layers = inputs.map((input, index) => {
+    if (
+      input.width <= 0 ||
+      input.height <= 0 ||
+      input.pixels.length !== input.width * input.height * 4
+    ) {
+      throw new Error(`Layer ${input.name || index + 1} has invalid pixel dimensions.`);
+    }
+    const layer = createLayer(index + 1, input.name || `Layer ${index + 1}`, 'image');
+    layer.visible = input.visible ?? true;
+    layer.opacity = Math.max(0, Math.min(1, input.opacity ?? 1));
+    layer.blendMode = input.blendMode ?? 'source-over';
+    layer.raster = {
+      x: input.x,
+      y: input.y,
+      width: input.width,
+      height: input.height,
+      opaque: rasterIsOpaque(input.pixels),
+      pixels: input.pixels,
+    };
+    return layer;
+  });
+  return {
+    width,
+    height,
+    activeLayerId: layers[layers.length - 1]!.id,
+    soloLayerId: null,
+    backgroundVisible: false,
+    layers,
+  };
+}
+
 export function activeLayer(stack: LayerStack): SparseLayer {
   return stack.layers.find((layer) => layer.id === stack.activeLayerId) ?? stack.layers[0]!;
 }
@@ -138,10 +200,7 @@ export function activeLayer(stack: LayerStack): SparseLayer {
  * in this deliberately strict common case. Hidden layers do not matter; any rendered
  * companion layer, partial raster, transparency, opacity or blend mode disables the path.
  */
-export function canUseVisibleCompositeAsLayerSource(
-  stack: LayerStack,
-  layerId: string,
-): boolean {
+export function canUseVisibleCompositeAsLayerSource(stack: LayerStack, layerId: string): boolean {
   const rendered = stack.layers.filter(
     (layer) => layer.visible && (!stack.soloLayerId || stack.soloLayerId === layer.id),
   );
@@ -167,6 +226,7 @@ export function snapshotLayerStack(stack: LayerStack): LayerStackSnapshot {
     height: stack.height,
     activeLayerId: stack.activeLayerId,
     soloLayerId: stack.soloLayerId,
+    backgroundVisible: stack.backgroundVisible,
     layers: stack.layers.map((layer) => ({
       id: layer.id,
       name: layer.name,
@@ -233,6 +293,7 @@ export function restoreLayerStack(snapshot: LayerStackSnapshot): LayerStack {
     soloLayerId: layers.some((layer) => layer.id === snapshot.soloLayerId)
       ? snapshot.soloLayerId
       : null,
+    backgroundVisible: snapshot.backgroundVisible ?? true,
     layers,
   };
 }
@@ -372,7 +433,11 @@ export function composeLayerStack(
   // safe to use it as the output base, then only composite that layer's effect tiles and
   // the layers above it.
   const output =
-    baseIndex >= 0 ? stack.layers[baseIndex]!.raster!.pixels.slice() : background.slice();
+    baseIndex >= 0
+      ? stack.layers[baseIndex]!.raster!.pixels.slice()
+      : stack.backgroundVisible
+        ? background.slice()
+        : new Uint8ClampedArray(background.length);
   compositeLayersInto(stack, output, stack.layers, undefined, baseIndex, baseIndex >= 0);
   recordPerformanceMeasure('glitchbrushes:compose-layer-stack', startedAt);
   return output;
@@ -434,6 +499,14 @@ function copyRegion(
   }
 }
 
+function clearRegion(output: Uint8ClampedArray, width: number, bounds: CompositeBounds): void {
+  const rowLength = (bounds.right - bounds.left) * 4;
+  for (let y = bounds.top; y < bounds.bottom; y += 1) {
+    const offset = (y * width + bounds.left) * 4;
+    output.fill(0, offset, offset + rowLength);
+  }
+}
+
 /**
  * Recompose only `bounds` into an existing full-size output buffer. Pixels outside the
  * clipped bounds are untouched. This is intentionally not wired into the UI yet so callers
@@ -456,12 +529,16 @@ export function composeLayerStackRegionInto(
     return;
   }
   const baseIndex = opaqueFullCanvasBaseRasterIndex(stack, stack.layers);
-  copyRegion(
-    baseIndex >= 0 ? stack.layers[baseIndex]!.raster!.pixels : background,
-    output,
-    stack.width,
-    region,
-  );
+  if (baseIndex >= 0 || stack.backgroundVisible) {
+    copyRegion(
+      baseIndex >= 0 ? stack.layers[baseIndex]!.raster!.pixels : background,
+      output,
+      stack.width,
+      region,
+    );
+  } else {
+    clearRegion(output, stack.width, region);
+  }
   compositeLayersInto(stack, output, stack.layers, region, baseIndex, baseIndex >= 0);
   recordPerformanceMeasure('glitchbrushes:compose-layer-stack-region', startedAt);
 }
@@ -596,7 +673,9 @@ export function composeImageLayers(
   if (background.length !== stack.width * stack.height * 4) {
     throw new Error('Background dimensions do not match the layer stack.');
   }
-  const output = background.slice();
+  const output = stack.backgroundVisible
+    ? background.slice()
+    : new Uint8ClampedArray(background.length);
   compositeLayersInto(
     { ...stack, soloLayerId: null },
     output,
@@ -658,13 +737,16 @@ export function composeLayerStackBelowActive(
   background: Uint8ClampedArray,
 ): Uint8ClampedArray {
   const activeIndex = stack.layers.findIndex((layer) => layer.id === stack.activeLayerId);
-  if (activeIndex <= 0) return background.slice();
+  if (activeIndex <= 0) {
+    return stack.backgroundVisible ? background.slice() : new Uint8ClampedArray(background.length);
+  }
   return composeLayerStack(
     {
       width: stack.width,
       height: stack.height,
       activeLayerId: stack.layers[Math.max(0, activeIndex - 1)]!.id,
       soloLayerId: null,
+      backgroundVisible: stack.backgroundVisible,
       layers: stack.layers.slice(0, activeIndex),
     },
     background,
@@ -804,8 +886,7 @@ function writeCompositeBufferToLayer(
       for (let y = Math.max(top, tileTop); y < tileBottom; y += 1) {
         let sourceOffset = (y * stack.width + Math.max(left, tileLeft)) * 4;
         for (let x = Math.max(left, tileLeft); x < tileRight; x += 1, sourceOffset += 4) {
-          const targetOffset =
-            ((y - targetOriginY) * targetStride + x - targetOriginX) * 4;
+          const targetOffset = ((y - targetOriginY) * targetStride + x - targetOriginX) * 4;
           if (
             beforeComposite[sourceOffset] === targetPixels[targetOffset] &&
             beforeComposite[sourceOffset + 1] === targetPixels[targetOffset + 1] &&
@@ -923,6 +1004,113 @@ export function moveActiveLayer(stack: LayerStack, direction: -1 | 1): boolean {
   return true;
 }
 
+/** Reorder one layer without touching its pixels. The mutation is committed only on drop. */
+export function moveLayerToLayer(
+  stack: LayerStack,
+  layerId: string,
+  targetLayerId: string,
+): boolean {
+  const from = stack.layers.findIndex((layer) => layer.id === layerId);
+  const target = stack.layers.findIndex((layer) => layer.id === targetLayerId);
+  if (from < 0 || target < 0 || from === target) return false;
+  const [layer] = stack.layers.splice(from, 1);
+  const insertion = stack.layers.findIndex((candidate) => candidate.id === targetLayerId);
+  stack.layers.splice(insertion, 0, layer!);
+  stack.activeLayerId = layerId;
+  return true;
+}
+
+/** Promote the built-in white Background to an ordinary editable raster layer. */
+export function unlockBackgroundLayer(
+  stack: LayerStack,
+  background: Uint8ClampedArray,
+): SparseLayer | null {
+  if (!stack.backgroundVisible || background.length !== stack.width * stack.height * 4) return null;
+  const layer = createLayer(0, 'Background', 'image');
+  layer.raster = {
+    x: 0,
+    y: 0,
+    width: stack.width,
+    height: stack.height,
+    opaque: true,
+    pixels: background,
+  };
+  stack.layers.unshift(layer);
+  stack.activeLayerId = layer.id;
+  stack.soloLayerId = null;
+  stack.backgroundVisible = false;
+  return layer;
+}
+
+export interface MaterializedLayerContent {
+  bounds: Rectangle;
+  pixels: Uint8ClampedArray;
+}
+
+export function layerContentBounds(stack: LayerStack, layerId: string): Rectangle | null {
+  const layer = stack.layers.find((candidate) => candidate.id === layerId);
+  if (!layer) return null;
+  let left = stack.width;
+  let top = stack.height;
+  let right = 0;
+  let bottom = 0;
+  const include = (x: number, y: number, width: number, height: number) => {
+    left = Math.min(left, Math.max(0, x));
+    top = Math.min(top, Math.max(0, y));
+    right = Math.max(right, Math.min(stack.width, x + width));
+    bottom = Math.max(bottom, Math.min(stack.height, y + height));
+  };
+  if (layer.raster)
+    include(layer.raster.x, layer.raster.y, layer.raster.width, layer.raster.height);
+  for (const tile of layer.tiles.values()) {
+    if (!tileIsEmpty(tile)) {
+      include(tile.tileX * LAYER_TILE_SIZE, tile.tileY * LAYER_TILE_SIZE, tile.width, tile.height);
+    }
+  }
+  return right > left && bottom > top
+    ? { x: left, y: top, width: right - left, height: bottom - top }
+    : null;
+}
+
+/** Materialize raw layer pixels once for transform/PSD operations, outside pointer hot paths. */
+export function materializeLayerContent(
+  stack: LayerStack,
+  layerId: string,
+): MaterializedLayerContent | null {
+  const layer = stack.layers.find((candidate) => candidate.id === layerId);
+  const bounds = layerContentBounds(stack, layerId);
+  if (!layer || !bounds) return null;
+  const rawLayer: SparseLayer = { ...layer, visible: true, opacity: 1, blendMode: 'source-over' };
+  const pixels = composeLayerPixelsRegion(
+    { ...stack, soloLayerId: null, layers: [rawLayer], activeLayerId: rawLayer.id },
+    rawLayer.id,
+    bounds,
+  );
+  return { bounds, pixels };
+}
+
+export function replaceLayerContent(
+  stack: LayerStack,
+  layerId: string,
+  bounds: Rectangle,
+  pixels: Uint8ClampedArray,
+): boolean {
+  const layer = stack.layers.find((candidate) => candidate.id === layerId);
+  const width = Math.max(1, Math.round(bounds.width));
+  const height = Math.max(1, Math.round(bounds.height));
+  if (!layer || layer.locked || pixels.length !== width * height * 4) return false;
+  layer.raster = {
+    x: Math.round(bounds.x),
+    y: Math.round(bounds.y),
+    width,
+    height,
+    opaque: rasterIsOpaque(pixels),
+    pixels,
+  };
+  layer.tiles.clear();
+  return true;
+}
+
 export function clearActiveLayer(stack: LayerStack): boolean {
   const layer = activeLayer(stack);
   if (layer.locked || (layer.tiles.size === 0 && !layer.raster)) return false;
@@ -950,6 +1138,7 @@ export function mergeActiveLayerDown(stack: LayerStack): boolean {
     height: stack.height,
     activeLayerId: upper.id,
     soloLayerId: null,
+    backgroundVisible: false,
     layers: [lower, upper],
   };
   const mergedPixels = composeLayerStack(pair, transparentBase(stack.width, stack.height));

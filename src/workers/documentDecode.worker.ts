@@ -54,6 +54,13 @@ self.onmessage = async (event: MessageEvent<DecodeRequest>) => {
       context.imageSmoothingQuality = 'high';
       context.drawImage(bitmap, 0, 0, dimensions.width, dimensions.height);
       const original = context.getImageData(0, 0, dimensions.width, dimensions.height).data;
+      let opaque = true;
+      for (let offset = 3; offset < original.length; offset += 4) {
+        if (original[offset] !== 255) {
+          opaque = false;
+          break;
+        }
+      }
       const pixels = mode === 'document' ? original.slice() : null;
       const mask =
         mode === 'document' ? new Float32Array(dimensions.width * dimensions.height) : null;
@@ -61,6 +68,7 @@ self.onmessage = async (event: MessageEvent<DecodeRequest>) => {
         jobId,
         type: 'result' as const,
         ...dimensions,
+        opaque,
         original: original.buffer,
         pixels: pixels?.buffer,
         mask: mask?.buffer,

@@ -89,7 +89,7 @@ export function TopBar({
           ref={fileInputRef}
           hidden
           type="file"
-          accept="image/png,image/jpeg,image/webp"
+          accept="image/png,image/jpeg,image/webp,image/vnd.adobe.photoshop,.psd"
           onChange={onFileChange}
         />
         <button onClick={() => fileInputRef.current?.click()} aria-label="Add image layer">

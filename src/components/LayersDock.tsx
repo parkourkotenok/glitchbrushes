@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
+import type { DragEvent } from 'react';
 import {
   ChevronDown,
   ChevronUp,
   Copy,
   Eye,
   EyeOff,
+  GripVertical,
   Layers3,
   Lock,
   MoreHorizontal,
   Plus,
+  Scaling,
   Trash2,
   Unlock,
 } from 'lucide-react';
@@ -21,6 +24,7 @@ import {
   duplicateActiveLayer,
   mergeActiveLayerDown,
   moveActiveLayer,
+  moveLayerToLayer,
   toggleSoloActiveLayer,
   type LayerStack,
   type SparseLayer,
@@ -35,6 +39,8 @@ interface LayersDockProps {
   sampleAllLayers: boolean;
   onFlattenLayers(): void;
   onSelectBackground(): void;
+  onUnlockBackground(): void;
+  onBeginTransform(): void;
   onSampleAllLayersChange(value: boolean): void;
   onSelectLayer(id: string, name: string): void;
   onRunLayerOperation(label: string, mutate: (stack: LayerStack) => boolean | void): void;
@@ -149,10 +155,29 @@ export function LayersDock({
   sampleAllLayers,
   onFlattenLayers,
   onSelectBackground,
+  onUnlockBackground,
+  onBeginTransform,
   onSampleAllLayersChange,
   onSelectLayer,
   onRunLayerOperation,
 }: LayersDockProps) {
+  const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null);
+  const beginLayerDrag = (event: DragEvent<HTMLElement>, layerId: string) => {
+    event.stopPropagation();
+    setDraggedLayerId(layerId);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('application/x-glitchbrush-layer', layerId);
+  };
+  const dropLayer = (event: DragEvent<HTMLElement>, targetLayerId: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const layerId = draggedLayerId || event.dataTransfer.getData('application/x-glitchbrush-layer');
+    setDraggedLayerId(null);
+    if (!layerId || layerId === targetLayerId) return;
+    onRunLayerOperation('Reorder layers', (stack) =>
+      moveLayerToLayer(stack, layerId, targetLayerId),
+    );
+  };
   return (
     <section className="layers-dock" aria-label="Layers">
       <header>
@@ -206,7 +231,31 @@ export function LayersDock({
           {[...layerStack.layers].reverse().map((item) => {
             const selected = !backgroundSelected && item.id === layerStack.activeLayerId;
             return (
-              <div className={`layer-stack-row ${selected ? 'active' : ''}`} key={item.id}>
+              <div
+                className={`layer-stack-row ${selected ? 'active' : ''} ${draggedLayerId === item.id ? 'dragging' : ''}`}
+                key={item.id}
+                onDragOver={(event) => {
+                  if (!draggedLayerId) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  event.dataTransfer.dropEffect = 'move';
+                }}
+                onDrop={(event) => dropLayer(event, item.id)}
+              >
+                <button
+                  type="button"
+                  className="layer-drag-handle"
+                  draggable
+                  aria-label={`Move ${item.name}`}
+                  title="Drag to reorder layer"
+                  onDragStart={(event) => beginLayerDrag(event, item.id)}
+                  onDragEnd={(event) => {
+                    event.stopPropagation();
+                    setDraggedLayerId(null);
+                  }}
+                >
+                  <GripVertical size={13} />
+                </button>
                 <button
                   className="layer-visibility"
                   aria-label={item.visible ? `Hide ${item.name}` : `Show ${item.name}`}
@@ -257,29 +306,46 @@ export function LayersDock({
               </div>
             );
           })}
-          <div className={`layer-stack-row original-layer ${backgroundSelected ? 'active' : ''}`}>
-            <span className="layer-visibility">
-              <Eye size={14} />
-            </span>
-            <button
-              className="layer-select-button"
-              aria-pressed={backgroundSelected}
-              onClick={onSelectBackground}
-            >
-              <span className="layer-thumbnail original-thumbnail" />
-              <span className="layer-row-copy">
-                <strong>Background</strong>
-                <small>White canvas · locked</small>
+          {layerStack.backgroundVisible && (
+            <div className={`layer-stack-row original-layer ${backgroundSelected ? 'active' : ''}`}>
+              <span className="layer-drag-handle" aria-hidden="true" />
+              <span className="layer-visibility">
+                <Eye size={14} />
               </span>
-            </button>
-            <span className="layer-lock-button">
-              <Lock size={13} />
-            </span>
-          </div>
+              <button
+                className="layer-select-button"
+                aria-pressed={backgroundSelected}
+                onClick={onSelectBackground}
+              >
+                <span className="layer-thumbnail original-thumbnail" />
+                <span className="layer-row-copy">
+                  <strong>Background</strong>
+                  <small>White canvas · locked until promoted</small>
+                </span>
+              </button>
+              <button
+                type="button"
+                className="layer-lock-button"
+                aria-label="Unlock Background"
+                title="Convert Background to an editable layer"
+                onClick={onUnlockBackground}
+              >
+                <Lock size={13} />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
       <footer className="layers-toolbar" aria-label="Layer actions">
+        <button
+          aria-label="Transform layer"
+          title="Transform layer"
+          disabled={backgroundSelected}
+          onClick={onBeginTransform}
+        >
+          <Scaling size={14} />
+        </button>
         <button
           aria-label="Add layer"
           title="Add layer"

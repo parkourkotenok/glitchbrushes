@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { PatchHistory } from './history/PatchHistory';
 import {
   LAYER_TILE_SIZE,
   activeLayer,
@@ -16,15 +17,19 @@ import {
   deserializeLayerStack,
   duplicateActiveLayer,
   flattenLayerStack,
+  layerContentBounds,
   layerMemoryBytes,
+  materializeLayerContent,
   mergeActiveLayerDown,
   moveActiveLayer,
+  moveLayerToLayer,
   removeGeneratedLayers,
   restoreLayerStack,
   serializeLayerStack,
   setLayerPixel,
   snapshotLayerStack,
   toggleSoloActiveLayer,
+  unlockBackgroundLayer,
   writeCompositeResultToActiveLayer,
   writeCompositeRegionToActiveLayer,
 } from './layers/sparseLayers';
@@ -119,6 +124,44 @@ describe('sparse tiled layer stack', () => {
     expect(activeLayer(stack).name).toBe('Flattened Result');
   });
 
+  it('reorders by layer id without copying pixel buffers', () => {
+    const stack = createImageLayerStack(2, 1, 'Bottom', opaque(2, 1, [1, 2, 3, 255]));
+    const bottomPixels = stack.layers[0]!.raster!.pixels;
+    const middle = addLayer(stack, 'Middle');
+    const top = addLayer(stack, 'Top');
+    expect(moveLayerToLayer(stack, top.id, middle.id)).toBe(true);
+    expect(stack.layers.map((layer) => layer.name)).toEqual(['Bottom', 'Top', 'Middle']);
+    expect(stack.layers[0]!.raster!.pixels).toBe(bottomPixels);
+    expect(stack.activeLayerId).toBe(top.id);
+  });
+
+  it('promotes the special Background to an ordinary editable layer reversibly', () => {
+    const background = opaque(2, 1, [255, 255, 255, 255]);
+    const stack = createLayerStack(2, 1);
+    const before = snapshotLayerStack(stack);
+    const promoted = unlockBackgroundLayer(stack, background);
+    expect(promoted?.name).toBe('Background');
+    expect(promoted?.locked).toBe(false);
+    expect(stack.backgroundVisible).toBe(false);
+    expect(stack.layers[0]).toBe(promoted);
+    promoted!.visible = false;
+    expect(composeLayerStack(stack, background)).toEqual(new Uint8ClampedArray(8));
+    expect(restoreLayerStack(before).backgroundVisible).toBe(true);
+  });
+
+  it('materializes only the active content bounds with raw opacity-independent pixels', () => {
+    const stack = createLayerStack(10, 8);
+    const layer = activeLayer(stack);
+    layer.opacity = 0.2;
+    setLayerPixel(stack, layer, 3, 2, [200, 100, 50, 255]);
+    setLayerPixel(stack, layer, 5, 4, [10, 20, 30, 128]);
+    expect(layerContentBounds(stack, layer.id)).toEqual({ x: 0, y: 0, width: 10, height: 8 });
+    const content = materializeLayerContent(stack, layer.id)!;
+    expect([...content.pixels.slice((2 * 10 + 3) * 4, (2 * 10 + 3) * 4 + 4)]).toEqual([
+      200, 100, 50, 255,
+    ]);
+  });
+
   it('round-trips all sparse tiles and metadata through project serialization', () => {
     const stack = createLayerStack(300, 300);
     const bottom = activeLayer(stack);
@@ -203,18 +246,11 @@ describe('sparse tiled layer stack', () => {
     const before = composeLayerStack(stack, background);
     const bounds = { x: 3, y: 2, width: 2, height: 2 };
     const targetRegion = new Uint8ClampedArray([
-      200, 10, 20, 255, 210, 20, 30, 255,
-      220, 30, 40, 255, 230, 40, 50, 255,
+      200, 10, 20, 255, 210, 20, 30, 255, 220, 30, 40, 255, 230, 40, 50, 255,
     ]);
     expect(targetRegion.byteLength).toBe(bounds.width * bounds.height * 4);
     expect(
-      writeCompositeRegionToActiveLayer(
-        stack,
-        before,
-        targetRegion,
-        bounds,
-        stack.activeLayerId,
-      ),
+      writeCompositeRegionToActiveLayer(stack, before, targetRegion, bounds, stack.activeLayerId),
     ).toBe(4);
     const result = composeLayerStack(stack, background);
     for (let row = 0; row < bounds.height; row += 1) {
@@ -363,5 +399,33 @@ describe('sparse tiled layer stack', () => {
     const restored = deserializeLayerStack(serializeLayerStack(stack));
     expect(restored.layers[0]!.kind).toBe('image');
     expect(restored.layers[0]!.raster?.pixels).toEqual(pixels);
+  });
+
+  it('counts shared raster snapshots once and leaves snapshot restoration authoritative', () => {
+    const raster = opaque(2, 2, [4, 8, 12, 255]);
+    const stack = createImageLayerStack(2, 2, 'Photo', raster, true);
+    const snapshot = snapshotLayerStack(stack);
+    const history = new PatchHistory();
+    const working = new Uint8ClampedArray([9, 9, 9, 9]);
+    history.push({
+      id: 'layer-backed',
+      label: 'Layer action',
+      timestamp: 1,
+      patches: [
+        {
+          start: 0,
+          before: new Uint8ClampedArray([1, 2, 3, 4]),
+          after: new Uint8ClampedArray([5, 6, 7, 8]),
+        },
+      ],
+      layerBefore: snapshot,
+      layerAfter: snapshot,
+    });
+
+    expect(history.memoryBytes).toBe(raster.byteLength + 8);
+    history.undo(working);
+    expect([...working]).toEqual([9, 9, 9, 9]);
+    history.redo(working);
+    expect([...working]).toEqual([9, 9, 9, 9]);
   });
 });

@@ -1,5 +1,5 @@
 import type { BytePatch, HistoryAction } from '../types';
-import { recordPerformanceMeasure } from '../utils/performance';
+import { performanceDiagnosticsEnabled, recordPerformanceMeasure } from '../utils/performance';
 
 export class PatchHistory {
   private undoActions: HistoryAction[] = [];
@@ -20,9 +20,14 @@ export class PatchHistory {
   undo(buffer: Uint8ClampedArray): HistoryAction | null {
     const action = this.undoActions.pop();
     if (!action) return null;
-    for (let index = action.patches.length - 1; index >= 0; index -= 1) {
-      const patch = action.patches[index]!;
-      buffer.set(patch.before, patch.start);
+    // Layer snapshots are the authoritative state for layer-backed actions. App restores that
+    // snapshot immediately after this method returns, so replaying the duplicate byte patches
+    // first only adds full-region bandwidth to Undo.
+    if (!action.layerBefore) {
+      for (let index = action.patches.length - 1; index >= 0; index -= 1) {
+        const patch = action.patches[index]!;
+        buffer.set(patch.before, patch.start);
+      }
     }
     this.redoActions.push(action);
     this.recalculateMemory();
@@ -32,7 +37,9 @@ export class PatchHistory {
   redo(buffer: Uint8ClampedArray): HistoryAction | null {
     const action = this.redoActions.pop();
     if (!action) return null;
-    for (const patch of action.patches) buffer.set(patch.after, patch.start);
+    if (!action.layerAfter) {
+      for (const patch of action.patches) buffer.set(patch.after, patch.start);
+    }
     this.undoActions.push(action);
     this.recalculateMemory();
     return action;
@@ -92,6 +99,8 @@ export class PatchHistory {
   }
 
   private recalculateMemory(): void {
+    const measure = performanceDiagnosticsEnabled();
+    const startedAt = measure ? performance.now() : 0;
     const uniqueBuffers = new Set<ArrayBufferLike>();
     let uniqueBytes = 0;
     let logicalBytes = 0;
@@ -109,12 +118,20 @@ export class PatchHistory {
       for (const snapshot of [action.layerBefore, action.layerAfter]) {
         if (!snapshot) continue;
         for (const layer of snapshot.layers) {
+          if (layer.raster) count(layer.raster.pixels);
           for (const tile of layer.tiles) count(tile.pixels);
         }
       }
     }
     this.retainedMemoryBytes = uniqueBytes;
     this.logicalRetainedMemoryBytes = logicalBytes;
+    if (measure) {
+      recordPerformanceMeasure('glitchbrushes:history-memory-recalculate', startedAt, {
+        actions: this.undoActions.length + this.redoActions.length,
+        uniqueBytes,
+        logicalBytes,
+      });
+    }
   }
 }
 

@@ -1063,3 +1063,23 @@ Output: dist/index.html, 21.39 KB CSS, 297.34 KB JS, 0.90 KB Raw Worker
 * В Evolution добавлен независимый `Fade along stroke` с Start/End Opacity и собственной Linear/Ease/Exponential кривой. Fade можно сочетать с любым mutation mode; он управляет opacity по позиции штампа, а не по количеству копий в `stampsPerStep`.
 * При активном fade Essential Opacity недоступен, показывает `Controlled by stroke fade`, а рядом отображается причина блокировки. Старые проекты получают выключенный fade через существующую нормализацию defaults.
 * Проверки: typecheck ✓; Image Brush + production UI 96/96 ✓; полный suite 282/282 ✓; production build ✓ (1663 modules, main 553.16 kB / gzip 168.72 kB, прежнее Vite size warning остаётся). In-app UI: fade-поля видимы, Essential Opacity disabled, обе поясняющие подписи видимы, scrollY 0, console errors 0.
+
+### 2026-08-29/30 Full measurable performance audit
+
+* Аудит начат на ветке `diagnostic/lagging-layer-version-2026-08-21`, HEAD `92aeb441366759ebe5dc5b1b7e1131e9e4a3662a`, поверх уже dirty worktree с незакоммиченными Layers transform/PSD изменениями. Ничего не reset/restore/stash; commit/push не выполнялись.
+* Три субагента независимо выполнили runtime baseline, static memory-flow audit и bounded benchmark API; главный агент просмотрел diff, воспроизвёл production Edge/Firefox замеры и расширил harness.
+* Подтверждённые fixes: opaque initial raster sharing, lazy full-size Float32 mask, удаление неиспользуемого full selected-layer compose для structural/Retouch pointerdown, snapshot-authoritative layer Undo/Redo, unique raster-aware History accounting, PSD header guard до `readPsd` с реальным cap 2 MP/1920.
+* `?perf=1`: bounded 500-event/500-rAF API `reset(scope?)` / `snapshot()` / `exportJson()`, p50/p95/p99/max, Long Task и rAF buckets. Harness поддерживает Edge/Firefox, headless/headed, startup/UI/Effect/Retouch/Mosh/Image Brush, 5 warm-ups, exact Undo/Redo, heap checkpoints, 200-stroke/100-history soak.
+* Edge short Effect matrix: 17 visual tools × 20 strokes, commit p95 1.4–7.2 ms, 0 full-sync, 0 fit, exact History. Clone Corruption без source корректно был no-op и исключён. Representative long p95 10.4–11.5 ms, gaps ≥50 ms 0.
+* Retouch Smudge/Finger/Blur/Sharpen: source prep p95 1.2–1.4 ms, adoption 1.0–1.6 ms, commit 0.8–1.3 ms; Worker 34.5–79.1 ms; gaps ≥50 ms 0. Image Brush 8 cases: Worker p95 17.1–95.6 ms, adoption ≤0.1 ms, commit ≤1.7 ms, gaps ≥50 ms 0.
+* Firefox 154 headless Slice/Image JPEG: commit p95 3/2 ms, gaps ≥50 ms 0. Headed Firefox 5 strokes и headed Edge 3 strokes прошли exact History; Edge требовал явный `Page.bringToFront`/focus emulation.
+* Soak: 200 strokes + 100 Undo/Redo, 200 dirty uploads, 0 full sync, 0 fit, exact History, rAF max 8.5 ms. Heap checkpoints 29→122→94→84→98→120→129 MB показывают GC saw-tooth + bounded History, не доказанный runaway leak.
+* Точный Mosh rack после удаления скрытого default: 1/3/5 effects дали Apply p95 133.4/1352.5/3006.8 ms; rAF max 27.8/13.9/13.9 ms, gaps ≥50 ms 0. 30-layer action matrix: React commit p95 1.9 ms, rAF max 8.1 ms, Long Tasks/fit 0; 89 full sync точно соответствуют explicit Duplicate/Visibility/Reorder/Opacity.
+* Полный отчёт и ограничения: `PERFORMANCE_AUDIT_2026-08-29.md`; компактные результаты: `performance-results/baseline.json`, `final.json`, `summary.json`.
+* Финальная валидация: typecheck ✓; полный suite 298/298 (20 files) ✓; production build ✓ (1666 modules; актуальный размер после следующего UI follow-up указан ниже; прежний Vite size warning остаётся).
+
+### 2026-08-30 Image Brush Style browser previews
+
+* Исправлен Style browser, который показывал только маленькие иконки: карточки теперь используют уже существующие pre-generated SVG thumbnails в широкой двухколоночной сетке. Они не читают текущий canvas, не создают Worker jobs и не добавляют тяжёлую обработку при hover/focus.
+* In-app Browser: все видимые Style options получили графические previews; `Glitched Repeat` выбирается, каталог закрывается, Live Preview возвращается в `Ready`; browser errors/warnings — 0.
+* Валидация: Image Brush + production UI 96/96 ✓; полный suite 298/298 (20 files) ✓; typecheck ✓; production build ✓ — 1666 modules, main 569.98 KiB / gzip 173.83 KiB, CSS 109.25 KiB / gzip 20.62 KiB.

@@ -48,7 +48,7 @@ describe('production editor cleanup', () => {
     expect(compactIconBrowserSource).toContain("'ArrowLeft'");
     expect(compactIconBrowserSource).toContain("'ArrowRight'");
     expect(compactIconBrowserSource).toContain('compact-icon-browser-tooltip');
-    expect(imageBrushPanelSource).not.toContain('<img');
+    expect(imageBrushPanelSource).toContain('image-brush-style-thumbnail');
   });
 
   it('derives Evolution recipes from the shared registry and mounts the dock splitter', () => {
@@ -153,7 +153,8 @@ describe('production editor cleanup', () => {
   it('uses a static visual Style browser and keeps raw recipe editing Advanced-only', () => {
     expect(imageBrushPanelSource).toContain('aria-label="Image Brush style browser"');
     expect(imageBrushPanelSource).toContain('CompactIconBrowser');
-    expect(imageBrushPanelSource).not.toContain('imageBrushStaticStyleThumbnail');
+    expect(imageBrushPanelSource).toContain('imageBrushStaticStyleThumbnail');
+    expect(imageBrushPanelSource).toContain('image-brush-style-thumbnail');
     expect(imageBrushPanelSource).not.toContain('new Worker');
     expect(imageBrushSimpleSource).toContain('preGeneratedStyleThumbnails');
     expect(imageBrushSimpleSource).toContain("catalog: 'legacy'");

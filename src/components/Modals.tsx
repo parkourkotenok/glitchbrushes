@@ -28,7 +28,7 @@ export function ShortcutsModal({ onClose }: ShortcutsModalProps) {
   );
 }
 
-export type ExportFormat = 'png' | 'jpeg' | 'webp';
+export type ExportFormat = 'png' | 'jpeg' | 'webp' | 'psd';
 
 interface ExportModalProps {
   onClose: () => void;
@@ -77,13 +77,14 @@ export function ExportModal({
             <option value="png">PNG</option>
             <option value="jpeg">JPEG</option>
             <option value="webp">WebP</option>
+            <option value="psd">Photoshop PSD (layers)</option>
           </select>
         </label>
         <label>
           <span>FILE NAME</span>
           <input value={name} onChange={(event) => onNameChange(event.target.value)} />
         </label>
-        {format !== 'png' && (
+        {format !== 'png' && format !== 'psd' && (
           <SliderField
             label="Encoding quality"
             value={quality}
@@ -93,14 +94,14 @@ export function ExportModal({
             onChange={onQualityChange}
           />
         )}
-        {format !== 'jpeg' && (
+        {format !== 'jpeg' && format !== 'psd' && (
           <Toggle
             label="Preserve transparency"
             checked={preserveTransparency}
             onChange={onPreserveTransparencyChange}
           />
         )}
-        {(format === 'jpeg' || !preserveTransparency) && (
+        {format !== 'psd' && (format === 'jpeg' || !preserveTransparency) && (
           <label>
             <span>BACKGROUND COLOR</span>
             <input
@@ -111,14 +112,18 @@ export function ExportModal({
           </label>
         )}
         <p className="fine-print">
-          Exports always keep the source pixel dimensions: {docWidth} × {docHeight}.
+          {format === 'psd'
+            ? 'PSD keeps raster layers, names, visibility, opacity, order, position, and supported blend modes. Text, vector, smart-object, and group semantics are rasterized/flattened on import.'
+            : `Exports always keep the source pixel dimensions: ${docWidth} × ${docHeight}.`}
         </p>
         <div className="modal-actions">
-          <button onClick={() => onExport(true)}>
-            <Clipboard size={15} /> Copy PNG
-          </button>
+          {format !== 'psd' && (
+            <button onClick={() => onExport(true)}>
+              <Clipboard size={15} /> Copy PNG
+            </button>
+          )}
           <button className="primary" onClick={() => onExport(false)}>
-            <Download size={15} /> Download
+            <Download size={15} /> {format === 'psd' ? 'Download PSD' : 'Download'}
           </button>
         </div>
         <button className="link-button" onClick={onOpenProject}>

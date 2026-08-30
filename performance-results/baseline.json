@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-29",
+  "commit": "92aeb441366759ebe5dc5b1b7e1131e9e4a3662a",
+  "worktree": "dirty-before-audit",
+  "fixture": "parkour-kotenok-road.jpg 1280x960 JPEG, one opaque image layer",
+  "browsers": {
+    "edge": "152.0.4191.53",
+    "firefox": "154.0.1"
+  },
+  "buildKiB": {
+    "main": 565.85,
+    "mainGzip": 172.33,
+    "css": 108.69,
+    "cssGzip": 20.54
+  },
+  "startup": {
+    "edgeColdRuns": 6,
+    "loadMedianMs": 36.1,
+    "rafMaxMedianMs": 208.4,
+    "rafMaxRangeMs": [187.6, 229.3],
+    "longTaskMaxMsByRun": [253, 239, 53, 0, 51, 56],
+    "runsAtLeast100Ms": 2
+  },
+  "effectSliceDisplacement": {
+    "edgeShortCommitP95Ms": 5.4,
+    "edgeShortCommitMaxMs": 6.5,
+    "edgeLongCommitP95Ms": 15.6,
+    "edgeLongCommitMaxMs": 19.8,
+    "firefoxShortCommitP95Ms": 3,
+    "firefoxShortCommitMaxMs": 9,
+    "firefoxLongCommitP95Ms": 9,
+    "firefoxLongCommitMaxMs": 9,
+    "fullCanvasSyncPerStroke": 0,
+    "fitToScreenPerStroke": 0
+  },
+  "imageBrushFlowFieldEvolving": {
+    "edgeWorkerMs": { "p50": 377.6, "p95": 418.8, "max": 425.1 },
+    "firefoxWorkerMs": { "p50": 327, "p95": 364, "max": 367 },
+    "mainAdoptionCommitUploadMaxMs": 2.1
+  },
+  "imageBrushMoshFlowTrail": {
+    "workerP95Ms": 128.8,
+    "mainThreadLongTasks": 0
+  },
+  "heapWithoutForcedGc": {
+    "slice20DeltaMiB": 57.56,
+    "imageBrush20DeltaMiB": 38.18,
+    "classification": "expected History/cache retention candidate; not leak proof"
+  },
+  "limitations": [
+    "Baseline was captured before the bounded API replacement, so its old rAF ring could under-report retained samples after reset.",
+    "No forced GC was available.",
+    "Cold-start Long Tasks were intermittent and lacked app-subphase attribution."
+  ]
+}

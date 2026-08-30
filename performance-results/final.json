@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-30",
+  "commit": "92aeb441366759ebe5dc5b1b7e1131e9e4a3662a",
+  "worktree": "dirty-audit-result-not-committed",
+  "fixture": "parkour-kotenok-road.jpg 1280x960 JPEG, one opaque image layer",
+  "browsers": {
+    "edge": "152.0.4191.53",
+    "firefox": "154.0.1"
+  },
+  "buildKiB": {
+    "main": 569.98,
+    "mainGzip": 173.83,
+    "css": 109.25,
+    "cssGzip": 20.62
+  },
+  "startup": {
+    "edgeColdRuns": 10,
+    "moduleReadyMedianMs": 22.2,
+    "documentDecodeRangeMs": [17.3, 24.8],
+    "documentAdoptionMedianMs": 2.5,
+    "initialComposeMedianMs": 1.0,
+    "longTaskMaxMs": 334,
+    "runsAtLeast100Ms": 1,
+    "note": "Large headless rAF pauses often had no Long Task and are classified as browser/OS scheduling noise, not proven app work."
+  },
+  "effects": {
+    "shortMatrix": {
+      "toolsAttempted": 18,
+      "toolsWithPixelChanges": 17,
+      "warmupsPerTool": 5,
+      "measuredStrokesPerTool": 20,
+      "commitP95RangeMs": [1.4, 7.2],
+      "fullCanvasSync": 0,
+      "fitToScreen": 0,
+      "historyByteExact": true,
+      "repeatedRafGapsAtLeast50Ms": 0,
+      "cloneCorruption": "requires an explicit clone source; no-op run excluded"
+    },
+    "representativeLongMatrix": {
+      "tools": [
+        "JPEG Resample",
+        "Pixel Sort Brush",
+        "Feedback Brush",
+        "Flow Mosh Brush",
+        "Line Freeze Brush",
+        "Mixed Structural Glitch"
+      ],
+      "commitP95RangeMs": [10.4, 11.5],
+      "rafMaxMs": 8.4,
+      "rafGapsAtLeast50Ms": 0,
+      "historyByteExact": true
+    },
+    "sliceDisplacement": {
+      "shortCommitP95Ms": 1.6,
+      "longCommitP95Ms": 14.5,
+      "adoptionP95Ms": 0.2,
+      "canvasUploadP95Ms": 0.2
+    }
+  },
+  "retouchShort": {
+    "warmupsPerTool": 5,
+    "measuredStrokesPerTool": 20,
+    "tools": {
+      "smudge": { "sourcePrepP95Ms": 1.2, "workerP95Ms": 34.5, "adoptionP95Ms": 1.0, "commitP95Ms": 0.8 },
+      "finger": { "sourcePrepP95Ms": 1.3, "workerP95Ms": 41.1, "adoptionP95Ms": 1.4, "commitP95Ms": 0.9 },
+      "blur": { "sourcePrepP95Ms": 1.2, "workerP95Ms": 79.1, "adoptionP95Ms": 1.6, "commitP95Ms": 1.2 },
+      "sharpen": { "sourcePrepP95Ms": 1.4, "workerP95Ms": 49.4, "adoptionP95Ms": 1.6, "commitP95Ms": 1.3 }
+    },
+    "rafGapsAtLeast50Ms": 0,
+    "restoreNote": "Original-source restore is a no-op on an unmodified fixture.",
+    "eraserNote": "The imported photo is an immutable raster source; sparse-tile eraser found no editable overlay pixels."
+  },
+  "imageBrush": {
+    "warmupsPerCase": 5,
+    "measuredStrokesPerCase": 20,
+    "jpegModes": {
+      "cleanWorkerP95Ms": 17.1,
+      "fixedWorkerP95Ms": 45.6,
+      "progressiveWorkerP95Ms": 90.7,
+      "evolvingWorkerP95Ms": 95.6,
+      "strokeGradientWorkerP95Ms": 93.8,
+      "wholeTrailWorkerP95Ms": 33.7
+    },
+    "pixelEmbroideryFixedWorkerP95Ms": 21,
+    "xeroxDecayFixedWorkerP95Ms": 22.2,
+    "adoptionP95MaxMs": 0.1,
+    "commitP95MaxMs": 1.7,
+    "rafMaxMs": 8.4,
+    "rafGapsAtLeast50Ms": 0,
+    "historyByteExact": true
+  },
+  "moshRackMatrix": {
+    "exactRackComposition": true,
+    "previewCancelKeptHistory": true,
+    "oneEffectJpeg": {
+      "applies": 10,
+      "changedApplies": 8,
+      "noChangeApplies": 2,
+      "applyLatencyMs": { "p50": 123.5, "p95": 133.4, "max": 148.2 },
+      "rafMaxMs": 27.8,
+      "rafGapsAtLeast50Ms": 0
+    },
+    "threeEffects": {
+      "effects": ["jpeg-resample", "pixel-sort", "feedback"],
+      "applies": 10,
+      "applyLatencyMs": { "p50": 1318.6, "p95": 1352.5, "max": 1363.3 },
+      "rafMaxMs": 13.9,
+      "rafGapsAtLeast50Ms": 0
+    },
+    "fiveEffects": {
+      "effects": ["jpeg-resample", "pixel-sort", "feedback", "flow-field", "dct-damage"],
+      "applies": 10,
+      "applyLatencyMs": { "p50": 2891.4, "p95": 3006.8, "max": 3014.3 },
+      "rafMaxMs": 13.9,
+      "rafGapsAtLeast50Ms": 0
+    }
+  },
+  "layersThirty": {
+    "layers": 30,
+    "duplicate29P95Ms": 11.75,
+    "selection20P95Ms": 7.9,
+    "visibility20P95Ms": 12.14,
+    "reorder20P95Ms": 12.26,
+    "opacity20P95Ms": 17.15,
+    "allLayers20P95Ms": 4.21,
+    "reactCommitMs": { "p50": 1.5, "p95": 1.9, "max": 2.3 },
+    "canvasFullSync": 89,
+    "fitToScreen": 0,
+    "rafMaxMs": 8.1,
+    "rafGapsAtLeast25Ms": 0,
+    "longTasks": 0,
+    "heapDeltaBytes": 65270000
+  },
+  "firefox": {
+    "sliceShort": { "strokes": 20, "commitP95Ms": 3, "canvasUploadP95Ms": 1, "rafMaxMs": 47.6, "gapsAtLeast50Ms": 0 },
+    "imageBrushJpegProgressive": { "strokes": 20, "workerP95Ms": 94, "commitP95Ms": 2, "rafMaxMs": 47.04, "gapsAtLeast50Ms": 0 },
+    "headedSlice": { "strokes": 5, "commitP95Ms": 3, "rafMaxMs": 78.22, "gapsAtLeast50Ms": 2, "gapsAtLeast100Ms": 0 }
+  },
+  "edgeHeadedSlice": {
+    "strokes": 3,
+    "commitP95Ms": 4.6,
+    "rafMaxMs": 8.1,
+    "gapsAtLeast50Ms": 0,
+    "historyByteExact": true
+  },
+  "soak": {
+    "warmups": 5,
+    "strokes": 200,
+    "undoRedoCycles": 100,
+    "heapBytes": [29461389, 121879761, 93611983, 83964703, 98056213, 120244249, 128725265],
+    "heapDeltaBytes": 99263876,
+    "canvasDirtyUploads": 200,
+    "canvasFullSync": 0,
+    "fitToScreen": 0,
+    "historyByteExact": true,
+    "rafMaxMs": 8.5,
+    "gapsAtLeast25Ms": 0,
+    "classification": "saw-tooth GC plus bounded History retention; no monotonic leak proven without forced GC"
+  }
+}

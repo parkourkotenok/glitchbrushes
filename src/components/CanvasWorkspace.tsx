@@ -5,6 +5,7 @@ import { EffectIcon, algorithmIconIds } from '../icons/effects';
 import type { AlgorithmId, CanvasOverlayState, MaskView, Point, Tool } from '../types';
 import type { BrushProgress } from '../brush/engine';
 import { isRetouchTool } from '../retouch/tools';
+import { LayerTransformOverlay, type LayerTransformSession } from './LayerTransformOverlay';
 
 interface CanvasWorkspaceProps {
   doc: { width: number; height: number };
@@ -37,6 +38,9 @@ interface CanvasWorkspaceProps {
   imageBrushOverlayCanvasRef: RefObject<HTMLCanvasElement | null>;
   selectionCanvasRef: RefObject<HTMLCanvasElement | null>;
   cursorRef: RefObject<HTMLDivElement | null>;
+  layerTransform: LayerTransformSession | null;
+  onApplyLayerTransform(bounds: import('../types').Rectangle): void;
+  onCancelLayerTransform(): void;
   onCanvasPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onCanvasPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onCanvasPointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -77,6 +81,9 @@ export function CanvasWorkspace({
   imageBrushOverlayCanvasRef,
   selectionCanvasRef,
   cursorRef,
+  layerTransform,
+  onApplyLayerTransform,
+  onCancelLayerTransform,
   onCanvasPointerDown,
   onCanvasPointerMove,
   onCanvasPointerUp,
@@ -164,7 +171,7 @@ export function CanvasWorkspace({
         <div className="viewport-grid" />
         <div
           ref={stageRef}
-          className="canvas-stage"
+          className={`canvas-stage ${layerTransform ? 'transforming-layer' : ''}`}
           style={{
             width: doc.width,
             height: doc.height,
@@ -208,6 +215,16 @@ export function CanvasWorkspace({
               </div>
             );
           })}
+          {layerTransform && (
+            <LayerTransformOverlay
+              session={layerTransform}
+              zoom={zoom}
+              canvasWidth={doc.width}
+              canvasHeight={doc.height}
+              onApply={onApplyLayerTransform}
+              onCancel={onCancelLayerTransform}
+            />
+          )}
         </div>
         <div ref={cursorRef} className="brush-cursor" />
         {compareMode === 'split' && (

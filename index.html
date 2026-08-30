@@ -9,6 +9,11 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      if (new URLSearchParams(location.search).get('perf') === '1') {
+        window.__GLITCH_BOOTSTRAP_AT__ = performance.now();
+      }
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

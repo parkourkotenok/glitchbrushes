@@ -12,9 +12,47 @@ const effectName =
   process.argv.find((arg) => arg.startsWith('--effect='))?.split('=')[1] ?? 'Slice Displacement';
 const strokeProfile =
   process.argv.find((arg) => arg.startsWith('--stroke='))?.split('=')[1] ?? 'short';
+const measuredStrokes = Math.max(
+  1,
+  Number.parseInt(
+    process.argv.find((arg) => arg.startsWith('--strokes='))?.split('=')[1] ?? '20',
+    10,
+  ) || 20,
+);
+const historyCycles = Math.max(
+  1,
+  Number.parseInt(
+    process.argv.find((arg) => arg.startsWith('--history-cycles='))?.split('=')[1] ?? '1',
+    10,
+  ) || 1,
+);
+const warmupStrokes = Math.max(
+  1,
+  Number.parseInt(
+    process.argv.find((arg) => arg.startsWith('--warmups='))?.split('=')[1] ?? '5',
+    10,
+  ) || 5,
+);
 const imageFxId = process.argv.find((arg) => arg.startsWith('--image-fx='))?.split('=')[1] ?? '';
+const retouchTool = process.argv.find((arg) => arg.startsWith('--retouch='))?.split('=')[1] ?? '';
 const moshEffectId = process.argv.find((arg) => arg.startsWith('--mosh-effect='))?.split('=')[1] ?? '';
+const moshEffectIds = (
+  process.argv.find((arg) => arg.startsWith('--mosh-effects='))?.split('=')[1] ?? moshEffectId
+)
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
+const moshApplies = Math.max(
+  1,
+  Number.parseInt(
+    process.argv.find((arg) => arg.startsWith('--mosh-applies='))?.split('=')[1] ?? '10',
+    10,
+  ) || 10,
+);
 const uiAcceptance = process.argv.includes('--ui-acceptance');
+const layersAcceptance = process.argv.includes('--layers-acceptance');
+const startupOnly = process.argv.includes('--startup');
+const headed = process.argv.includes('--headed');
 const mutationMode =
   process.argv.find((arg) => arg.startsWith('--mutation='))?.split('=')[1] ?? 'clean';
 const delay = (ms) => new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
@@ -96,7 +134,25 @@ function summarize(values = []) {
   const sorted = [...values].sort((a, b) => a - b);
   const at = (ratio) =>
     sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * ratio))] ?? 0;
-  return { count: sorted.length, p50: at(0.5), p95: at(0.95), max: sorted.at(-1) ?? 0 };
+  return {
+    count: sorted.length,
+    p50: at(0.5),
+    p95: at(0.95),
+    p99: at(0.99),
+    max: sorted.at(-1) ?? 0,
+  };
+}
+
+const performanceSnapshot = (evaluate) =>
+  evaluate(`window.__GLITCH_PERF__?.snapshot() ?? null`);
+
+async function resetPerformance(evaluate) {
+  const reset = await evaluate(`(async () => {
+    window.__GLITCH_PERF__?.reset();
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return Boolean(window.__GLITCH_PERF__);
+  })()`);
+  if (!reset) throw new Error('The ?perf=1 diagnostics API is unavailable.');
 }
 
 async function exerciseMosh(evaluate, capabilities) {
@@ -107,23 +163,69 @@ async function exerciseMosh(evaluate, capabilities) {
   })()`);
   if (!opened) throw new Error('Could not open Mosh Lab.');
   await waitFor(() => evaluate(`Boolean(document.querySelector('.mosh-lab'))`));
-  await evaluate(`(() => {
-    const button = [...document.querySelectorAll('.mosh-rack-toolbar button')]
-      .find((entry) => entry.textContent.includes('Add Effect'));
+  const moshNames = {
+    'pixel-sort': 'Pixel Sorter',
+    feedback: 'Feedback Echo',
+    'motion-field': 'Motion Field Mosh',
+    'motion-transfer': 'Motion Transfer',
+    'chroma-drift': 'Luma / Chroma Drift',
+    'dct-damage': 'DCT Block Damage',
+    'jpeg-resample': 'JPEG Resample',
+    'edge-melt': 'Edge Melt',
+    'flow-field': 'Flow Field Displace',
+  };
+  const advancedOpened = await evaluate(`(() => {
+    const button = [...document.querySelectorAll('.interface-mode-options button')]
+      .find((entry) => entry.textContent.trim() === 'Advanced');
     button?.click();
     return Boolean(button);
   })()`);
-  await waitFor(() => evaluate(`document.querySelectorAll('.mosh-add-menu [role="option"]').length > 0`));
-  const added = await evaluate(`(() => {
-    const option = [...document.querySelectorAll('.mosh-add-menu [role="option"]')]
-      .find((entry) => entry.getAttribute('aria-label')?.includes('JPEG Resample.'));
-    option?.click();
-    return Boolean(option);
-  })()`);
-  if (!added) throw new Error(`Could not add MOSH effect: ${moshEffectId}`);
+  if (!advancedOpened) throw new Error('Could not switch MOSH controls to Advanced.');
   await waitFor(() =>
-    evaluate(`[...document.querySelectorAll('.mosh-card')].some((entry) => entry.textContent.includes('JPEG Resample'))`),
+    evaluate(`Boolean(document.querySelector('.mosh-card .mosh-card-actions button'))`),
   );
+  while (await evaluate(`document.querySelectorAll('.mosh-card').length > 0`)) {
+    const beforeCards = await evaluate(`document.querySelectorAll('.mosh-card').length`);
+    const removed = await evaluate(`(() => {
+      const card = document.querySelector('.mosh-card');
+      const button = card && [...card.querySelectorAll('.mosh-card-actions button')]
+        .find((entry) => entry.textContent.includes('Remove'));
+      button?.click();
+      return Boolean(button);
+    })()`);
+    if (!removed) throw new Error('Could not clear the default MOSH rack.');
+    await waitFor(() => evaluate(`document.querySelectorAll('.mosh-card').length < ${beforeCards}`));
+  }
+  await evaluate(`(() => {
+    const button = [...document.querySelectorAll('.interface-mode-options button')]
+      .find((entry) => entry.textContent.trim() === 'Simple');
+    button?.click();
+    return Boolean(button);
+  })()`);
+  for (const effectId of moshEffectIds) {
+    const name = moshNames[effectId];
+    if (!name) throw new Error(`Unknown MOSH effect id: ${effectId}`);
+    const beforeCards = await evaluate(`document.querySelectorAll('.mosh-card').length`);
+    await evaluate(`(() => {
+      const button = [...document.querySelectorAll('.mosh-rack-toolbar button')]
+        .find((entry) => entry.textContent.includes('Add Effect'));
+      button?.click();
+      return Boolean(button);
+    })()`);
+    await waitFor(() =>
+      evaluate(`document.querySelectorAll('.mosh-add-menu [role="option"]').length > 0`),
+    );
+    const added = await evaluate(`(() => {
+      const option = [...document.querySelectorAll('.mosh-add-menu [role="option"]')]
+        .find((entry) => entry.getAttribute('aria-label')?.includes(${JSON.stringify(`${name}.`)}));
+      option?.click();
+      return Boolean(option);
+    })()`);
+    if (!added) throw new Error(`Could not add MOSH effect: ${effectId}`);
+    await waitFor(() =>
+      evaluate(`document.querySelectorAll('.mosh-card').length > ${beforeCards}`),
+    );
+  }
 
   const historyCount = () => evaluate(`(() => {
     const history = [...document.querySelectorAll('.status-data span')]
@@ -131,9 +233,8 @@ async function exerciseMosh(evaluate, capabilities) {
     return Number.parseInt(history?.querySelector('strong')?.textContent ?? '-1', 10);
   })()`);
   const beforeHistory = await historyCount();
-  const before = JSON.parse(
-    await evaluate(`document.documentElement.getAttribute('data-glitchbrush-performance')`),
-  );
+  await resetPerformance(evaluate);
+  const before = await performanceSnapshot(evaluate);
   const previewOpened = await evaluate(`(() => {
     const button = [...document.querySelectorAll('.mosh-rack-toolbar button')]
       .find((entry) => entry.textContent.trim() === 'Preview');
@@ -154,10 +255,21 @@ async function exerciseMosh(evaluate, capabilities) {
   if (!cancelled) throw new Error('MOSH preview Cancel was not available.');
   await waitFor(() => evaluate(`document.querySelector('.status-message')?.textContent.includes('preview cancelled')`));
   const cancelKeptHistory = (await historyCount()) === beforeHistory;
+  await evaluate(`(() => {
+    const button = [...document.querySelectorAll('.mosh-rack-toolbar button')]
+      .find((entry) => entry.textContent.trim() === 'Preview');
+    if (button?.classList.contains('active')) button.click();
+    return Boolean(button);
+  })()`);
+  await waitFor(() =>
+    evaluate(`!document.querySelector('.mosh-rack-toolbar button.active')?.textContent.includes('Preview')`),
+  );
 
   const applyDurations = [];
-  for (let index = 0; index < 10; index += 1) {
-    const historyBeforeApply = await historyCount();
+  let noChangeApplies = 0;
+  for (let index = 0; index < moshApplies; index += 1) {
+    const fullSyncBeforeApply =
+      (await performanceSnapshot(evaluate)).counts['glitchbrushes:canvas-full-sync'] ?? 0;
     const startedAt = performance.now();
     const clicked = await evaluate(`(() => {
       const button = [...document.querySelectorAll('.mosh-rack-toolbar button')]
@@ -166,18 +278,50 @@ async function exerciseMosh(evaluate, capabilities) {
       return Boolean(button);
     })()`);
     if (!clicked) throw new Error(`MOSH Apply ${index + 1} was not available.`);
-    await waitFor(async () => (await historyCount()) > historyBeforeApply, 60000);
+    await delay(20);
+    try {
+      await waitFor(async () => {
+        const metrics = await performanceSnapshot(evaluate);
+        const fullSyncReady =
+          (metrics.counts['glitchbrushes:canvas-full-sync'] ?? 0) > fullSyncBeforeApply;
+        const applyReady = await evaluate(`(() => {
+          const button = [...document.querySelectorAll('.mosh-rack-toolbar button')]
+            .find((entry) => entry.textContent.trim() === 'Apply');
+          return Boolean(button && !button.disabled);
+        })()`);
+        const applied = await evaluate(
+          `document.querySelector('.status-message')?.textContent.includes('applied atomically')`,
+        );
+        const noChange = await evaluate(
+          `document.querySelector('.status-message')?.textContent.includes('completed without changing pixels')`,
+        );
+        return applyReady && ((fullSyncReady && applied) || noChange);
+      }, 60000);
+    } catch {
+      const state = await evaluate(`({
+        history: [...document.querySelectorAll('.status-data span')].find((entry) => entry.textContent.trim().startsWith('HISTORY'))?.textContent.trim(),
+        notice: document.querySelector('.status-message')?.textContent.trim(),
+        progress: document.querySelector('.mosh-progress')?.textContent.trim(),
+        cards: [...document.querySelectorAll('.mosh-card')].map((entry) => entry.querySelector('strong')?.textContent.trim()),
+        applyDisabled: [...document.querySelectorAll('.mosh-rack-toolbar button')].find((entry) => entry.textContent.trim() === 'Apply')?.disabled
+      })`);
+      throw new Error(`MOSH Apply ${index + 1} did not commit: ${JSON.stringify(state)}`);
+    }
+    const noChange = await evaluate(
+      `document.querySelector('.status-message')?.textContent.includes('completed without changing pixels')`,
+    );
+    if (noChange) noChangeApplies += 1;
     applyDurations.push(performance.now() - startedAt);
   }
-  const after = JSON.parse(
-    await evaluate(`document.documentElement.getAttribute('data-glitchbrush-performance')`),
-  );
+  const after = await performanceSnapshot(evaluate);
   const delta = (name) => (after.counts[name] ?? 0) - (before.counts[name] ?? 0);
-  const scenarioRafGaps = after.rafGaps.slice(before.rafGaps.length);
+  const scenarioRafGaps = after.rafGaps;
   return {
     browser: capabilities,
-    effect: moshEffectId,
-    applies: 10,
+    effects: moshEffectIds,
+    applies: moshApplies,
+    changedApplies: moshApplies - noChangeApplies,
+    noChangeApplies,
     previewCancelKeptHistory: cancelKeptHistory,
     historyDelta: (await historyCount()) - beforeHistory,
     canvasFullSyncDelta: delta('glitchbrushes:canvas-full-sync'),
@@ -330,6 +474,129 @@ async function exerciseUi(evaluate, stroke, capabilities) {
   };
 }
 
+async function exerciseLayers(evaluate, capabilities) {
+  const layerVersion = () =>
+    evaluate(
+      `Number(document.querySelector('.layer-stack')?.getAttribute('data-layer-version') ?? -1)`,
+    );
+  const runVersionedAction = async (expression) => {
+    const beforeVersion = await layerVersion();
+    const startedAt = performance.now();
+    const clicked = await evaluate(expression);
+    if (!clicked) throw new Error(`Layer action was unavailable: ${expression}`);
+    await waitFor(async () => (await layerVersion()) > beforeVersion, 15000);
+    return performance.now() - startedAt;
+  };
+
+  // Let the editor's initial fit/layout effects settle before isolating layer actions.
+  await delay(500);
+  await resetPerformance(evaluate);
+  const heapBefore = await evaluate(`performance.memory?.usedJSHeapSize ?? null`);
+  const duplicate = [];
+  for (let index = 0; index < 29; index += 1) {
+    duplicate.push(
+      await runVersionedAction(`(() => {
+        const button = document.querySelector('button[aria-label="Duplicate layer"]');
+        button?.click();
+        return Boolean(button && !button.disabled);
+      })()`),
+    );
+  }
+  const layerCount = await evaluate(`document.querySelectorAll('.layer-stack-row:not(.original-layer)').length`);
+
+  const selection = [];
+  for (let index = 0; index < 20; index += 1) {
+    selection.push(
+      await runVersionedAction(`(() => {
+        const buttons = [...document.querySelectorAll('.layer-stack-row:not(.original-layer) .layer-select-button')];
+        const button = buttons[${index} % buttons.length];
+        button?.click();
+        return Boolean(button);
+      })()`),
+    );
+  }
+
+  const visibility = [];
+  for (let index = 0; index < 20; index += 1) {
+    visibility.push(
+      await runVersionedAction(`(() => {
+        const buttons = [...document.querySelectorAll('.layer-stack-row:not(.original-layer) .layer-visibility')];
+        const button = buttons[${index} % buttons.length];
+        button?.click();
+        return Boolean(button);
+      })()`),
+    );
+  }
+
+  const reorder = [];
+  for (let index = 0; index < 20; index += 1) {
+    reorder.push(
+      await runVersionedAction(`(() => {
+        const button = document.querySelector('button[aria-label="${index % 2 === 0 ? 'Move layer down' : 'Move layer up'}"]');
+        button?.click();
+        return Boolean(button && !button.disabled);
+      })()`),
+    );
+  }
+
+  const opacity = [];
+  for (let index = 0; index < 20; index += 1) {
+    opacity.push(
+      await runVersionedAction(`(async () => {
+        const input = document.querySelector('input[aria-label="Layer opacity"]');
+        if (!input || input.disabled) return false;
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${index % 2 === 0 ? 80 : 100});
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        input.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+        return true;
+      })()`),
+    );
+  }
+
+  const allLayers = [];
+  for (let index = 0; index < 20; index += 1) {
+    const before = await evaluate(`document.querySelector('.layers-sample-all')?.getAttribute('aria-pressed')`);
+    const startedAt = performance.now();
+    await evaluate(`document.querySelector('.layers-sample-all')?.click()`);
+    await waitFor(
+      () =>
+        evaluate(`document.querySelector('.layers-sample-all')?.getAttribute('aria-pressed')`) .then(
+          (value) => value !== before,
+        ),
+      10000,
+    );
+    allLayers.push(performance.now() - startedAt);
+  }
+
+  await delay(500);
+  const metrics = await performanceSnapshot(evaluate);
+  const heapAfter = await evaluate(`performance.memory?.usedJSHeapSize ?? null`);
+  return {
+    browser: capabilities,
+    scenario: 'layers-30',
+    layerCount,
+    operations: {
+      duplicate: summarize(duplicate),
+      selection: summarize(selection),
+      visibility: summarize(visibility),
+      reorder: summarize(reorder),
+      opacity: summarize(opacity),
+      allLayers: summarize(allLayers),
+    },
+    reactCommits: metrics.summaries['glitchbrushes:react-post-commit'] ?? null,
+    fullCanvasSync: metrics.counts['glitchbrushes:canvas-full-sync'] ?? 0,
+    fitToScreen: metrics.counts['glitchbrushes:fit-to-screen'] ?? 0,
+    longTasks: metrics.summaries['glitchbrushes:long-main-task'] ?? null,
+    raf: metrics.raf,
+    heap:
+      heapBefore === null || heapAfter === null
+        ? { supported: false }
+        : { supported: true, before: heapBefore, after: heapAfter, delta: heapAfter - heapBefore },
+  };
+}
+
 async function stopBrowser(child) {
   if (child.exitCode !== null) return;
   child.kill();
@@ -349,9 +616,61 @@ async function exercise(evaluate, stroke, capabilities) {
       `document.querySelector('.topbar-file')?.textContent.includes('parkour-kotenok-road.jpg')`,
     ),
   );
+  if (startupOnly) {
+    await delay(350);
+    const metrics = await performanceSnapshot(evaluate);
+    const navigation = await evaluate(
+      `performance.getEntriesByType('navigation')[0]?.toJSON() ?? null`,
+    );
+    return {
+      browser: capabilities,
+      scenario: 'cold-start',
+      document: await evaluate(`document.querySelector('.topbar-file')?.textContent.trim() ?? ''`),
+      navigation: navigation
+        ? {
+            domContentLoaded: navigation.domContentLoadedEventEnd,
+            load: navigation.loadEventEnd,
+            responseEnd: navigation.responseEnd,
+          }
+        : null,
+      adoption: metrics.summaries['glitchbrushes:document-adoption'] ?? null,
+      decodeRoundTrip: metrics.summaries['glitchbrushes:document-decode-roundtrip'] ?? null,
+      initialCompose: metrics.summaries['glitchbrushes:document-initial-compose'] ?? null,
+      moduleReady: metrics.summaries['glitchbrushes:app-module-ready'] ?? null,
+      firstPaint: metrics.summaries['glitchbrushes:react-first-paint'] ?? null,
+      longTasks: metrics.summaries['glitchbrushes:long-main-task'] ?? null,
+      longTaskEvents: metrics.events
+        .filter((entry) => entry.name === 'glitchbrushes:long-main-task')
+        .map((entry) => ({ at: entry.at, duration: entry.duration, metadata: entry.metadata })),
+      measuredStartupWork: Object.fromEntries(
+        Object.entries(metrics.summaries).filter(([name]) => name !== 'glitchbrushes:raf-gap'),
+      ),
+      raf: metrics.raf,
+    };
+  }
+  if (layersAcceptance) return exerciseLayers(evaluate, capabilities);
   if (uiAcceptance) return exerciseUi(evaluate, stroke, capabilities);
-  if (moshEffectId) return exerciseMosh(evaluate, capabilities);
-  if (imageFxId) {
+  if (moshEffectIds.length) return exerciseMosh(evaluate, capabilities);
+  if (retouchTool) {
+    const openedRetouch = await evaluate(`(() => {
+      const button = [...document.querySelectorAll('nav button')]
+        .find((entry) => entry.textContent.trim() === 'Retouch');
+      button?.click();
+      return Boolean(button);
+    })()`);
+    if (!openedRetouch) throw new Error('Could not open Retouch.');
+    await waitFor(() => evaluate(`Boolean(document.querySelector('.retouch-panel'))`));
+    const selectedRetouch = await evaluate(`(() => {
+      const button = [...document.querySelectorAll('.retouch-tool-switcher button')]
+        .find((entry) => entry.textContent.trim().toLowerCase() === ${JSON.stringify(retouchTool.toLowerCase())});
+      button?.click();
+      return Boolean(button);
+    })()`);
+    if (!selectedRetouch) throw new Error(`Could not select Retouch tool: ${retouchTool}`);
+    await waitFor(() =>
+      evaluate(`document.querySelector('.retouch-panel')?.getAttribute('data-retouch-tool') === ${JSON.stringify(retouchTool)}`),
+    );
+  } else if (imageFxId) {
     const openedImageBrush = await evaluate(`(() => {
       const button = [...document.querySelectorAll('nav button')].find((entry) => entry.textContent.trim() === 'Image Brush');
       button?.click();
@@ -450,22 +769,41 @@ async function exercise(evaluate, stroke, capabilities) {
   }
   await delay(1200);
   const canvas = await evaluate(
-    `(() => { const r=document.querySelector('.work-canvas').getBoundingClientRect(); return {x:r.x,y:r.y,width:r.width,height:r.height}; })()`,
+    `(() => {
+      const r = document.querySelector('.work-canvas').getBoundingClientRect();
+      const left = Math.max(0, r.left);
+      const top = Math.max(0, r.top);
+      const right = Math.min(innerWidth - 1, r.right);
+      const bottom = Math.min(innerHeight - 1, r.bottom);
+      return { x: left, y: top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) };
+    })()`,
   );
   const warmupStart = { x: canvas.x + canvas.width * 0.18, y: canvas.y + canvas.height * 0.55 };
-  await stroke(warmupStart, { x: warmupStart.x + canvas.width * 0.09, y: warmupStart.y + 6 });
-  await waitFor(() => evaluate(`!document.querySelector('.image-brush-progress')`));
+  for (let index = 0; index < warmupStrokes; index += 1) {
+    const uploadMetric = imageFxId
+      ? 'glitchbrushes:image-brush-canvas-upload'
+      : 'glitchbrushes:canvas-dirty-upload';
+    const beforeWarmup = (await performanceSnapshot(evaluate)).counts[uploadMetric] ?? 0;
+    await stroke(
+      { ...warmupStart, y: warmupStart.y + index * 4 },
+      { x: warmupStart.x + canvas.width * 0.09, y: warmupStart.y + index * 4 + 6 },
+    );
+    await waitFor(async () => {
+      const metrics = await performanceSnapshot(evaluate);
+      return (metrics.counts[uploadMetric] ?? 0) > beforeWarmup;
+    }, imageFxId ? 60000 : 10000);
+  }
   await delay(1000);
-  const before = JSON.parse(
-    await evaluate(`document.documentElement.getAttribute('data-glitchbrush-performance')`),
-  );
+  await resetPerformance(evaluate);
+  const before = await performanceSnapshot(evaluate);
+  const heapBefore = await evaluate(`performance.memory?.usedJSHeapSize ?? null`);
+  const heapCheckpoints = [{ stroke: 0, heap: heapBefore }];
   const zoomBefore = await evaluate(`document.querySelector('.zoom-readout')?.textContent ?? ''`);
-  for (let index = 0; index < 20; index += 1) {
-    const previousImageUploads = imageFxId
-      ? (JSON.parse(
-          await evaluate(`document.documentElement.getAttribute('data-glitchbrush-performance')`),
-        ).counts['glitchbrushes:image-brush-canvas-upload'] ?? 0)
-      : 0;
+  for (let index = 0; index < measuredStrokes; index += 1) {
+    const uploadMetric = imageFxId
+      ? 'glitchbrushes:image-brush-canvas-upload'
+      : 'glitchbrushes:canvas-dirty-upload';
+    const previousCanvasUploads = (await performanceSnapshot(evaluate)).counts[uploadMetric] ?? 0;
     const start = {
       x: canvas.x + canvas.width * 0.2,
       y: canvas.y + canvas.height * (0.44 + (index % 10) * 0.032),
@@ -475,17 +813,14 @@ async function exercise(evaluate, stroke, capabilities) {
       y: start.y + (strokeProfile === 'long' ? 34 : 6),
     };
     await stroke(start, end);
-    if (imageFxId) {
-      try {
-        await waitFor(async () => {
-          const metrics = JSON.parse(
-            await evaluate(`document.documentElement.getAttribute('data-glitchbrush-performance')`),
-          );
-          return (
-            (metrics.counts['glitchbrushes:image-brush-canvas-upload'] ?? 0) > previousImageUploads
-          );
-        }, 60000);
-      } catch {
+    try {
+      await waitFor(async () => {
+        const metrics = await performanceSnapshot(evaluate);
+        return (metrics.counts[uploadMetric] ?? 0) > previousCanvasUploads;
+      }, imageFxId ? 60000 : 10000);
+      await delay(imageFxId ? 80 : 30);
+    } catch {
+      if (imageFxId) {
         const state = await evaluate(`({
           notice: document.querySelector('.status-message')?.textContent.trim(),
           progress: document.querySelector('.image-brush-progress')?.textContent.trim(),
@@ -494,15 +829,17 @@ async function exercise(evaluate, stroke, capabilities) {
         })`);
         throw new Error(`Image Brush stroke ${index + 1} did not commit: ${JSON.stringify(state)}`);
       }
-      await delay(80);
-    } else {
-      await delay(180);
+      throw new Error(`Effect stroke ${index + 1} did not commit.`);
+    }
+    if ((index + 1) % 40 === 0 || index + 1 === measuredStrokes) {
+      heapCheckpoints.push({
+        stroke: index + 1,
+        heap: await evaluate(`performance.memory?.usedJSHeapSize ?? null`),
+      });
     }
   }
   await delay(900);
-  const after = JSON.parse(
-    await evaluate(`document.documentElement.getAttribute('data-glitchbrush-performance')`),
-  );
+  const after = await performanceSnapshot(evaluate);
   const zoomAfter = await evaluate(`document.querySelector('.zoom-readout')?.textContent ?? ''`);
   const hashCanvas = async () =>
     evaluate(`(async () => {
@@ -512,50 +849,89 @@ async function exercise(evaluate, stroke, capabilities) {
     return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('');
   })()`);
   const committedHash = await hashCanvas();
-  const historyReady = await evaluate(
-    `(() => { const button = document.querySelector('button[aria-label="Undo"]'); if (!button || button.disabled) return false; button.click(); return true; })()`,
-  );
-  if (!historyReady) {
-    const state = await evaluate(`({
-      notice: document.querySelector('.status-message')?.textContent.trim(),
-      activeLayer: document.querySelector('.layer-row.active, .layer-row[aria-selected="true"]')?.textContent.trim(),
-      pointerEvents: getComputedStyle(document.querySelector('.work-canvas')).pointerEvents,
-      metrics: JSON.parse(document.documentElement.getAttribute('data-glitchbrush-performance'))
-    })`);
-    throw new Error(`Undo was not available after the acceptance strokes: ${JSON.stringify(state)}`);
+  let undoneHash = '';
+  let redoneHash = '';
+  for (let cycle = 0; cycle < historyCycles; cycle += 1) {
+    const historyReady = await evaluate(
+      `(() => { const button = document.querySelector('button[aria-label="Undo"]'); if (!button || button.disabled) return false; button.click(); return true; })()`,
+    );
+    if (!historyReady) {
+      const state = await evaluate(`({
+        notice: document.querySelector('.status-message')?.textContent.trim(),
+        activeLayer: document.querySelector('.layer-row.active, .layer-row[aria-selected="true"]')?.textContent.trim(),
+        pointerEvents: getComputedStyle(document.querySelector('.work-canvas')).pointerEvents,
+        metrics: window.__GLITCH_PERF__?.snapshot()
+      })`);
+      throw new Error(`Undo was not available after the acceptance strokes: ${JSON.stringify(state)}`);
+    }
+    await delay(historyCycles > 1 ? 35 : 350);
+    if (cycle === 0) undoneHash = await hashCanvas();
+    const redoReady = await evaluate(
+      `(() => { const button = document.querySelector('button[aria-label="Redo"]'); if (!button || button.disabled) return false; button.click(); return true; })()`,
+    );
+    if (!redoReady) throw new Error('Redo was not available after Undo.');
+    await delay(historyCycles > 1 ? 35 : 350);
   }
-  await delay(350);
-  const undoneHash = await hashCanvas();
-  const redoReady = await evaluate(
-    `(() => { const button = document.querySelector('button[aria-label="Redo"]'); if (!button || button.disabled) return false; button.click(); return true; })()`,
-  );
-  if (!redoReady) throw new Error('Redo was not available after Undo.');
-  await delay(350);
-  const redoneHash = await hashCanvas();
+  redoneHash = await hashCanvas();
+  await delay(historyCycles > 1 ? 750 : 100);
+  const afterHistory = await performanceSnapshot(evaluate);
+  const heapAfter = await evaluate(`performance.memory?.usedJSHeapSize ?? null`);
+  heapCheckpoints.push({ stroke: measuredStrokes, phase: 'after-history', heap: heapAfter });
   const delta = (name) => (after.counts[name] ?? 0) - (before.counts[name] ?? 0);
-  const scenarioRafGaps = after.rafGaps.slice(before.rafGaps.length);
+  const scenarioRafGaps = after.rafGaps;
   return {
     browser: capabilities,
-    effect: imageFxId || effectName,
+    effect: retouchTool || imageFxId || effectName,
     mutationMode: imageFxId ? mutationMode : undefined,
     strokeProfile,
     document: await evaluate(`document.querySelector('.topbar-file')?.textContent.trim() ?? ''`),
-    strokes: 20,
+    warmups: warmupStrokes,
+    strokes: measuredStrokes,
+    historyCycles,
     canvasDirtyUploadDelta: delta('glitchbrushes:canvas-dirty-upload'),
     canvasFullSyncDelta: delta('glitchbrushes:canvas-full-sync'),
     fitToScreenDelta: delta('glitchbrushes:fit-to-screen'),
     zoomStable: zoomBefore === zoomAfter,
     historyByteExact: committedHash !== undoneHash && committedHash === redoneHash,
+    heap:
+      heapBefore === null || heapAfter === null
+        ? { supported: false }
+        : {
+            supported: true,
+            before: heapBefore,
+            after: heapAfter,
+            delta: heapAfter - heapBefore,
+            checkpoints: heapCheckpoints,
+          },
     workerRoundTrip: summarize(
-      (after.samples['glitchbrushes:pointer-up-to-result'] ?? []).slice(-20),
+      (
+        after.samples[
+          retouchTool
+            ? 'glitchbrushes:retouch-worker-roundtrip'
+            : 'glitchbrushes:pointer-up-to-result'
+        ] ?? []
+      ).slice(-measuredStrokes),
     ),
-    adoption: summarize((after.samples['glitchbrushes:worker-result-adoption'] ?? []).slice(-20)),
+    sourcePrep: retouchTool
+      ? summarize(
+          (after.samples['glitchbrushes:retouch-source-prep'] ?? []).slice(-measuredStrokes),
+        )
+      : undefined,
+    adoption: summarize(
+      (
+        after.samples[
+          retouchTool
+            ? 'glitchbrushes:retouch-result-adoption'
+            : 'glitchbrushes:worker-result-adoption'
+        ] ?? []
+      ).slice(-measuredStrokes),
+    ),
     layerCommit: summarize(
       (
         after.samples[
           imageFxId ? 'glitchbrushes:layer-commit' : 'glitchbrushes:commit-current-buffer'
         ] ?? []
-      ).slice(-20),
+      ).slice(-measuredStrokes),
     ),
     canvasUpload: summarize(
       (
@@ -564,29 +940,31 @@ async function exercise(evaluate, stroke, capabilities) {
             ? 'glitchbrushes:image-brush-canvas-upload'
             : 'glitchbrushes:canvas-dirty-upload'
         ] ?? []
-      ).slice(-20),
+      ).slice(-measuredStrokes),
     ),
     rafGaps: summarize(scenarioRafGaps),
     rafGapsOver50ms: scenarioRafGaps.filter((gap) => gap >= 50).length,
+    totalRaf: afterHistory.raf,
   };
 }
 
 async function runEdge() {
   const executable = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
-  const port = 9341;
-  const process = spawn(
+  const port = 30_000 + (process.pid % 10_000);
+  const launchArguments = [
+    `--remote-debugging-port=${port}`,
+    `--user-data-dir=${profile}`,
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-features=msEdgeFirstRunExperience',
+    '--window-size=1500,980',
+    appUrl,
+  ];
+  if (!headed) launchArguments.splice(5, 0, '--headless=new');
+  const browserProcess = spawn(
     executable,
-    [
-      `--remote-debugging-port=${port}`,
-      `--user-data-dir=${profile}`,
-      '--no-first-run',
-      '--no-default-browser-check',
-      '--disable-features=msEdgeFirstRunExperience',
-      '--headless=new',
-      '--window-size=1500,980',
-      appUrl,
-    ],
-    { stdio: 'ignore', windowsHide: true },
+    launchArguments,
+    { stdio: 'ignore', windowsHide: !headed },
   );
   let rpc;
   try {
@@ -600,6 +978,11 @@ async function runEdge() {
     rpc = new Rpc(target.webSocketDebuggerUrl);
     await rpc.open();
     await rpc.send('Runtime.enable');
+    if (headed) {
+      await rpc.send('Page.enable');
+      await rpc.send('Page.bringToFront');
+      await rpc.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    }
     const evaluate = async (expression) => {
       const result = await rpc.send('Runtime.evaluate', {
         expression,
@@ -642,31 +1025,33 @@ async function runEdge() {
     return await exercise(evaluate, stroke, {
       name: 'Microsoft Edge',
       version: await evaluate('navigator.userAgent'),
+      headed,
     });
   } finally {
     rpc?.close();
-    await stopBrowser(process);
+    await stopBrowser(browserProcess);
     await delay(500);
   }
 }
 
 async function runFirefox() {
   const executable = 'C:\\Program Files\\Mozilla Firefox\\firefox.exe';
-  const port = 9228;
-  const process = spawn(
+  const port = 20_000 + (process.pid % 10_000);
+  const launchArguments = [
+    '--no-remote',
+    '--wait-for-browser',
+    '--profile',
+    profile,
+    `--remote-debugging-port=${port}`,
+    '--width=1500',
+    '--height=980',
+    appUrl,
+  ];
+  if (!headed) launchArguments.splice(2, 0, '--headless');
+  const browserProcess = spawn(
     executable,
-    [
-      '--no-remote',
-      '--wait-for-browser',
-      '--headless',
-      '--profile',
-      profile,
-      `--remote-debugging-port=${port}`,
-      '--width=1500',
-      '--height=980',
-      appUrl,
-    ],
-    { stdio: 'ignore', windowsHide: true },
+    launchArguments,
+    { stdio: 'ignore', windowsHide: !headed },
   );
   let rpc;
   try {
@@ -741,13 +1126,13 @@ async function runFirefox() {
     const report = await exercise(evaluate, stroke, {
       name: 'Mozilla Firefox',
       version: session.capabilities.browserVersion,
-      headed: !session.capabilities['moz:headless'],
+      headed,
     });
     await rpc.send('session.end', {});
     return report;
   } finally {
     rpc?.close();
-    await stopBrowser(process);
+    await stopBrowser(browserProcess);
     await delay(500);
   }
 }

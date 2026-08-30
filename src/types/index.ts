@@ -463,5 +463,7 @@ export interface LayerStackSnapshot {
   height: number;
   activeLayerId: string;
   soloLayerId: string | null;
+  /** Older projects omit this and therefore keep the built-in white Background. */
+  backgroundVisible?: boolean;
   layers: SparseLayerSnapshot[];
 }

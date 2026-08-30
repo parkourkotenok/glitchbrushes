@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "baselineCommit": "92aeb441366759ebe5dc5b1b7e1131e9e4a3662a",
+  "status": "audit fixes remain uncommitted",
+  "confirmedFixes": [
+    "Opaque startup document shares its immutable raster and allocates the Float32 mask lazily.",
+    "Structural Effect and Retouch pointerdown no longer compose an unused full selected-layer buffer.",
+    "Layer-backed History undo/redo does not replay byte patches before authoritative snapshot restore.",
+    "History accounting includes unique raster buffers and avoids duplicate references.",
+    "PSD dimensions are rejected from the 26-byte header before ag-psd decode and use the real 2 MP document cap.",
+    "Bounded perf diagnostics expose reset/snapshot/exportJson, p50/p95/p99/max, Long Tasks and rAF buckets."
+  ],
+  "baselineToFinal": {
+    "edgeColdRunsAtLeast100Ms": "2/6 -> 1/10 (intermittent environment-sensitive tail remains)",
+    "documentAdoptionMs": "unattributed cold-start candidate -> median 2.5 ms",
+    "sliceShortCommitP95Ms": "5.4 -> 1.6",
+    "sliceLongCommitP95Ms": "15.6 -> 14.5",
+    "ordinaryStrokeFullCanvasSync": "0 -> 0",
+    "ordinaryStrokeRafGapsAtLeast50Ms": "0 -> 0"
+  },
+  "deferred": [
+    "Persistent workers and packed path arrays: current main-thread adoption is already inside frame budget.",
+    "Region-only Retouch source/result: current full-buffer source prep is 1.2-1.4 ms p95 on the 1280x960 fixture.",
+    "OffscreenCanvas/WebGL/WebGPU/WASM: no measured main-thread bottleneck justifies the migration.",
+    "Immutable raster erasure semantics: functional layer-model decision, not changed by this performance audit.",
+    "Near-cap multi-layer/project/export exhaustive browser matrix remains a follow-up; an isolated 30-layer action matrix passed and unit/static paths were reviewed."
+  ]
+}

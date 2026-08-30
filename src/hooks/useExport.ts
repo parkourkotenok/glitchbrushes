@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import type { EditorDocument } from '../types';
 
-export type ExportFormat = 'png' | 'jpeg' | 'webp';
+export type ExportFormat = 'png' | 'jpeg' | 'webp' | 'psd';
 
 export type DocRef = { current: EditorDocument };
 

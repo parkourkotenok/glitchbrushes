@@ -24,6 +24,7 @@ import { TopBar } from './components/TopBar';
 import { HistoryPopover } from './components/HistoryPopover';
 import { ToolRail } from './components/ToolRail';
 import { CanvasWorkspace } from './components/CanvasWorkspace';
+import type { LayerTransformSession } from './components/LayerTransformOverlay';
 import { BrushesTabs, InspectorTabs } from './components/InspectorTabs';
 import { EffectPanel } from './components/EffectPanel';
 import { RetouchPanel } from './components/RetouchPanel';
@@ -82,18 +83,25 @@ import {
   composeLayerStackBelowActive,
   createImageLayerStack,
   createLayerStack,
+  createRasterLayerStack,
   deserializeLayerStack,
   eraseActiveLayerWithMask,
   flattenLayerStack,
   layerMemoryBytes,
+  materializeLayerContent,
+  replaceLayerContent,
   removeGeneratedLayers,
   restoreLayerStack,
   serializeLayerStack,
   snapshotLayerStack,
+  unlockBackgroundLayer,
   writeCompositeResultToActiveLayer,
   type LayerStack,
   type SerializedLayerStack,
 } from './layers/sparseLayers';
+import { resizeLayerOffThread } from './layers/transformClient';
+import { decodePsdOffThread, encodePsdOffThread } from './psd/client';
+import type { EncodedPsdInput } from './psd/codec';
 import { algorithmIconIds } from './icons/effects';
 import { countChangedPixels } from './utils/pixels';
 import {
@@ -209,6 +217,7 @@ function decodeDocumentOffThread(
   sourceWidth: number;
   sourceHeight: number;
   resized: boolean;
+  opaque: boolean;
   original: ArrayBuffer;
   pixels?: ArrayBuffer;
   mask?: ArrayBuffer;
@@ -246,6 +255,7 @@ function decodeDocumentOffThread(
             sourceWidth: number;
             sourceHeight: number;
             resized: boolean;
+            opaque: boolean;
             original: ArrayBuffer;
             pixels?: ArrayBuffer;
             mask?: ArrayBuffer;
@@ -508,6 +518,7 @@ function GlitchBrushesEditor({
   } = usePixelState();
   const { notice, setNotice } = useNotice();
   const [originalLayerSelected, setOriginalLayerSelected] = useState(false);
+  const [layerTransform, setLayerTransform] = useState<LayerTransformSession | null>(null);
   const [lastRetouchTool, setLastRetouchTool] = useState<RetouchTool>('smudge');
   useEffect(() => {
     if (isRetouchTool(tool)) setLastRetouchTool(tool);
@@ -1032,11 +1043,27 @@ function GlitchBrushesEditor({
     } else {
       context.putImageData(data, 0, 0);
     }
+    const uploadWidth = bounds?.width ?? current.width;
+    const uploadHeight = bounds?.height ?? current.height;
+    const uploadMetadata = {
+      width: uploadWidth,
+      height: uploadHeight,
+      pixels: uploadWidth * uploadHeight,
+      bytes: uploadWidth * uploadHeight * 4,
+      full: !bounds,
+    };
     recordPerformanceMeasure(
       bounds ? 'glitchbrushes:canvas-dirty-upload' : 'glitchbrushes:canvas-full-sync',
       startedAt,
+      uploadMetadata,
     );
-    recordPerformanceMeasure('glitchbrushes:canvas-upload', startedAt);
+    recordPerformanceMeasure('glitchbrushes:canvas-upload', startedAt, uploadMetadata);
+  }, []);
+
+  const ensureBrushMask = useCallback(() => {
+    const current = docRef.current;
+    const expected = current.width * current.height;
+    if (maskRef.current.length !== expected) maskRef.current = new Float32Array(expected);
   }, []);
 
   const processingSourcePixels = useCallback(
@@ -1212,6 +1239,108 @@ function GlitchBrushesEditor({
     if (!canvas || !context || pixels.length !== current.width * current.height * 4) return;
     context.putImageData(imageDataFrom(pixels, current.width, current.height), 0, 0);
   }, []);
+
+  const cancelLayerTransform = useCallback(() => {
+    setLayerTransform(null);
+    updateWorkingCanvas();
+    setNotice('Layer transform cancelled.');
+  }, [setNotice, updateWorkingCanvas]);
+
+  const beginLayerTransform = useCallback(() => {
+    const stack = layerStackRef.current;
+    if (originalLayerSelectedRef.current) {
+      setNotice('Unlock Background first, then transform it as a normal layer.');
+      return;
+    }
+    const layer = activeLayer(stack);
+    if (layer.locked) {
+      setNotice('Unlock the selected layer before transforming it.');
+      return;
+    }
+    const materialized = materializeLayerContent(stack, layer.id);
+    if (!materialized) {
+      setNotice('The selected layer has no visible pixels to transform.');
+      return;
+    }
+    const visible = layer.visible;
+    layer.visible = false;
+    displayWorkingBuffer(composeLayerStack(stack, docRef.current.background));
+    layer.visible = visible;
+    setLayerTransform({
+      layerId: layer.id,
+      name: layer.name,
+      bounds: materialized.bounds,
+      pixels: materialized.pixels,
+      opacity: layer.opacity,
+    });
+    setNotice('Transform: drag to move, drag a corner to scale. Hold Shift for free proportions.');
+  }, [displayWorkingBuffer, setNotice]);
+
+  const applyLayerTransform = useCallback(
+    async (bounds: Rectangle) => {
+      const session = layerTransform;
+      if (!session) return;
+      const width = Math.max(4, Math.round(bounds.width));
+      const height = Math.max(4, Math.round(bounds.height));
+      const beforeSnapshot = snapshotLayerStack(layerStackRef.current);
+      setLayerTransform(null);
+      setProcessing(true);
+      setNotice(`Resizing ${session.name} off the UI thread...`);
+      try {
+        const pixels = await resizeLayerOffThread(
+          session.pixels,
+          session.bounds.width,
+          session.bounds.height,
+          width,
+          height,
+        );
+        if (
+          !replaceLayerContent(
+            layerStackRef.current,
+            session.layerId,
+            { x: Math.round(bounds.x), y: Math.round(bounds.y), width, height },
+            pixels,
+          )
+        ) {
+          throw new Error('The transformed layer is no longer available or is locked.');
+        }
+        const current = docRef.current;
+        current.pixels.set(composeLayerStack(layerStackRef.current, current.background));
+        current.dirty = true;
+        commitHistory({
+          id: `layer-transform-${Date.now()}`,
+          label: `Transform layer · ${session.name}`,
+          patches: [],
+          timestamp: Date.now(),
+          icon: 'image-brush',
+          affectedBytes: pixels.byteLength,
+          detail: `${width} × ${height}px`,
+          layerBefore: beforeSnapshot,
+          layerAfter: snapshotLayerStack(layerStackRef.current),
+        });
+        updateWorkingCanvas();
+        bumpLayers();
+        bumpDocument();
+        setNotice(`${session.name} transformed as one reversible History action.`);
+      } catch (error) {
+        updateWorkingCanvas();
+        setNotice(error instanceof Error ? error.message : 'Layer transform failed.');
+      } finally {
+        setProcessing(false);
+      }
+    },
+    [bumpLayers, commitHistory, layerTransform, setNotice, updateWorkingCanvas],
+  );
+
+  useEffect(() => {
+    if (
+      layerTransform &&
+      (originalLayerSelected || layerStackRef.current.activeLayerId !== layerTransform.layerId)
+    ) {
+      setLayerTransform(null);
+      updateWorkingCanvas();
+    }
+  }, [layerTransform, layerVersion, originalLayerSelected, updateWorkingCanvas]);
 
   const commitMoshBuffer = useCallback(
     (pixels: Uint8ClampedArray, affectedPixels: number, completedEffects: number) => {
@@ -1876,16 +2005,16 @@ function GlitchBrushesEditor({
       const sources = imageBrushGhostVariantsRef.current.length
         ? imageBrushGhostVariantsRef.current
         : [source];
-      const selection = normalizeImageBrushAssetSelection(
+      const selection = normalizeImageBrushAssetSelection(imageBrushLibraryRef.current, active.id, {
+        mode: imageBrushAssetModeRef.current,
+        order: imageBrushAssetOrderRef.current,
+        enabledAssetIds: enabledImageBrushAssetIdsRef.current,
+      });
+      const sourceAssets = requiredImageBrushAssets(
         imageBrushLibraryRef.current,
         active.id,
-        {
-          mode: imageBrushAssetModeRef.current,
-          order: imageBrushAssetOrderRef.current,
-          enabledAssetIds: enabledImageBrushAssetIdsRef.current,
-        },
+        selection,
       );
-      const sourceAssets = requiredImageBrushAssets(imageBrushLibraryRef.current, active.id, selection);
       const copies = Math.max(1, Math.round(current.stampsPerStep));
       const baseAnchor = anchorPoint(current.anchor, current.customAnchor);
       const quality = resolveImageBrushQuality(
@@ -1895,7 +2024,12 @@ function GlitchBrushesEditor({
         stamps.length,
         imageBrushRackRef.current,
       );
-      const liveSources = selection.mode === 'all' ? sources : quality === 'realtime' ? [sources[0] ?? source] : sources;
+      const liveSources =
+        selection.mode === 'all'
+          ? sources
+          : quality === 'realtime'
+            ? [sources[0] ?? source]
+            : sources;
       context.save();
       context.imageSmoothingEnabled = quality !== 'realtime';
       try {
@@ -1996,21 +2130,24 @@ function GlitchBrushesEditor({
     if (activePanel !== 'image-brush' || tool !== 'brush') clearImageBrushOverlay();
   }, [activePanel, clearImageBrushOverlay, tool]);
 
-  const cancelImageBrushJob = useCallback((quiet = false) => {
-    const jobId = imageBrushJobGateRef.current.currentJobId;
-    if (jobId) {
-      imageBrushJobGateRef.current.cancel(jobId);
-      imageBrushWorkerCountersRef.current.cancelled += 1;
-    }
-    imageBrushWorkerRef.current?.terminate();
-    imageBrushWorkerRef.current = null;
-    setImageBrushProcessing(false);
-    setImageBrushProgress(null);
-    clearImageBrushOverlay();
-    if (!quiet && jobId) {
-      setNotice('Image Brush Worker cancelled. Committed pixels and History were not changed.');
-    }
-  }, [clearImageBrushOverlay]);
+  const cancelImageBrushJob = useCallback(
+    (quiet = false) => {
+      const jobId = imageBrushJobGateRef.current.currentJobId;
+      if (jobId) {
+        imageBrushJobGateRef.current.cancel(jobId);
+        imageBrushWorkerCountersRef.current.cancelled += 1;
+      }
+      imageBrushWorkerRef.current?.terminate();
+      imageBrushWorkerRef.current = null;
+      setImageBrushProcessing(false);
+      setImageBrushProgress(null);
+      clearImageBrushOverlay();
+      if (!quiet && jobId) {
+        setNotice('Image Brush Worker cancelled. Committed pixels and History were not changed.');
+      }
+    },
+    [clearImageBrushOverlay],
+  );
 
   const clearImageBrushAssetCaches = useCallback(() => {
     imageBrushPreviewGenerationRef.current += 1;
@@ -2034,7 +2171,10 @@ function GlitchBrushesEditor({
       const selection = normalizeImageBrushAssetSelection(next, nextActive, {
         mode: imageBrushAssetModeRef.current,
         order: imageBrushAssetOrderRef.current,
-        enabledAssetIds: [...enabledImageBrushAssetIdsRef.current, ...additions.map((asset) => asset.id)],
+        enabledAssetIds: [
+          ...enabledImageBrushAssetIdsRef.current,
+          ...additions.map((asset) => asset.id),
+        ],
       });
       imageBrushLibraryRef.current = next;
       activeImageBrushIdRef.current = nextActive;
@@ -2574,11 +2714,7 @@ function GlitchBrushesEditor({
           : null;
       const sourcePixels =
         jpegWriteBounds && stroke.sourceMode === 'selected-layer'
-          ? composeLayerPixelsRegion(
-              layerStackRef.current,
-              stroke.sourceLayerId,
-              jpegWriteBounds,
-            )
+          ? composeLayerPixelsRegion(layerStackRef.current, stroke.sourceLayerId, jpegWriteBounds)
           : processingSourcePixels(stroke.sourceLayerId, stroke.sourceMode);
       const capturedCloneSource = cloneSource ? { ...cloneSource } : undefined;
       const capturedFeedbackMemory =
@@ -2747,9 +2883,7 @@ function GlitchBrushesEditor({
             movement: capturedMovement,
             cloneSource: capturedCloneSource,
             feedbackMemory: capturedFeedbackMemory,
-            origin: jpegWriteBounds
-              ? { x: jpegWriteBounds.x, y: jpegWriteBounds.y }
-              : undefined,
+            origin: jpegWriteBounds ? { x: jpegWriteBounds.x, y: jpegWriteBounds.y } : undefined,
             tool: capturedTool,
           },
         },
@@ -2844,6 +2978,7 @@ function GlitchBrushesEditor({
       const capturedBounds = { ...stroke.bounds };
       const capturedSettings = { ...retouchSettingsRef.current };
       const capturedBrush = { ...brushRef.current };
+      const sourcePrepStartedAt = performance.now();
       const processingPixels = processingSourcePixels(stroke.sourceLayerId, stroke.sourceMode);
       let sourcePixels: Uint8ClampedArray | undefined;
       const samplePixels =
@@ -2873,6 +3008,7 @@ function GlitchBrushesEditor({
         }
       }
       const jobId = `retouch-${capturedTool}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const workerRoundTripStartedAt = performance.now();
       const worker = new Worker(new URL('./workers/retouch.worker.ts', import.meta.url), {
         type: 'module',
       });
@@ -2929,6 +3065,12 @@ function GlitchBrushesEditor({
           docRef.current !== sourceDocument
         )
           return;
+        recordPerformanceMeasure(
+          'glitchbrushes:retouch-worker-roundtrip',
+          workerRoundTripStartedAt,
+          { tool: capturedTool, width: current.width, height: current.height },
+        );
+        const adoptionStartedAt = performance.now();
         brushJobGateRef.current.cancel(result.jobId);
         if (retouchWorkerRef.current === worker) retouchWorkerRef.current = null;
         setBrushProcessing(false);
@@ -2941,6 +3083,12 @@ function GlitchBrushesEditor({
         }
         const committed = commitCurrentBufferToActiveLayer(capturedLayerBefore, result.writeBounds);
         updateWorkingCanvas(result.writeBounds);
+        recordPerformanceMeasure('glitchbrushes:retouch-result-adoption', adoptionStartedAt, {
+          tool: capturedTool,
+          width: result.writeBounds.width,
+          height: result.writeBounds.height,
+          bytes: result.pixels.byteLength,
+        });
         if (!committed.patches.length) {
           setNotice(`${capturedTool} completed without changing pixels.`);
           return;
@@ -2980,6 +3128,15 @@ function GlitchBrushesEditor({
       if (sourceBuffer) transfers.push(sourceBuffer);
       const sampleBuffer = samplePixels?.buffer;
       if (sampleBuffer) transfers.push(sampleBuffer);
+      recordPerformanceMeasure('glitchbrushes:retouch-source-prep', sourcePrepStartedAt, {
+        tool: capturedTool,
+        bytes:
+          pixels.byteLength +
+          maskBuffer.byteLength +
+          (sourceBuffer?.byteLength ?? 0) +
+          (sampleBuffer?.byteLength ?? 0),
+        sourceMode: stroke.sourceMode,
+      });
       worker.postMessage(
         {
           type: 'process',
@@ -3378,11 +3535,16 @@ function GlitchBrushesEditor({
       sourceLayerId,
       sourceMode,
       editPixels:
-        sourceMode === 'selected-layer' ? processingSourcePixels(sourceLayerId, sourceMode) : null,
+        sourceMode === 'selected-layer' &&
+        tool === 'brush' &&
+        algorithms[algorithm].family === 'pixel'
+          ? processingSourcePixels(sourceLayerId, sourceMode)
+          : null,
       pendingRetouchSamples: [],
       retouchRaf: null,
       retouchEnded: false,
     };
+    ensureBrushMask();
     event.currentTarget.setPointerCapture(event.pointerId);
     stampAt(point, pressureFor(event), { x: 0, y: 0 });
     recordPerformanceMeasure('glitchbrushes:pointerdown', pointerDownStartedAt);
@@ -3859,23 +4021,49 @@ function GlitchBrushesEditor({
       setProcessing(true);
       setNotice(`Decoding ${file.name} off the UI thread...`);
       try {
+        const decodeStartedAt = performance.now();
         const decoded = await decodeDocumentOffThread(file, { mode: 'layer' });
+        recordPerformanceMeasure('glitchbrushes:document-decode-roundtrip', decodeStartedAt, {
+          width: decoded.width,
+          height: decoded.height,
+          bytes: decoded.original.byteLength,
+        });
+        const adoptionStartedAt = performance.now();
         const rasterPixels = new Uint8ClampedArray(decoded.original);
+        const backgroundStartedAt = performance.now();
         const background = new Uint8ClampedArray(decoded.width * decoded.height * 4);
         background.fill(255);
+        recordPerformanceMeasure('glitchbrushes:document-background-create', backgroundStartedAt, {
+          bytes: background.byteLength,
+        });
+        const stackStartedAt = performance.now();
         const stack = createImageLayerStack(
           decoded.width,
           decoded.height,
           file.name.replace(/\.[^.]+$/, '') || 'Image 1',
           rasterPixels,
+          decoded.opaque,
         );
-        const original = composeImageLayers(stack, background);
+        recordPerformanceMeasure('glitchbrushes:document-layer-stack-create', stackStartedAt, {
+          pixels: decoded.width * decoded.height,
+          opaque: decoded.opaque,
+        });
+        const composeStartedAt = performance.now();
+        // The decoder-owned RGBA is immutable once installed as the raster layer. For an
+        // opaque image it is already byte-identical to the flattened original, so sharing it
+        // avoids a second full-canvas composition/allocation during cold start.
+        const original = decoded.opaque ? rasterPixels : composeImageLayers(stack, background);
+        const workingPixels = original.slice();
+        recordPerformanceMeasure('glitchbrushes:document-initial-compose', composeStartedAt, {
+          bytes: workingPixels.byteLength,
+          sharedOpaqueOriginal: decoded.opaque,
+        });
         docRef.current = {
           width: decoded.width,
           height: decoded.height,
           background,
           original,
-          pixels: original.slice(),
+          pixels: workingPixels,
           fileName: file.name,
           mimeType: file.type,
           dirty: false,
@@ -3884,7 +4072,9 @@ function GlitchBrushesEditor({
         originalLayerSelectedRef.current = false;
         setOriginalLayerSelected(false);
         bumpLayers();
-        maskRef.current = new Float32Array(decoded.width * decoded.height);
+        // The Effect/Retouch mask is large and not needed to display or use Image Brush.
+        // Allocate it at the first ordinary brush pointerdown instead of blocking cold start.
+        maskRef.current = new Float32Array(0);
         lastBrushMaskRef.current = { data: new Uint8Array(0), bounds: null };
         lastBrushDirectionRef.current = { x: 1, y: 0 };
         setBrushContext((context) => ({
@@ -3911,6 +4101,12 @@ function GlitchBrushesEditor({
             ? `${file.name} opened at ${decoded.width} x ${decoded.height} for responsive editing (source ${decoded.sourceWidth} x ${decoded.sourceHeight}).`
             : `${file.name} decoded locally at ${decoded.width} x ${decoded.height}.`,
         );
+        recordPerformanceMeasure('glitchbrushes:document-adoption', adoptionStartedAt, {
+          width: decoded.width,
+          height: decoded.height,
+          bytes: decoded.original.byteLength,
+          opaque: decoded.opaque,
+        });
       } catch (error) {
         setNotice(error instanceof Error ? error.message : 'Image decoding failed.');
       } finally {
@@ -3918,6 +4114,57 @@ function GlitchBrushesEditor({
       }
     },
     [bumpDocumentSurface, bumpHistory, cancelForImageImport, prepareImageImport, resetHistory],
+  );
+
+  const importPsdDocument = useCallback(
+    async (file: File) => {
+      if (file.size > 64 * 1024 * 1024) {
+        setNotice('The PSD exceeds the 64 MB safety limit.');
+        return;
+      }
+      cancelForImageImport();
+      setLayerTransform(null);
+      setProcessing(true);
+      setNotice(`Reading ${file.name} in the PSD worker...`);
+      try {
+        const decoded = await decodePsdOffThread(file);
+        const background = new Uint8ClampedArray(decoded.width * decoded.height * 4);
+        background.fill(255);
+        const stack = createRasterLayerStack(decoded.width, decoded.height, decoded.layers);
+        const original = composeImageLayers(stack, background);
+        docRef.current = {
+          width: decoded.width,
+          height: decoded.height,
+          background,
+          original,
+          pixels: composeLayerStack(stack, background),
+          fileName: file.name,
+          mimeType: 'image/vnd.adobe.photoshop',
+          dirty: false,
+        };
+        layerStackRef.current = stack;
+        originalLayerSelectedRef.current = false;
+        setOriginalLayerSelected(false);
+        maskRef.current = new Float32Array(0);
+        lastBrushMaskRef.current = { data: new Uint8Array(0), bounds: null };
+        lastBrushDirectionRef.current = { x: 1, y: 0 };
+        resetHistory();
+        setSelectedByte(0);
+        setSelectedPixels([0]);
+        setExportName(file.name.replace(/\.psd$/i, ''));
+        bumpLayers();
+        bumpDocumentSurface();
+        bumpHistory();
+        setNotice(
+          `${file.name} imported with ${decoded.layers.length} raster layer(s). Groups, text, vectors, and smart objects are flattened to raster layers when available.`,
+        );
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : 'PSD import failed.');
+      } finally {
+        setProcessing(false);
+      }
+    },
+    [bumpDocumentSurface, bumpHistory, bumpLayers, cancelForImageImport, resetHistory, setNotice],
   );
 
   const addImageToCanvas = useCallback(
@@ -3999,7 +4246,13 @@ function GlitchBrushesEditor({
 
   const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) void addImageToCanvas(file);
+    if (file) {
+      if (/\.psd$/i.test(file.name) || file.type === 'image/vnd.adobe.photoshop') {
+        void importPsdDocument(file);
+      } else {
+        void addImageToCanvas(file);
+      }
+    }
     event.target.value = '';
   };
 
@@ -4222,6 +4475,52 @@ function GlitchBrushesEditor({
   const exportImage = async (copy = false) => {
     setProcessing(true);
     try {
+      if (exportFormat === 'psd') {
+        if (copy) throw new Error('PSD export is available as a download, not clipboard data.');
+        const current = docRef.current;
+        const stack = layerStackRef.current;
+        const layers: EncodedPsdInput['layers'] = [];
+        if (stack.backgroundVisible) {
+          layers.push({
+            name: 'Background',
+            x: 0,
+            y: 0,
+            width: stack.width,
+            height: stack.height,
+            pixels: current.background.slice(),
+            visible: true,
+            opacity: 1,
+            blendMode: 'source-over',
+          });
+        }
+        for (const layer of stack.layers) {
+          const content = materializeLayerContent(stack, layer.id);
+          layers.push({
+            name: layer.name,
+            x: content?.bounds.x ?? 0,
+            y: content?.bounds.y ?? 0,
+            width: content?.bounds.width ?? 1,
+            height: content?.bounds.height ?? 1,
+            pixels: content?.pixels ?? new Uint8ClampedArray(4),
+            visible: layer.visible,
+            opacity: layer.opacity,
+            blendMode: layer.blendMode,
+          });
+        }
+        const bytes = await encodePsdOffThread({
+          width: stack.width,
+          height: stack.height,
+          layers,
+          composite: current.pixels.slice(),
+        });
+        triggerDownload(
+          new Blob([bytes], { type: 'image/vnd.adobe.photoshop' }),
+          `${exportName || 'image'}_glitched.psd`,
+        );
+        current.dirty = false;
+        setNotice('Layered Photoshop PSD created locally in a worker.');
+        return;
+      }
       const canvas = renderExportCanvas();
       const mime = `image/${exportFormat}`;
       const blob = await new Promise<Blob>((resolve, reject) =>
@@ -4442,20 +4741,25 @@ function GlitchBrushesEditor({
       sourceLayerId,
       sourceMode,
       editPixels:
-        sourceMode === 'selected-layer' ? processingSourcePixels(sourceLayerId, sourceMode) : null,
+        sourceMode === 'selected-layer' && algorithms[algorithm].family === 'pixel'
+          ? processingSourcePixels(sourceLayerId, sourceMode)
+          : null,
       pendingRetouchSamples: [],
       retouchRaf: null,
       retouchEnded: false,
     };
+    ensureBrushMask();
     stampAt(point, 1, { x: random.int(-20, 20), y: random.int(-20, 20) });
     commitStroke();
   }, [
+    algorithm,
     cancelBrushJob,
     cancelImageBrushJob,
     cancelMosh,
     cancelPreview,
     commitStroke,
     historyVersion,
+    ensureBrushMask,
     pendingPreview,
     seed,
     stampAt,
@@ -4595,22 +4899,33 @@ function GlitchBrushesEditor({
       className={`app ${isAnyProcessing ? 'is-processing' : ''}`}
       data-interface-mode={interfaceMode}
       onDragEnter={(event) => {
+        if (!event.dataTransfer.types.includes('Files')) return;
         event.preventDefault();
         fileDropCounter.current += 1;
         event.currentTarget.classList.add('dragging-file');
       }}
       onDragLeave={(event) => {
+        if (!event.dataTransfer.types.includes('Files')) return;
         event.preventDefault();
         fileDropCounter.current -= 1;
         if (fileDropCounter.current <= 0) event.currentTarget.classList.remove('dragging-file');
       }}
-      onDragOver={(event) => event.preventDefault()}
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes('Files')) event.preventDefault();
+      }}
       onDrop={(event) => {
+        if (!event.dataTransfer.types.includes('Files')) return;
         event.preventDefault();
         fileDropCounter.current = 0;
         event.currentTarget.classList.remove('dragging-file');
         const file = event.dataTransfer.files[0];
-        if (file) void addImageToCanvas(file);
+        if (file) {
+          if (/\.psd$/i.test(file.name) || file.type === 'image/vnd.adobe.photoshop') {
+            void importPsdDocument(file);
+          } else {
+            void addImageToCanvas(file);
+          }
+        }
       }}
     >
       <a className="skip-link" href="#editor-canvas">
@@ -4697,14 +5012,26 @@ function GlitchBrushesEditor({
           imageBrushOverlayCanvasRef={imageBrushOverlayCanvasRef}
           selectionCanvasRef={selectionCanvasRef}
           cursorRef={cursorRef}
+          layerTransform={layerTransform}
+          onApplyLayerTransform={(bounds) => void applyLayerTransform(bounds)}
+          onCancelLayerTransform={cancelLayerTransform}
           onCanvasPointerDown={(event) => {
+            if (layerTransform) return;
             selectCanvasPixel(event);
             if (!event.shiftKey) beginPointer(event);
           }}
-          onCanvasPointerMove={movePointer}
-          onCanvasPointerUp={endPointer}
-          onCanvasPointerCancel={endPointer}
-          onCanvasPointerLostCapture={endPointer}
+          onCanvasPointerMove={(event) => {
+            if (!layerTransform) movePointer(event);
+          }}
+          onCanvasPointerUp={(event) => {
+            if (!layerTransform) endPointer(event);
+          }}
+          onCanvasPointerCancel={(event) => {
+            if (!layerTransform) endPointer(event);
+          }}
+          onCanvasPointerLostCapture={(event) => {
+            if (!layerTransform) endPointer(event);
+          }}
           onCanvasPointerLeave={() => {
             hideBrushCursorVisual();
             clearImageBrushOverlay();
@@ -4746,231 +5073,241 @@ function GlitchBrushesEditor({
           </div>
 
           <div className="controls-layers-pane" ref={controlsLayersPaneRef}>
-          <div className="inspector-scroll" ref={inspectorScrollRef}>
-            <div
-              id="workspace-panel-brushes"
-              role="tabpanel"
-              aria-labelledby="workspace-tab-brushes"
-              hidden={activeWorkspace !== 'brushes'}
-            >
-            <section
-              id="brushes-panel-effect"
-              role="tabpanel"
-              aria-labelledby="brushes-tab-effect"
-              hidden={activePanel !== 'effect'}
-            >
-              <EffectPanel
-                algorithm={algorithm}
-                algorithms={algorithms}
-                algorithmList={algorithmList}
-                legacyAlgorithmList={legacyAlgorithmList}
-                algorithmDescriptions={algorithmDescriptions}
-                settings={settings}
-                seed={seed}
-                brush={brush}
-                onChangeAlgorithm={changeAlgorithm}
-                onUpdateBrush={updateBrush}
-                onUpdateSetting={updateSetting}
-                onSeedChange={setSeed}
-                onRandomizeEffect={randomizeSelectedEffect}
-                onResetEffect={resetSelectedEffect}
-                onNotice={setNotice}
-                cloneSource={cloneSource}
-                cloneSourcePickMode={cloneSourcePickMode}
-                feedbackMemoryReady={
-                  feedbackMemoryVersion >= 0 && feedbackMemoryRef.current !== null
-                }
-                onPickCloneSource={() => {
-                  setCloneSourcePickMode(true);
-                  setNotice(
-                    'Click the image to capture a Clone Corruption source region. Escape cancels the picker.',
-                  );
-                }}
-                onClearCloneSource={() => {
-                  setCloneSource(null);
-                  setCloneSourcePickMode(false);
-                  setNotice('Clone source cleared. Image pixels and History were not changed.');
-                }}
-                onResetFeedback={resetFeedbackMemory}
-                metaRecipeLocked={metaRecipeLocked}
-                onMetaRecipeLockChange={setMetaRecipeLocked}
-                onNewMetaRecipe={() => {
-                  if (metaRecipeLocked) {
-                    setNotice(
-                      'The Mixed Structural recipe is locked. Unlock it before generating a new recipe.',
-                    );
-                    return;
-                  }
-                  const nextSeed = createSeed();
-                  setSeed(nextSeed);
-                  setNotice(
-                    `New Mixed Structural recipe generated with seed ${nextSeed}. No pixels changed.`,
-                  );
-                }}
-              />
-            </section>
-
-            <section
-              id="brushes-panel-retouch"
-              role="tabpanel"
-              aria-labelledby="brushes-tab-retouch"
-              hidden={activePanel !== 'retouch'}
-            >
-              <RetouchPanel
-                tool={isRetouchTool(tool) ? tool : lastRetouchTool}
-                onToolChange={(next) => {
-                  setLastRetouchTool(next);
-                  setTool(next);
-                }}
-                brush={brush}
-                onUpdateBrush={updateBrush}
-                retouchSettings={retouchSettings}
-                onRetouchSettingsChange={setRetouchSettings}
-              />
-            </section>
-
-            {moshPanelMounted && (
-            <section
-              id="brushes-panel-mosh"
-              role="tabpanel"
-              aria-labelledby="brushes-tab-mosh"
-              hidden={activePanel !== 'mosh'}
-            >
-              <Suspense fallback={<PanelLoading />}>
-                <MoshLab
-                  interfaceMode={interfaceMode}
-                  rack={moshRack}
-                  seed={moshSeed}
-                  previewEnabled={moshPreviewEnabled}
-                  processing={moshProcessing}
-                  progress={moshProgress}
-                  hasSelection={selectedPixels.length > 0}
-                  hasBrushMask={brushContext.affectedPixels > 0}
-                  hasPreview={Boolean(moshPreviewBufferRef.current)}
-                  previewStale={moshPreviewStale}
-                  documentLongEdge={Math.max(docRef.current.width, docRef.current.height)}
-                  onRackChange={changeMoshRack}
-                  onSeedChange={setMoshSeed}
-                  onPreviewChange={(enabled) => {
-                    setMoshPreviewEnabled(enabled);
-                    if (
-                      !enabled &&
-                      (moshPreviewBufferRef.current || moshJobGateRef.current.currentJobId)
-                    ) {
-                      cancelMosh();
+            <div className="inspector-scroll" ref={inspectorScrollRef}>
+              <div
+                id="workspace-panel-brushes"
+                role="tabpanel"
+                aria-labelledby="workspace-tab-brushes"
+                hidden={activeWorkspace !== 'brushes'}
+              >
+                <section
+                  id="brushes-panel-effect"
+                  role="tabpanel"
+                  aria-labelledby="brushes-tab-effect"
+                  hidden={activePanel !== 'effect'}
+                >
+                  <EffectPanel
+                    algorithm={algorithm}
+                    algorithms={algorithms}
+                    algorithmList={algorithmList}
+                    legacyAlgorithmList={legacyAlgorithmList}
+                    algorithmDescriptions={algorithmDescriptions}
+                    settings={settings}
+                    seed={seed}
+                    brush={brush}
+                    onChangeAlgorithm={changeAlgorithm}
+                    onUpdateBrush={updateBrush}
+                    onUpdateSetting={updateSetting}
+                    onSeedChange={setSeed}
+                    onRandomizeEffect={randomizeSelectedEffect}
+                    onResetEffect={resetSelectedEffect}
+                    onNotice={setNotice}
+                    cloneSource={cloneSource}
+                    cloneSourcePickMode={cloneSourcePickMode}
+                    feedbackMemoryReady={
+                      feedbackMemoryVersion >= 0 && feedbackMemoryRef.current !== null
                     }
-                  }}
-                  onApply={applyMosh}
-                  onCancel={cancelMosh}
-                  onReset={() => {
-                    cancelMosh();
-                    setMoshRack([createMoshCard('pixel-sort')]);
-                    regionDragRef.current = null;
-                    setMoshDraftRegion(null);
-                    setMoshRegionTool(null);
-                    setNotice('MOSH LAB rack reset.');
-                  }}
-                  onPickRegion={(ownerEffectInstanceId, mode) => {
-                    regionDragRef.current = null;
-                    setMoshDraftRegion(null);
-                    setMoshRegionTool({ ownerEffectInstanceId, mode });
-                    setTool('brush');
-                    setNotice(`Drag over the canvas to define the MOSH ${mode} region.`);
-                  }}
-                  onClearRegion={clearMotionTransferRegion}
-                  onRemoveAppliedResult={() => {
-                    const latest = historyRef.current.undoEntries.at(-1);
-                    if (latest?.id.startsWith('mosh-')) undo();
-                    else
+                    onPickCloneSource={() => {
+                      setCloneSourcePickMode(true);
                       setNotice(
-                        'Remove Applied Result is available when the latest History action is a MOSH LAB apply. Older results can be removed from History or the active layer.',
+                        'Click the image to capture a Clone Corruption source region. Escape cancels the picker.',
                       );
-                  }}
-                />
-              </Suspense>
-            </section>
-            )}
-            </div>
+                    }}
+                    onClearCloneSource={() => {
+                      setCloneSource(null);
+                      setCloneSourcePickMode(false);
+                      setNotice('Clone source cleared. Image pixels and History were not changed.');
+                    }}
+                    onResetFeedback={resetFeedbackMemory}
+                    metaRecipeLocked={metaRecipeLocked}
+                    onMetaRecipeLockChange={setMetaRecipeLocked}
+                    onNewMetaRecipe={() => {
+                      if (metaRecipeLocked) {
+                        setNotice(
+                          'The Mixed Structural recipe is locked. Unlock it before generating a new recipe.',
+                        );
+                        return;
+                      }
+                      const nextSeed = createSeed();
+                      setSeed(nextSeed);
+                      setNotice(
+                        `New Mixed Structural recipe generated with seed ${nextSeed}. No pixels changed.`,
+                      );
+                    }}
+                  />
+                </section>
 
-            {imageBrushPanelMounted && (
-            <section
-              id="workspace-panel-image-brush"
-              role="tabpanel"
-              aria-labelledby="workspace-tab-image-brush"
-              hidden={activeWorkspace !== 'image-brush'}
-            >
-              <Suspense fallback={<PanelLoading />}>
-                <ImageBrushPanel
-                  library={imageBrushLibrary}
-                  activeAssetId={activeImageBrushId}
-                  assetMode={imageBrushAssetMode}
-                  assetOrder={imageBrushAssetOrder}
-                  enabledAssetIds={enabledImageBrushAssetIds}
-                  settings={imageBrushSettings}
-                  rack={imageBrushRack}
-                  seed={imageBrushSeed}
-                  activeStyleId={activeImageBrushStyleId}
-                  processedPreview={processedBrushPreview}
-                  processing={imageBrushProcessing}
-                  progress={imageBrushProgress}
-                  performance={imageBrushPerformance}
-                  onAddAssets={addImageBrushAssets}
-                  onRemoveAsset={removeImageBrushAsset}
-                  onClearLibrary={clearImageBrushLibrary}
-                  onActiveAssetChange={selectImageBrushAsset}
-                  onAssetModeChange={updateImageBrushAssetMode}
-                  onAssetOrderChange={updateImageBrushAssetOrder}
-                  onEnabledAssetIdsChange={updateEnabledImageBrushAssetIds}
-                  onSettingsChange={setImageBrushSettings}
-                  onRackChange={setImageBrushRack}
-                  onSeedChange={setImageBrushSeed}
-                  onStyleChange={setActiveImageBrushStyleId}
-                  onRandomize={randomizeCurrentImageBrush}
-                  randomizeLockSeed={imageBrushLockSeed}
-                  onRandomizeLockSeedChange={(locked) => {
-                    imageBrushLockedRandomizationRef.current = null;
-                    setImageBrushLockSeed(locked);
-                  }}
-                  onOptimizeAsset={optimizeActiveImageBrush}
-                  onTestStamp={() => testImageBrushOverlay('stamp')}
-                  onTestTrail={() => testImageBrushOverlay('trail')}
-                  onCancelProcessing={() => cancelImageBrushJob()}
-                  onNotice={setNotice}
-                />
-              </Suspense>
-            </section>
-            )}
-          </div>
-          <ControlsLayersSplitter containerRef={controlsLayersPaneRef} />
-          <div className="controls-layers-layers">
-          <LayersDock
-            layerStack={layerStack}
-            layerVersion={layerVersion}
-            currentLayer={currentLayer}
-            backgroundSelected={originalLayerSelected}
-            sampleAllLayers={sampleAllLayers}
-            onFlattenLayers={() =>
-              runLayerOperation('Flatten layer stack', (stack) => {
-                flattenLayerStack(stack, docRef.current.background);
-              })
-            }
-            onSelectBackground={selectOriginalLayer}
-            onSampleAllLayersChange={(value) => {
-              if (value && originalLayerSelectedRef.current) {
-                originalLayerSelectedRef.current = false;
-                setOriginalLayerSelected(false);
-              }
-              setSampleAllLayers(value);
-              setNotice(
-                value
-                  ? 'All Layers enabled: tools sample the visible composite and write the result into the selected layer.'
-                  : 'All Layers disabled: tools sample and edit only the selected layer.',
-              );
-            }}
-            onSelectLayer={selectEditableLayer}
-            onRunLayerOperation={runLayerOperation}
-          />
-          </div>
+                <section
+                  id="brushes-panel-retouch"
+                  role="tabpanel"
+                  aria-labelledby="brushes-tab-retouch"
+                  hidden={activePanel !== 'retouch'}
+                >
+                  <RetouchPanel
+                    tool={isRetouchTool(tool) ? tool : lastRetouchTool}
+                    onToolChange={(next) => {
+                      setLastRetouchTool(next);
+                      setTool(next);
+                    }}
+                    brush={brush}
+                    onUpdateBrush={updateBrush}
+                    retouchSettings={retouchSettings}
+                    onRetouchSettingsChange={setRetouchSettings}
+                  />
+                </section>
+
+                {moshPanelMounted && (
+                  <section
+                    id="brushes-panel-mosh"
+                    role="tabpanel"
+                    aria-labelledby="brushes-tab-mosh"
+                    hidden={activePanel !== 'mosh'}
+                  >
+                    <Suspense fallback={<PanelLoading />}>
+                      <MoshLab
+                        interfaceMode={interfaceMode}
+                        rack={moshRack}
+                        seed={moshSeed}
+                        previewEnabled={moshPreviewEnabled}
+                        processing={moshProcessing}
+                        progress={moshProgress}
+                        hasSelection={selectedPixels.length > 0}
+                        hasBrushMask={brushContext.affectedPixels > 0}
+                        hasPreview={Boolean(moshPreviewBufferRef.current)}
+                        previewStale={moshPreviewStale}
+                        documentLongEdge={Math.max(docRef.current.width, docRef.current.height)}
+                        onRackChange={changeMoshRack}
+                        onSeedChange={setMoshSeed}
+                        onPreviewChange={(enabled) => {
+                          setMoshPreviewEnabled(enabled);
+                          if (
+                            !enabled &&
+                            (moshPreviewBufferRef.current || moshJobGateRef.current.currentJobId)
+                          ) {
+                            cancelMosh();
+                          }
+                        }}
+                        onApply={applyMosh}
+                        onCancel={cancelMosh}
+                        onReset={() => {
+                          cancelMosh();
+                          setMoshRack([createMoshCard('pixel-sort')]);
+                          regionDragRef.current = null;
+                          setMoshDraftRegion(null);
+                          setMoshRegionTool(null);
+                          setNotice('MOSH LAB rack reset.');
+                        }}
+                        onPickRegion={(ownerEffectInstanceId, mode) => {
+                          regionDragRef.current = null;
+                          setMoshDraftRegion(null);
+                          setMoshRegionTool({ ownerEffectInstanceId, mode });
+                          setTool('brush');
+                          setNotice(`Drag over the canvas to define the MOSH ${mode} region.`);
+                        }}
+                        onClearRegion={clearMotionTransferRegion}
+                        onRemoveAppliedResult={() => {
+                          const latest = historyRef.current.undoEntries.at(-1);
+                          if (latest?.id.startsWith('mosh-')) undo();
+                          else
+                            setNotice(
+                              'Remove Applied Result is available when the latest History action is a MOSH LAB apply. Older results can be removed from History or the active layer.',
+                            );
+                        }}
+                      />
+                    </Suspense>
+                  </section>
+                )}
+              </div>
+
+              {imageBrushPanelMounted && (
+                <section
+                  id="workspace-panel-image-brush"
+                  role="tabpanel"
+                  aria-labelledby="workspace-tab-image-brush"
+                  hidden={activeWorkspace !== 'image-brush'}
+                >
+                  <Suspense fallback={<PanelLoading />}>
+                    <ImageBrushPanel
+                      library={imageBrushLibrary}
+                      activeAssetId={activeImageBrushId}
+                      assetMode={imageBrushAssetMode}
+                      assetOrder={imageBrushAssetOrder}
+                      enabledAssetIds={enabledImageBrushAssetIds}
+                      settings={imageBrushSettings}
+                      rack={imageBrushRack}
+                      seed={imageBrushSeed}
+                      activeStyleId={activeImageBrushStyleId}
+                      processedPreview={processedBrushPreview}
+                      processing={imageBrushProcessing}
+                      progress={imageBrushProgress}
+                      performance={imageBrushPerformance}
+                      onAddAssets={addImageBrushAssets}
+                      onRemoveAsset={removeImageBrushAsset}
+                      onClearLibrary={clearImageBrushLibrary}
+                      onActiveAssetChange={selectImageBrushAsset}
+                      onAssetModeChange={updateImageBrushAssetMode}
+                      onAssetOrderChange={updateImageBrushAssetOrder}
+                      onEnabledAssetIdsChange={updateEnabledImageBrushAssetIds}
+                      onSettingsChange={setImageBrushSettings}
+                      onRackChange={setImageBrushRack}
+                      onSeedChange={setImageBrushSeed}
+                      onStyleChange={setActiveImageBrushStyleId}
+                      onRandomize={randomizeCurrentImageBrush}
+                      randomizeLockSeed={imageBrushLockSeed}
+                      onRandomizeLockSeedChange={(locked) => {
+                        imageBrushLockedRandomizationRef.current = null;
+                        setImageBrushLockSeed(locked);
+                      }}
+                      onOptimizeAsset={optimizeActiveImageBrush}
+                      onTestStamp={() => testImageBrushOverlay('stamp')}
+                      onTestTrail={() => testImageBrushOverlay('trail')}
+                      onCancelProcessing={() => cancelImageBrushJob()}
+                      onNotice={setNotice}
+                    />
+                  </Suspense>
+                </section>
+              )}
+            </div>
+            <ControlsLayersSplitter containerRef={controlsLayersPaneRef} />
+            <div className="controls-layers-layers">
+              <LayersDock
+                layerStack={layerStack}
+                layerVersion={layerVersion}
+                currentLayer={currentLayer}
+                backgroundSelected={originalLayerSelected}
+                sampleAllLayers={sampleAllLayers}
+                onFlattenLayers={() =>
+                  runLayerOperation('Flatten layer stack', (stack) => {
+                    flattenLayerStack(stack, docRef.current.background);
+                  })
+                }
+                onSelectBackground={selectOriginalLayer}
+                onUnlockBackground={() =>
+                  runLayerOperation('Unlock Background', (stack) => {
+                    const promoted = unlockBackgroundLayer(stack, docRef.current.background);
+                    if (!promoted) return false;
+                    originalLayerSelectedRef.current = false;
+                    setOriginalLayerSelected(false);
+                    return true;
+                  })
+                }
+                onBeginTransform={beginLayerTransform}
+                onSampleAllLayersChange={(value) => {
+                  if (value && originalLayerSelectedRef.current) {
+                    originalLayerSelectedRef.current = false;
+                    setOriginalLayerSelected(false);
+                  }
+                  setSampleAllLayers(value);
+                  setNotice(
+                    value
+                      ? 'All Layers enabled: tools sample the visible composite and write the result into the selected layer.'
+                      : 'All Layers disabled: tools sample and edit only the selected layer.',
+                  );
+                }}
+                onSelectLayer={selectEditableLayer}
+                onRunLayerOperation={runLayerOperation}
+              />
+            </div>
           </div>
         </aside>
       </div>
@@ -4992,7 +5329,7 @@ function GlitchBrushesEditor({
       <div className="drop-overlay">
         <FileImage size={34} />
         <strong>DROP IMAGE TO DECODE LOCALLY</strong>
-        <span>PNG / JPEG / WEBP</span>
+        <span>PNG / JPEG / WEBP / PSD</span>
       </div>
 
       {isAnyProcessing && <div className="processing-line" />}

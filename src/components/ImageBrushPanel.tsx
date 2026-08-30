@@ -37,6 +37,7 @@ import {
   applyImageBrushGlitchAmount,
   applyImageBrushStyleKeepingEssentials,
   imageBrushGlitchLevels,
+  imageBrushStaticStyleThumbnail,
   imageBrushStyleCategories,
   imageBrushStylePresentationFor,
   isImageBrushEssentialSetting,
@@ -155,27 +156,6 @@ const fxIcons: Record<ImageBrushFxId, Parameters<typeof EffectIcon>[0]['id']> = 
   'pixel-embroidery': 'pixel-embroidery',
   'xerox-decay': 'xerox-decay',
   'jpeg-resample': 'jpeg-resample-brush',
-};
-
-const styleIcons: Record<string, Parameters<typeof EffectIcon>[0]['id']> = {
-  'clean-repeat': 'image-brush',
-  'glitched-repeat': 'slice',
-  'progressive-decay': 'pixel-sort',
-  'datamosh-trail': 'datamosh',
-  'pixel-sort-trail': 'pixel-sort',
-  'mosh-flow-trail': 'flow-field',
-  'chroma-feedback': 'chroma-drift',
-  'compression-breakdown': 'compression',
-  'broken-interface': 'macroblock',
-  'scatter-fragments': 'packet-loss',
-  'pixel-embroidery': 'pixel-embroidery',
-  'xerox-decay': 'xerox-decay',
-  'zine-stitch': 'mixed',
-  'random-glitch-chain': 'mixed',
-  'rgb-separation-trail': 'rgb-split',
-  'codec-damage-trail': 'compression',
-  'packet-loss-stream': 'packet-loss',
-  'whole-trail': 'flow-field',
 };
 
 const imageBrushFxHelpOptions: ControlHelpOption[] = imageBrushFxDefinitions.map((definition) => ({
@@ -501,7 +481,13 @@ export function ImageBrushPanel({
         description: presentation.description,
         cost: presentation.cost,
         badge: presentation.badge,
-        icon: <EffectIcon id={styleIcons[preset.id] ?? 'image-brush'} size={21} />,
+        icon: (
+          <img
+            className="image-brush-style-thumbnail"
+            src={imageBrushStaticStyleThumbnail(preset.id)}
+            alt=""
+          />
+        ),
       };
     });
   const styleBrowserGroups: CompactIconBrowserGroup<ImageBrushPreset>[] = [
@@ -1107,7 +1093,7 @@ export function ImageBrushPanel({
           >
             <header>
               <strong>Style browser</strong>
-              <span>Icon catalog · no preview jobs</span>
+              <span>Static previews · no Worker jobs</span>
             </header>
             <CompactIconBrowser
               groups={styleBrowserGroups}
